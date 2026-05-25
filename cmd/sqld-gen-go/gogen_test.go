@@ -9,6 +9,114 @@ import (
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
 
+func TestGenerateDynamicQuery(t *testing.T) {
+	sql := "SELECT id, email, status FROM app.users WHERE true\n" +
+		"/*@if name*/ AND email = $1 /*@endif*/\n" +
+		"/*@slice ids*/ AND id = ANY($2) /*@endif*/\n" +
+		"/*@orderby allow=created_at,email*/"
+
+	// offNth finds the start/end of the n-th occurrence (0-based) of sub in sql.
+	offNth := func(sub string, n int) (uint32, uint32) {
+		idx := 0
+		for i := 0; i <= n; i++ {
+			j := strings.Index(sql[idx:], sub)
+			if j < 0 {
+				t.Fatalf("substring %q not found (occurrence %d)", sub, n)
+			}
+			if i == n {
+				start := idx + j
+				return uint32(start), uint32(start + len(sub))
+			}
+			idx += j + len(sub)
+		}
+		panic("unreachable")
+	}
+	off := func(sub string) (uint32, uint32) { return offNth(sub, 0) }
+
+	mk := func(name, argName, argVal string, s, e uint32) *irv1.AnnotationValue {
+		av := &irv1.AnnotationValue{
+			Name: name,
+			Target: &irv1.AnnotationTargetRef{
+				Kind:      irv1.AnnotationTargetKind_ANNOTATION_TARGET_KIND_QUERY,
+				QueryName: "SearchUsers",
+				Source:    &irv1.SourceSpan{StartOffset: uint64(s), EndOffset: uint64(e)},
+			},
+		}
+		if argName != "" {
+			av.Args = []*irv1.AnnotationArg{{
+				Name:  argName,
+				Value: &irv1.AnnotationArg_StringValue{StringValue: argVal},
+			}}
+		}
+		return av
+	}
+
+	ifS, ifE := off("/*@if name*/")
+	endif1S, endif1E := offNth("/*@endif*/", 0)
+	sliceS, sliceE := off("/*@slice ids*/")
+	endif2S, endif2E := offNth("/*@endif*/", 1)
+	orderbyS, orderbyE := off("/*@orderby allow=created_at,email*/")
+
+	req := &pluginv1.GenerateRequest{
+		Queries: []*pluginv1.Query{{
+			Name:    "SearchUsers",
+			Sql:     sql,
+			Command: pluginv1.QueryCommand_QUERY_COMMAND_MANY,
+			Parameters: []*pluginv1.QueryParameter{
+				{Number: 1, Type: &irv1.TypeRef{PgName: "text"}},
+				{Number: 2, Type: &irv1.TypeRef{PgName: "int8"}},
+			},
+			Columns: []*pluginv1.QueryColumn{
+				{Name: "id", Type: &irv1.TypeRef{PgName: "int8"}},
+				{Name: "email", Type: &irv1.TypeRef{PgName: "text"}},
+				{Name: "status", Type: &irv1.TypeRef{PgName: "text"}},
+			},
+		}},
+		Annotations: []*irv1.AnnotationValue{
+			mk("if", "condition", "name", ifS, ifE),
+			mk("endif", "", "", endif1S, endif1E),
+			mk("slice", "param", "ids", sliceS, sliceE),
+			mk("endif", "", "", endif2S, endif2E),
+			mk("orderby", "allow", "created_at,email", orderbyS, orderbyE),
+		},
+	}
+
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var q string
+	for _, f := range resp.GetFiles() {
+		if f.GetPath() == "queries.go" {
+			q = string(f.GetContents())
+		}
+	}
+	if q == "" {
+		t.Fatal("queries.go not found in response")
+	}
+
+	for _, want := range []string{
+		"SearchUsersParams",
+		"Name",
+		"*string",
+		"Ids",
+		"[]int64",
+		"OrderBy",
+		"string",
+		"arg.Name != nil",
+		"len(arg.Ids) > 0",
+		"ANY($%d)",
+		"invalid order by",
+	} {
+		if !strings.Contains(q, want) {
+			t.Fatalf("missing %q in:\n%s", want, q)
+		}
+	}
+	if _, err := format.Source([]byte(q)); err != nil {
+		t.Fatalf("invalid Go: %v\n%s", err, q)
+	}
+}
+
 func keys(m map[string]string) []string {
 	ks := make([]string, 0, len(m))
 	for k := range m {
