@@ -5,36 +5,29 @@ type Engine string
 
 const EnginePostgreSQL Engine = "postgresql"
 
-// SQLKind distinguishes DDL schema files from named DML query files.
-type SQLKind string
-
-const (
-	SQLSchema SQLKind = "schema"
-	SQLQuery  SQLKind = "query"
-)
-
 // Config is the root of a generation run, read from a YAML file.
 type Config struct {
 	Version    string            `yaml:"version"`
 	Engine     Engine            `yaml:"engine"`
-	SQL        []SQLSource       `yaml:"sql"`
+	Queries    []Source          `yaml:"queries"`
 	Migrations []MigrationSource `yaml:"migrations"`
 	Plugins    []PluginConfig    `yaml:"plugins"`
 	Options    GlobalOptions     `yaml:"options"`
 }
 
-// SQLSource describes a single SQL input: either a file, a directory, inline
-// SQL text, or a glob pattern applied to the current directory.
-type SQLSource struct {
-	File      string  `yaml:"file"`
-	Dir       string  `yaml:"dir"`
-	Inline    string  `yaml:"inline"`
-	Glob      string  `yaml:"glob"`
-	Recursive bool    `yaml:"recursive"`
-	Kind      SQLKind `yaml:"kind"`
+// Source describes a single SQL input for named queries: either a file,
+// a directory, inline SQL text, or a glob pattern applied to the current
+// directory.
+type Source struct {
+	File      string `yaml:"file"`
+	Dir       string `yaml:"dir"`
+	Inline    string `yaml:"inline"`
+	Glob      string `yaml:"glob"`
+	Recursive bool   `yaml:"recursive"`
 }
 
 // MigrationSource points at a directory (or glob) of up-migration SQL files.
+// Migrations are the sole source of schema DDL.
 type MigrationSource struct {
 	Dir  string `yaml:"dir"`
 	Glob string `yaml:"glob"`

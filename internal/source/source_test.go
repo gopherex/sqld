@@ -8,14 +8,13 @@ import (
 	"github.com/yaroher/sqld/pkg/config"
 )
 
-func TestResolveSchemaDir(t *testing.T) {
+func TestResolveQueryDir(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "a.sql"), []byte("CREATE TABLE a(id int);"), 0o644)
-	os.WriteFile(filepath.Join(dir, "b.sql"), []byte("CREATE TABLE b(id int);"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a.sql"), []byte("-- name: GetA :one\nSELECT 1;"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.sql"), []byte("-- name: GetB :one\nSELECT 2;"), 0o644)
 
-	cfg := &config.Config{SQL: []config.SQLSource{{
-		Dir:  dir,
-		Kind: config.SQLSchema,
+	cfg := &config.Config{Queries: []config.Source{{
+		Dir: dir,
 	}}}
 	units, err := Resolve(cfg)
 	if err != nil {
@@ -26,6 +25,11 @@ func TestResolveSchemaDir(t *testing.T) {
 	}
 	if filepath.Base(units[0].Path) != "a.sql" {
 		t.Fatalf("order: %s", units[0].Path)
+	}
+	for _, u := range units {
+		if u.Kind != KindQuery {
+			t.Fatalf("expected KindQuery, got %v", u.Kind)
+		}
 	}
 }
 

@@ -13,11 +13,8 @@ version: "1"
 engine: postgresql
 options:
   defaultSchema: public
-sql:
-  - inline: "CREATE TABLE users(id bigint primary key);"
-    kind: schema
+queries:
   - dir: ./queries
-    kind: query
 migrations:
   - dir: ./migrations
 plugins:
@@ -50,14 +47,14 @@ func TestLoadBasic(t *testing.T) {
 	if cfg.Options.DefaultSchema != "public" {
 		t.Errorf("defaultSchema = %q; want %q", cfg.Options.DefaultSchema, "public")
 	}
-	if len(cfg.SQL) != 2 {
-		t.Fatalf("len(sql) = %d; want 2", len(cfg.SQL))
+	if len(cfg.Queries) != 1 {
+		t.Fatalf("len(queries) = %d; want 1", len(cfg.Queries))
 	}
-	if cfg.SQL[0].Inline == "" {
-		t.Error("sql[0].Inline should be set")
+	if cfg.Queries[0].Dir == "" {
+		t.Error("queries[0].Dir should be set")
 	}
-	if cfg.SQL[1].Kind != config.SQLQuery {
-		t.Errorf("sql[1].kind = %q; want %q", cfg.SQL[1].Kind, config.SQLQuery)
+	if len(cfg.Migrations) != 1 {
+		t.Fatalf("len(migrations) = %d; want 1", len(cfg.Migrations))
 	}
 	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Name != "go" {
 		t.Fatalf("plugins = %+v", cfg.Plugins)
@@ -75,9 +72,8 @@ func TestLoadBasic(t *testing.T) {
 func TestValidateDefaults(t *testing.T) {
 	// Engine and defaultSchema defaults when omitted.
 	y := `
-sql:
-  - inline: "SELECT 1;"
-    kind: schema
+migrations:
+  - dir: ./migrations
 `
 	p := writeTempConfig(t, y)
 	cfg, err := config.Load(p)
@@ -90,26 +86,25 @@ sql:
 	if cfg.Options.DefaultSchema != "public" {
 		t.Errorf("default defaultSchema = %q; want %q", cfg.Options.DefaultSchema, "public")
 	}
-	// Glob default for dir source.
+	// Glob default for dir query source.
 	y2 := `
-sql:
-  - dir: ./schema
-    kind: schema
+queries:
+  - dir: ./queries
 `
 	p2 := writeTempConfig(t, y2)
 	cfg2, err := config.Load(p2)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg2.SQL[0].Glob != "*.sql" {
-		t.Errorf("default glob = %q; want %q", cfg2.SQL[0].Glob, "*.sql")
+	if cfg2.Queries[0].Glob != "*.sql" {
+		t.Errorf("default glob = %q; want %q", cfg2.Queries[0].Glob, "*.sql")
 	}
 }
 
 func TestValidateErrorBadEngine(t *testing.T) {
 	y := `
 engine: mysql
-sql:
+queries:
   - inline: "SELECT 1;"
 `
 	p := writeTempConfig(t, y)
@@ -121,10 +116,9 @@ sql:
 
 func TestValidateErrorTwoSources(t *testing.T) {
 	y := `
-sql:
+queries:
   - file: ./a.sql
-    dir: ./schema
-    kind: schema
+    dir: ./queries
 `
 	p := writeTempConfig(t, y)
 	_, err := config.Load(p)
@@ -135,7 +129,7 @@ sql:
 
 func TestValidateErrorMissingOut(t *testing.T) {
 	y := `
-sql:
+queries:
   - inline: "SELECT 1;"
 plugins:
   - name: go
@@ -150,8 +144,6 @@ plugins:
 
 func TestValidateErrorMissingMigrationDir(t *testing.T) {
 	y := `
-sql:
-  - inline: "SELECT 1;"
 migrations:
   - glob: "*.sql"
 `
