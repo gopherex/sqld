@@ -352,15 +352,16 @@ func mapFromItem(node *pg.Node, id nodeid.Builder) *irv1.FromItem {
 		rf := node.GetRangeFunction()
 		// Map each function in the functions list
 		var callExpr *irv1.Expr
-		for i, fn := range rf.GetFunctions() {
-			// Each element is a pg.Node containing a List of [funcCall, colidList]
-			// The first item is the actual function call expression.
+		// Each element is a pg.Node containing a List of [funcCall, colidList];
+		// the first item is the actual function call expression. We only map the
+		// first function.
+		if fns := rf.GetFunctions(); len(fns) > 0 {
+			fn := fns[0]
 			if lst := fn.GetList(); lst != nil && len(lst.GetItems()) > 0 {
-				callExpr = MapExpr(lst.GetItems()[0], id.Child("rfunc").Index(i))
+				callExpr = MapExpr(lst.GetItems()[0], id.Child("rfunc").Index(0))
 			} else {
-				callExpr = MapExpr(fn, id.Child("rfunc").Index(i))
+				callExpr = MapExpr(fn, id.Child("rfunc").Index(0))
 			}
-			break // use only the first
 		}
 		alias := rf.GetAlias().GetAliasname()
 		var colAliases []string
