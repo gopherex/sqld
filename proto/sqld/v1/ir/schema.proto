@@ -1,0 +1,189 @@
+syntax = "proto3";
+
+package sqld.v1.ir;
+
+import "sqld/v1/ir/common.proto";
+import "sqld/v1/ir/type.proto";
+import "sqld/v1/ir/expr.proto";
+
+option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+
+// ----------------------------------------------------------------------------
+// Tables, columns, constraints, indexes, sequences.
+// Triggers are nested under Table (see routine.proto for the Trigger message).
+// ----------------------------------------------------------------------------
+
+enum TablePersistence {
+  TABLE_PERSISTENCE_UNSPECIFIED = 0;
+  TABLE_PERSISTENCE_PERMANENT = 1;
+  TABLE_PERSISTENCE_UNLOGGED = 2;
+  TABLE_PERSISTENCE_TEMPORARY = 3;
+}
+
+message Table {
+  string id = 1;            // canonical id, e.g. "public.users"
+  QualifiedName name = 2;
+  string owner = 3;
+  TablePersistence persistence = 4;
+  repeated Column columns = 5;
+  repeated Constraint constraints = 6;
+  repeated Index indexes = 7;
+  // Trigger is defined in routine.proto; referenced here by id to keep the
+  // file dependency one-directional. Resolve against the catalog's trigger set.
+  repeated ObjectRef triggers = 8;
+  Metadata meta = 15;
+}
+
+// IdentityKind: GENERATED ALWAYS / BY DEFAULT AS IDENTITY.
+enum IdentityKind {
+  IDENTITY_KIND_UNSPECIFIED = 0;
+  IDENTITY_KIND_ALWAYS = 1;
+  IDENTITY_KIND_BY_DEFAULT = 2;
+}
+
+message Identity {
+  IdentityKind kind = 1;
+  ObjectRef sequence = 2; // backing sequence, when known
+}
+
+// GeneratedColumn: GENERATED ALWAYS AS (expr) STORED.
+message GeneratedColumn {
+  Expr expression = 1;
+  bool stored = 2; // PG currently only supports STORED
+}
+
+message Column {
+  string id = 1;          // e.g. "public.users.id"
+  string name = 2;
+  uint32 position = 3;    // 1-based ordinal
+  TypeRef type = 4;
+  bool nullable = 5;      // false => NOT NULL
+  Expr default_expr = 6;  // DEFAULT <expr>; unset if none
+  Identity identity = 7;  // set if column is an identity column
+  GeneratedColumn generated = 8;
+  string collation = 9;   // COLLATE "..."
+  Metadata meta = 15;
+}
+
+enum ReferentialAction {
+  REFERENTIAL_ACTION_UNSPECIFIED = 0;
+  REFERENTIAL_ACTION_NO_ACTION = 1;
+  REFERENTIAL_ACTION_RESTRICT = 2;
+  REFERENTIAL_ACTION_CASCADE = 3;
+  REFERENTIAL_ACTION_SET_NULL = 4;
+  REFERENTIAL_ACTION_SET_DEFAULT = 5;
+}
+
+enum MatchType {
+  MATCH_TYPE_UNSPECIFIED = 0; // MATCH SIMPLE (default)
+  MATCH_TYPE_SIMPLE = 1;
+  MATCH_TYPE_FULL = 2;
+  MATCH_TYPE_PARTIAL = 3;
+}
+
+message PrimaryKey {
+  repeated string columns = 1;
+  string index = 2; // backing index name, when distinct
+}
+
+message ForeignKey {
+  repeated string columns = 1;            // local columns
+  ObjectRef referenced_table = 2;
+  repeated string referenced_columns = 3; // referenced columns (PK/unique)
+  ReferentialAction on_delete = 4;
+  ReferentialAction on_update = 5;
+  MatchType match_type = 6;
+  // ON DELETE SET NULL/DEFAULT (column-list) target, PG 15+.
+  repeated string referenced_action_columns = 7;
+}
+
+message UniqueConstraint {
+  repeated string columns = 1;
+  bool nulls_not_distinct = 2; // PG 15+: NULLS NOT DISTINCT
+  string index = 3;            // backing index name, when distinct
+}
+
+message CheckConstraint {
+  Expr expression = 1;
+  bool no_inherit = 2;
+}
+
+message ExclusionElement {
+  oneof target {
+    string column = 1;
+    Expr expr = 2;
+  }
+  string operator = 3; // WITH <op>
+  string opclass = 4;
+}
+
+message ExclusionConstraint {
+  string index_method = 1; // USING gist / spgist
+  repeated ExclusionElement elements = 2;
+  Expr predicate = 3;      // WHERE (...)
+}
+
+enum ConstraintType {
+  CONSTRAINT_TYPE_UNSPECIFIED = 0;
+  CONSTRAINT_TYPE_PRIMARY_KEY = 1;
+  CONSTRAINT_TYPE_FOREIGN_KEY = 2;
+  CONSTRAINT_TYPE_UNIQUE = 3;
+  CONSTRAINT_TYPE_CHECK = 4;
+  CONSTRAINT_TYPE_EXCLUSION = 5;
+  CONSTRAINT_TYPE_NOT_NULL = 6;
+}
+
+message Constraint {
+  string id = 1;
+  string name = 2;
+  ConstraintType type = 3;
+  oneof body {
+    PrimaryKey primary_key = 4;
+    ForeignKey foreign_key = 5;
+    UniqueConstraint unique = 6;
+    CheckConstraint check = 7;
+    ExclusionConstraint exclusion = 8;
+    string not_null_column = 9; // NOT NULL constraint's column
+  }
+  bool deferrable = 10;
+  bool initially_deferred = 11;
+  Metadata meta = 15;
+}
+
+message IndexElement {
+  oneof target {
+    string column = 1;
+    Expr expr = 2; // expression index
+  }
+  string collation = 3;
+  string opclass = 4;
+  SortOrder order = 5;
+  NullsOrder nulls = 6;
+}
+
+message Index {
+  string id = 1;
+  string name = 2;
+  string method = 3; // btree, hash, gin, gist, spgist, brin
+  bool unique = 4;
+  bool primary = 5;  // index backs a primary key
+  repeated IndexElement elements = 6;
+  repeated string include = 7; // INCLUDE (col, ...) covering columns
+  Expr predicate = 8;          // partial index WHERE (...)
+  bool nulls_not_distinct = 9;
+  Metadata meta = 15;
+}
+
+message Sequence {
+  string id = 1;
+  QualifiedName name = 2;
+  TypeRef data_type = 3; // AS bigint / integer / smallint
+  int64 start = 4;
+  int64 increment = 5;
+  int64 min_value = 6;
+  int64 max_value = 7;
+  bool cycle = 8;
+  int64 cache = 9;
+  ObjectRef owned_by = 10; // OWNED BY column
+  Metadata meta = 15;
+}

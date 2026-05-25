@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package sqld.v1.ir;
+
+option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+
+// QualifiedName is a (catalog, schema, name) tuple. `name` is always set;
+// `schema` and `catalog` are empty when not applicable (e.g. a schema object
+// has only `name`).
+message QualifiedName {
+  string catalog = 1; // database name; usually empty
+  string schema = 2;  // namespace; empty for schema-less objects
+  string name = 3;    // object's own name
+}
+
+// Engine identifies the SQL dialect. Shared by config and plugin packages so
+// neither has to depend on the other.
+enum Engine {
+  ENGINE_UNSPECIFIED = 0;
+  ENGINE_POSTGRESQL = 1;
+}
+
+// ObjectKind discriminates what an ObjectRef points at.
+enum ObjectKind {
+  OBJECT_KIND_UNSPECIFIED = 0;
+  OBJECT_KIND_SCHEMA = 1;
+  OBJECT_KIND_TABLE = 2;
+  OBJECT_KIND_VIEW = 3;
+  OBJECT_KIND_MATERIALIZED_VIEW = 4;
+  OBJECT_KIND_COLUMN = 5;
+  OBJECT_KIND_CONSTRAINT = 6;
+  OBJECT_KIND_INDEX = 7;
+  OBJECT_KIND_SEQUENCE = 8;
+  OBJECT_KIND_FUNCTION = 9;
+  OBJECT_KIND_PROCEDURE = 10;
+  OBJECT_KIND_TRIGGER = 11;
+  OBJECT_KIND_ENUM_TYPE = 12;
+  OBJECT_KIND_DOMAIN_TYPE = 13;
+  OBJECT_KIND_COMPOSITE_TYPE = 14;
+  OBJECT_KIND_RANGE_TYPE = 15;
+}
+
+// ObjectRef is a stable, by-id reference to another object in the catalog.
+// `id` is the canonical lookup key (e.g. "public.users", "public.users.id").
+// `name` and `kind` are carried for readability and validation.
+message ObjectRef {
+  string id = 1;
+  ObjectKind kind = 2;
+  QualifiedName name = 3;
+}
+
+// SourceSpan records where an object came from in the original SQL source.
+message SourceSpan {
+  string file = 1;
+  uint32 start_line = 2;
+  uint32 start_column = 3;
+  uint32 end_line = 4;
+  uint32 end_column = 5;
+  uint64 start_offset = 6;
+  uint64 end_offset = 7;
+}
+
+// ----------------------------------------------------------------------------
+// Parsed annotation values (host -> plugin).
+//
+// A plugin declares its annotation grammar via sqld.v1.plugin.AnnotationSchema.
+// The host parses SQL comments against that grammar and hands back these
+// structured values: on each object's Metadata and as a flat list in the
+// GenerateRequest. The plugin never parses comment text itself.
+//
+// The VALUE model lives here (ir) so Metadata can embed it without depending on
+// the plugin package. The SCHEMA/grammar model lives in plugin/annotation.proto.
+// ----------------------------------------------------------------------------
+
+// AnnotationTargetKind identifies what an annotation is attached to. Shared by
+// the value model (here) and the grammar model (plugin package).
+enum AnnotationTargetKind {
+  ANNOTATION_TARGET_KIND_UNSPECIFIED = 0;
+  ANNOTATION_TARGET_KIND_SCHEMA = 1;
+  ANNOTATION_TARGET_KIND_TABLE = 2;
+  ANNOTATION_TARGET_KIND_COLUMN = 3;
+  ANNOTATION_TARGET_KIND_VIEW = 4;
+  ANNOTATION_TARGET_KIND_MATERIALIZED_VIEW = 5;
+  ANNOTATION_TARGET_KIND_FUNCTION = 6;
+  ANNOTATION_TARGET_KIND_PROCEDURE = 7;
+  ANNOTATION_TARGET_KIND_TRIGGER = 8;
+  ANNOTATION_TARGET_KIND_CONSTRAINT = 9;
+  ANNOTATION_TARGET_KIND_INDEX = 10;
+  ANNOTATION_TARGET_KIND_SEQUENCE = 11;
+  ANNOTATION_TARGET_KIND_TYPE = 12;
+  ANNOTATION_TARGET_KIND_QUERY = 13;     // named DML query
+  ANNOTATION_TARGET_KIND_MIGRATION = 14;
+}
+
+// AnnotationArgType is the scalar type of a parsed argument. Shared with the
+// grammar model's FieldSpec.
+enum AnnotationArgType {
+  ANNOTATION_ARG_TYPE_UNSPECIFIED = 0;
+  ANNOTATION_ARG_TYPE_STRING = 1;
+  ANNOTATION_ARG_TYPE_INT = 2;
+  ANNOTATION_ARG_TYPE_FLOAT = 3;
+  ANNOTATION_ARG_TYPE_BOOL = 4;
+  ANNOTATION_ARG_TYPE_IDENT = 5;    // bare identifier
+  ANNOTATION_ARG_TYPE_DURATION = 6; // "30s", "5m" -> duration_nanos
+  ANNOTATION_ARG_TYPE_ENUM = 7;
+}
+
+// AnnotationTargetRef points at the object an annotation is attached to.
+// `object` is set for catalog objects; `query_name`/`migration_version` for
+// non-catalog targets.
+message AnnotationTargetRef {
+  AnnotationTargetKind kind = 1;
+  ObjectRef object = 2;
+  string query_name = 3;
+  string migration_version = 4;
+  SourceSpan source = 5; // location of the originating comment
+  // AST node the annotation guards, when it targets a part of a query/migration
+  // (e.g. an optional predicate or join). Matches a `node_id` on a node inside
+  // Query.ast / Migration. Empty when the annotation targets a whole object.
+  string node_id = 6;
+}
+
+// AnnotationArg is one parsed argument: a positional value or a named key.
+message AnnotationArg {
+  string name = 1;  // key/field name; empty for pure positional args
+  uint32 index = 2; // 0-based positional index
+  AnnotationArgType type = 3;
+  oneof value {
+    string string_value = 4;
+    int64 int_value = 5;
+    double float_value = 6;
+    bool bool_value = 7;
+    int64 duration_nanos = 8;
+  }
+  string raw = 9; // original token text
+}
+
+// AnnotationValue is one parsed annotation instance.
+message AnnotationValue {
+  string name = 1;              // the AnnotationDef name it matched
+  AnnotationTargetRef target = 2;
+  repeated AnnotationArg args = 3;
+  bool present = 4;             // FLAG form: annotation was present
+  string raw = 5;               // full original annotation text
+  SourceSpan source = 6;
+}
+
+// Metadata is attached to every modeled object. It carries the SQL COMMENT,
+// source provenance, an options bag, and parsed annotations.
+message Metadata {
+  string comment = 1;              // SQL COMMENT ON ...
+  SourceSpan source = 2;           // provenance, optional
+  map<string, string> options = 3; // free-form generator hints
+  // Annotations parsed from this object's comments, per the active plugin's
+  // declared schema. Mirrored in GenerateRequest.annotations.
+  repeated AnnotationValue annotations = 4;
+}

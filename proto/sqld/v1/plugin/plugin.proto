@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package sqld.v1.plugin;
+
+import "sqld/v1/ir/common.proto";
+import "sqld/v1/ir/type.proto";
+import "sqld/v1/ir/dml.proto";
+import "sqld/v1/ir/catalog.proto";
+import "sqld/v1/plugin/annotation.proto";
+
+option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin;pluginv1";
+
+// ----------------------------------------------------------------------------
+// Generator plugin contract.
+//
+// One service, two transports:
+//   * binary / command plugins  -> serve this gRPC service over stdio.
+//   * wasm plugins              -> export `generate` and `get_info` functions
+//                                  taking a serialized GenerateRequest /
+//                                  GetInfoRequest and returning the serialized
+//                                  response. Same messages either way.
+// ----------------------------------------------------------------------------
+
+service Generator {
+  // GetInfo reports plugin identity and capabilities so the host can validate
+  // it before running. Cheap; no IR is sent.
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
+
+  // Generate turns the IR (schema + queries + migrations) into output files.
+  rpc Generate(GenerateRequest) returns (GenerateResponse);
+}
+
+// --- GetInfo -----------------------------------------------------------------
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  string name = 1;
+  string version = 2;
+  repeated sqld.v1.ir.Engine supported_engines = 3;
+  // Human/tooling-readable description of accepted options (e.g. a JSON schema
+  // or a proto descriptor name). Informational; options on the wire are bytes.
+  string options_schema = 4;
+  repeated string capabilities = 5; // free-form feature flags
+  // Grammar of the SQL-comment annotations this plugin understands. The host
+  // parses comments against this and returns sqld.v1.ir.AnnotationValue results.
+  AnnotationSchema annotation_schema = 6;
+}
+
+// --- Generate ----------------------------------------------------------------
+
+// PluginContext carries host-side run information.
+message PluginContext {
+  string host_version = 1;
+  string working_dir = 2;
+  sqld.v1.ir.Engine engine = 3;
+  map<string, string> env = 4;
+}
+
+message GenerateRequest {
+  // Schema IR derived from DDL and applied migrations.
+  sqld.v1.ir.Catalog catalog = 1;
+  // Named DML queries parsed from query sources.
+  repeated Query queries = 2;
+  // Ordered migrations (raw + parsed), for migration-aware generators.
+  repeated Migration migrations = 3;
+  // Plugin-specific settings, opaque to the host. The plugin decodes these
+  // bytes into its own options message (see PluginConfig.options).
+  bytes options = 4;
+  // Output directory the plugin should target (host resolves/cleans it).
+  string out_dir = 5;
+  PluginContext context = 6;
+  // All annotations parsed from the SQL sources, per the plugin's declared
+  // AnnotationSchema. A flat, global list keyed by target; also mirrored onto
+  // each object's Metadata.annotations.
+  repeated sqld.v1.ir.AnnotationValue annotations = 7;
+}
+
+message GenerateResponse {
+  repeated GeneratedFile files = 1;
+  repeated Diagnostic diagnostics = 2;
+}
+
+message GeneratedFile {
+  string path = 1;     // relative to GenerateRequest.out_dir
+  bytes contents = 2;
+  bool executable = 3; // set the executable bit
+}
+
+enum DiagnosticSeverity {
+  DIAGNOSTIC_SEVERITY_UNSPECIFIED = 0;
+  DIAGNOSTIC_SEVERITY_INFO = 1;
+  DIAGNOSTIC_SEVERITY_WARNING = 2;
+  DIAGNOSTIC_SEVERITY_ERROR = 3; // a single ERROR fails the run
+}
+
+message Diagnostic {
+  DiagnosticSeverity severity = 1;
+  string message = 2;
+  sqld.v1.ir.SourceSpan source = 3; // where it originated, when known
+  string code = 4;               // stable diagnostic code
+}
+
+// --- Named queries -----------------------------------------------------------
+
+// QueryCommand is the result-shape annotation (sqlc-style `:one`, `:many`...).
+enum QueryCommand {
+  QUERY_COMMAND_UNSPECIFIED = 0;
+  QUERY_COMMAND_ONE = 1;          // :one
+  QUERY_COMMAND_MANY = 2;         // :many
+  QUERY_COMMAND_EXEC = 3;         // :exec
+  QUERY_COMMAND_EXEC_ROWS = 4;    // :execrows (affected row count)
+  QUERY_COMMAND_EXEC_RESULT = 5;  // :execresult
+  QUERY_COMMAND_EXEC_LASTID = 6;  // :execlastid
+  QUERY_COMMAND_BATCH_EXEC = 7;   // :batchexec
+  QUERY_COMMAND_COPY_FROM = 8;    // :copyfrom
+}
+
+// QueryParameter is an inferred bind parameter ($1, $2, ...).
+message QueryParameter {
+  uint32 number = 1;         // 1-based position
+  string name = 2;           // named param, when available
+  sqld.v1.ir.TypeRef type = 3;
+  bool nullable = 4;
+  sqld.v1.ir.ObjectRef column = 5; // originating column, when inferred
+}
+
+// QueryColumn is an inferred output column of a query.
+message QueryColumn {
+  string name = 1;
+  sqld.v1.ir.TypeRef type = 2;
+  bool nullable = 3;
+  bool is_array = 4;
+  sqld.v1.ir.ObjectRef source_column = 5; // origin column, when inferred
+  string table_alias = 6;
+}
+
+// Query is a named DML query plus its inferred signature.
+message Query {
+  string name = 1;             // from `-- name: Foo :one`
+  string sql = 2;              // raw SQL text
+  QueryCommand command = 3;
+  sqld.v1.ir.Statement ast = 4;   // parsed statement IR
+  repeated QueryParameter parameters = 5;
+  repeated QueryColumn columns = 6;
+  string source_file = 7;
+  string comment = 8;          // leading doc comment, if any
+}
+
+// --- Migrations --------------------------------------------------------------
+
+// Migration is one ordered migration step, raw and parsed.
+message Migration {
+  string version = 1;   // ordering key: "0001", timestamp, ...
+  string name = 2;
+  string up_sql = 3;
+  string down_sql = 4;
+  repeated sqld.v1.ir.Statement up = 5;   // parsed up statements
+  repeated sqld.v1.ir.Statement down = 6; // parsed down statements
+  string source_file = 7;
+}
