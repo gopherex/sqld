@@ -14,3 +14,16 @@ func TestParseSelectSmoke(t *testing.T) {
 		t.Fatalf("want SelectStmt node")
 	}
 }
+
+func TestStatements(t *testing.T) {
+	stmts, err := Statements("CREATE TABLE a(id int); CREATE TABLE b(id int);")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stmts) != 2 {
+		t.Fatalf("want 2, got %d", len(stmts))
+	}
+	if stmts[0].Node.GetCreateStmt() == nil {
+		t.Fatal("want CreateStmt")
+	}
+}
