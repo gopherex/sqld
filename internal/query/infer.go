@@ -1,0 +1,658 @@
+package query
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/yaroher/sqld/internal/catalog"
+	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+)
+
+// Infer mutates q by:
+//  1. Walking the AST to collect ParameterRef nodes → QueryParameter entries.
+//  2. Attempting shallow type inference for parameters by examining operator
+//     operands — if a param appears beside a resolved ColumnRef, the param
+//     inherits the column's type.
+//  3. For SELECT queries, resolving SelectTarget nodes to QueryColumn entries.
+//
+// Unresolvable items produce a diagnostic but never a panic.
+func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
+	if q == nil || q.Ast == nil {
+		return
+	}
+
+	// Build alias→table lookup from the catalog for fast resolution.
+	catIdx := buildCatalogIndex(cat)
+
+	// ------------------------------------------------------------------ //
+	// 1. Collect all parameter refs from the full AST.
+	// ------------------------------------------------------------------ //
+	paramMap := make(map[uint32]*pluginv1.QueryParameter) // keyed by position
+	collectParams(q.Ast, paramMap)
+
+	// ------------------------------------------------------------------ //
+	// 2. Shallow type inference via operator context.
+	// ------------------------------------------------------------------ //
+	// For each operator expr we check whether one side is a ParameterRef and
+	// the other is a ColumnRef; if so, resolve the column and assign its type.
+	inferParamTypes(q.Ast, paramMap, catIdx, q.GetName(), d)
+
+	// Emit diagnostics for unresolved params and build the ordered param slice.
+	// Order by position (1-based).
+	ordered := orderedParams(paramMap)
+	for _, p := range ordered {
+		if p.GetType() == nil {
+			d.Add("info", fmt.Sprintf("param $%d type unresolved in query %s", p.GetNumber(), q.GetName()))
+		}
+	}
+	q.Parameters = ordered
+
+	// ------------------------------------------------------------------ //
+	// 3. Column inference (SELECT only).
+	// ------------------------------------------------------------------ //
+	sel := q.Ast.GetSelect()
+	if sel == nil {
+		return
+	}
+	ss := sel.GetSelect()
+	if ss == nil {
+		return
+	}
+
+	// Build a table alias map from the FROM clause.
+	// aliasMap: alias-or-name → *irv1.Table
+	aliasMap := buildAliasMap(ss.GetFrom(), catIdx)
+
+	// Collect all tables referenced (for star expansion).
+	var fromTables []*irv1.Table
+	for _, fi := range ss.GetFrom() {
+		tbl := resolveFromItemTable(fi, catIdx)
+		if tbl != nil {
+			fromTables = append(fromTables, tbl)
+		}
+	}
+	// Also collect join sides.
+	fromTables = collectJoinTables(ss.GetFrom(), catIdx, fromTables)
+
+	for _, target := range ss.GetTargets() {
+		expr := target.GetExpr()
+		alias := target.GetAlias()
+		cols := resolveTarget(expr, alias, aliasMap, fromTables, catIdx, q.GetName(), d)
+		q.Columns = append(q.Columns, cols...)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Catalog index
+// ---------------------------------------------------------------------------
+
+// catalogIndex maps lower-cased table name → *irv1.Table (first match wins).
+type catalogIndex map[string]*irv1.Table
+
+func buildCatalogIndex(cat *irv1.Catalog) catalogIndex {
+	idx := make(catalogIndex)
+	if cat == nil {
+		return idx
+	}
+	for _, schema := range cat.GetSchemas() {
+		for _, tbl := range schema.GetTables() {
+			name := strings.ToLower(tbl.GetName().GetName())
+			if _, exists := idx[name]; !exists {
+				idx[name] = tbl
+			}
+		}
+	}
+	return idx
+}
+
+func (ci catalogIndex) lookupTable(name string) *irv1.Table {
+	return ci[strings.ToLower(name)]
+}
+
+func (ci catalogIndex) lookupColumn(tbl *irv1.Table, colName string) *irv1.Column {
+	if tbl == nil {
+		return nil
+	}
+	lower := strings.ToLower(colName)
+	for _, col := range tbl.GetColumns() {
+		if strings.ToLower(col.GetName()) == lower {
+			return col
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Parameter collection
+// ---------------------------------------------------------------------------
+
+// collectParams recursively walks an IR Statement and populates paramMap.
+func collectParams(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryParameter) {
+	if stmt == nil {
+		return
+	}
+	switch {
+	case stmt.GetSelect() != nil:
+		collectParamsFromSelect(stmt.GetSelect(), paramMap)
+	case stmt.GetInsert() != nil:
+		ins := stmt.GetInsert()
+		// INSERT has no WHERE clause; params come from VALUES / SELECT / RETURNING.
+		if ins.GetQuery() != nil {
+			collectParamsFromSelect(ins.GetQuery(), paramMap)
+		}
+		// VALUES
+		if ins.GetValues() != nil {
+			for _, row := range ins.GetValues().GetRows() {
+				for _, e := range row.GetValues() {
+					walkExpr(e, paramMap)
+				}
+			}
+		}
+		for _, t := range ins.GetReturning() {
+			walkExpr(t.GetExpr(), paramMap)
+		}
+	case stmt.GetUpdate() != nil:
+		upd := stmt.GetUpdate()
+		collectParamsFromExprs(upd.GetWhere(), paramMap)
+		for _, a := range upd.GetSet() {
+			walkExpr(a.GetValue(), paramMap)
+		}
+		for _, t := range upd.GetReturning() {
+			walkExpr(t.GetExpr(), paramMap)
+		}
+	case stmt.GetDelete() != nil:
+		del := stmt.GetDelete()
+		collectParamsFromExprs(del.GetWhere(), paramMap)
+		for _, t := range del.GetReturning() {
+			walkExpr(t.GetExpr(), paramMap)
+		}
+	}
+}
+
+func collectParamsFromSelect(sel *irv1.SelectStmt, paramMap map[uint32]*pluginv1.QueryParameter) {
+	if sel == nil {
+		return
+	}
+	if ss := sel.GetSelect(); ss != nil {
+		collectParamsFromSimpleSelect(ss, paramMap)
+	}
+	if so := sel.GetSetOperation(); so != nil {
+		collectParamsFromSelect(so.GetLeft(), paramMap)
+		collectParamsFromSelect(so.GetRight(), paramMap)
+	}
+	walkExpr(sel.GetLimit(), paramMap)
+	walkExpr(sel.GetOffset(), paramMap)
+}
+
+func collectParamsFromSimpleSelect(ss *irv1.SimpleSelect, paramMap map[uint32]*pluginv1.QueryParameter) {
+	if ss == nil {
+		return
+	}
+	for _, t := range ss.GetTargets() {
+		walkExpr(t.GetExpr(), paramMap)
+	}
+	walkExpr(ss.GetWhere(), paramMap)
+	for _, g := range ss.GetGroupBy() {
+		walkExpr(g, paramMap)
+	}
+	walkExpr(ss.GetHaving(), paramMap)
+	for _, d := range ss.GetDistinctOn() {
+		walkExpr(d, paramMap)
+	}
+}
+
+func collectParamsFromExprs(e *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter) {
+	walkExpr(e, paramMap)
+}
+
+// walkExpr recursively visits an Expr and records any ParameterRef it finds.
+func walkExpr(e *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter) {
+	if e == nil {
+		return
+	}
+	switch {
+	case e.GetParameter() != nil:
+		pos := e.GetParameter().GetPosition()
+		if pos > 0 {
+			if _, exists := paramMap[pos]; !exists {
+				paramMap[pos] = &pluginv1.QueryParameter{
+					Number: pos,
+					Name:   e.GetParameter().GetName(),
+				}
+			}
+		}
+	case e.GetOperator() != nil:
+		for _, op := range e.GetOperator().GetOperands() {
+			walkExpr(op, paramMap)
+		}
+	case e.GetFunctionCall() != nil:
+		for _, arg := range e.GetFunctionCall().GetArguments() {
+			walkExpr(arg, paramMap)
+		}
+		walkExpr(e.GetFunctionCall().GetFilter(), paramMap)
+	case e.GetCaseExpr() != nil:
+		ce := e.GetCaseExpr()
+		walkExpr(ce.GetOperand(), paramMap)
+		for _, w := range ce.GetWhens() {
+			walkExpr(w.GetCondition(), paramMap)
+			walkExpr(w.GetResult(), paramMap)
+		}
+		walkExpr(ce.GetElseResult(), paramMap)
+	case e.GetCast() != nil:
+		walkExpr(e.GetCast().GetExpr(), paramMap)
+	case e.GetList() != nil:
+		for _, item := range e.GetList().GetElements() {
+			walkExpr(item, paramMap)
+		}
+	case e.GetSubquery() != nil:
+		collectParamsFromSelect(e.GetSubquery().GetQuery(), paramMap)
+	}
+	// ColumnRef, Literal, Star, RawSql have no sub-expressions to walk.
+}
+
+// ---------------------------------------------------------------------------
+// Parameter type inference
+// ---------------------------------------------------------------------------
+
+// inferParamTypes walks the statement AST looking for OperatorExpr nodes where
+// one operand is a ParameterRef and another is a resolvable ColumnRef.
+// When found, the param inherits the column's type.
+func inferParamTypes(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryParameter, catIdx catalogIndex, qName string, d *catalog.Diagnostics) {
+	if stmt == nil {
+		return
+	}
+	// Build alias map from the statement's FROM clause (for select/update/delete).
+	var aliasMap map[string]*irv1.Table
+	switch {
+	case stmt.GetSelect() != nil:
+		if ss := stmt.GetSelect().GetSelect(); ss != nil {
+			aliasMap = buildAliasMap(ss.GetFrom(), catIdx)
+		}
+	case stmt.GetUpdate() != nil:
+		aliasMap = buildFromTableAlias(stmt.GetUpdate().GetTableName(), stmt.GetUpdate().GetAlias(), catIdx)
+	case stmt.GetDelete() != nil:
+		aliasMap = buildFromTableAlias(stmt.GetDelete().GetTableName(), stmt.GetDelete().GetAlias(), catIdx)
+	case stmt.GetInsert() != nil:
+		aliasMap = buildFromTableAlias(stmt.GetInsert().GetTableName(), stmt.GetInsert().GetAlias(), catIdx)
+	}
+	if aliasMap == nil {
+		aliasMap = make(map[string]*irv1.Table)
+	}
+
+	inferParamTypesInStatement(stmt, paramMap, aliasMap, catIdx)
+}
+
+func buildFromTableAlias(qn *irv1.QualifiedName, alias string, catIdx catalogIndex) map[string]*irv1.Table {
+	m := make(map[string]*irv1.Table)
+	if qn == nil {
+		return m
+	}
+	tbl := catIdx.lookupTable(qn.GetName())
+	if tbl == nil {
+		return m
+	}
+	tableName := strings.ToLower(qn.GetName())
+	m[tableName] = tbl
+	if alias != "" {
+		m[strings.ToLower(alias)] = tbl
+	}
+	return m
+}
+
+func inferParamTypesInStatement(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
+	if stmt == nil {
+		return
+	}
+	switch {
+	case stmt.GetSelect() != nil:
+		inferParamTypesInSelect(stmt.GetSelect(), paramMap, aliasMap, catIdx)
+	case stmt.GetUpdate() != nil:
+		upd := stmt.GetUpdate()
+		inferParamTypesInExpr(upd.GetWhere(), paramMap, aliasMap, catIdx)
+		for _, a := range upd.GetSet() {
+			inferParamTypesInExpr(a.GetValue(), paramMap, aliasMap, catIdx)
+		}
+	case stmt.GetDelete() != nil:
+		inferParamTypesInExpr(stmt.GetDelete().GetWhere(), paramMap, aliasMap, catIdx)
+	case stmt.GetInsert() != nil:
+		ins := stmt.GetInsert()
+		if ins.GetQuery() != nil {
+			inferParamTypesInSelect(ins.GetQuery(), paramMap, aliasMap, catIdx)
+		}
+		if ins.GetValues() != nil {
+			for _, row := range ins.GetValues().GetRows() {
+				for _, e := range row.GetValues() {
+					inferParamTypesInExpr(e, paramMap, aliasMap, catIdx)
+				}
+			}
+		}
+	}
+}
+
+func inferParamTypesInSelect(sel *irv1.SelectStmt, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
+	if sel == nil {
+		return
+	}
+	if ss := sel.GetSelect(); ss != nil {
+		inferParamTypesInExpr(ss.GetWhere(), paramMap, aliasMap, catIdx)
+		for _, t := range ss.GetTargets() {
+			inferParamTypesInExpr(t.GetExpr(), paramMap, aliasMap, catIdx)
+		}
+		for _, g := range ss.GetGroupBy() {
+			inferParamTypesInExpr(g, paramMap, aliasMap, catIdx)
+		}
+		inferParamTypesInExpr(ss.GetHaving(), paramMap, aliasMap, catIdx)
+	}
+}
+
+// inferParamTypesInExpr traverses an Expr looking for OperatorExpr nodes
+// where one side is a param and the other is a resolvable column. When found,
+// it sets the param's Type from the column.
+func inferParamTypesInExpr(e *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
+	if e == nil {
+		return
+	}
+	if op := e.GetOperator(); op != nil {
+		operands := op.GetOperands()
+		// Try to find (param, colref) or (colref, param) pairs.
+		if len(operands) == 2 {
+			tryInferParamFromPair(operands[0], operands[1], paramMap, aliasMap, catIdx)
+			tryInferParamFromPair(operands[1], operands[0], paramMap, aliasMap, catIdx)
+		}
+		// Recurse into all operands regardless.
+		for _, operand := range operands {
+			inferParamTypesInExpr(operand, paramMap, aliasMap, catIdx)
+		}
+		return
+	}
+	// Recurse into sub-expressions.
+	if fc := e.GetFunctionCall(); fc != nil {
+		for _, arg := range fc.GetArguments() {
+			inferParamTypesInExpr(arg, paramMap, aliasMap, catIdx)
+		}
+		inferParamTypesInExpr(fc.GetFilter(), paramMap, aliasMap, catIdx)
+		return
+	}
+	if ce := e.GetCaseExpr(); ce != nil {
+		inferParamTypesInExpr(ce.GetOperand(), paramMap, aliasMap, catIdx)
+		for _, w := range ce.GetWhens() {
+			inferParamTypesInExpr(w.GetCondition(), paramMap, aliasMap, catIdx)
+			inferParamTypesInExpr(w.GetResult(), paramMap, aliasMap, catIdx)
+		}
+		inferParamTypesInExpr(ce.GetElseResult(), paramMap, aliasMap, catIdx)
+		return
+	}
+	if cast := e.GetCast(); cast != nil {
+		inferParamTypesInExpr(cast.GetExpr(), paramMap, aliasMap, catIdx)
+		return
+	}
+	if lst := e.GetList(); lst != nil {
+		for _, item := range lst.GetElements() {
+			inferParamTypesInExpr(item, paramMap, aliasMap, catIdx)
+		}
+		return
+	}
+	if sq := e.GetSubquery(); sq != nil {
+		inferParamTypesInSelect(sq.GetQuery(), paramMap, aliasMap, catIdx)
+		return
+	}
+}
+
+// tryInferParamFromPair: if `maybeParam` is a ParameterRef and `maybeCol` is
+// a ColumnRef, resolve the column from aliasMap/catIdx and assign its type to
+// the parameter (if not already set).
+func tryInferParamFromPair(maybeParam, maybeCol *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
+	if maybeParam == nil || maybeCol == nil {
+		return
+	}
+	param := maybeParam.GetParameter()
+	if param == nil {
+		return
+	}
+	colRef := maybeCol.GetColumnRef()
+	if colRef == nil {
+		return
+	}
+	pos := param.GetPosition()
+	if pos == 0 {
+		return
+	}
+	p, ok := paramMap[pos]
+	if !ok || p.GetType() != nil {
+		return // already resolved
+	}
+
+	col := resolveColumnRef(colRef, aliasMap, catIdx)
+	if col == nil {
+		return
+	}
+	p.Type = col.GetType()
+	p.Nullable = col.GetNullable()
+	p.Column = &irv1.ObjectRef{
+		Id:   col.GetId(),
+		Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN,
+	}
+}
+
+// resolveColumnRef looks up a ColumnRef in the aliasMap/catIdx.
+func resolveColumnRef(cr *irv1.ColumnRef, aliasMap map[string]*irv1.Table, catIdx catalogIndex) *irv1.Column {
+	if cr == nil {
+		return nil
+	}
+	colName := cr.GetColumn()
+	qualifier := cr.GetQualifier()
+
+	if qualifier != "" {
+		// Qualified: look up the table by alias/name.
+		tbl := aliasMap[strings.ToLower(qualifier)]
+		if tbl == nil {
+			tbl = catIdx.lookupTable(qualifier)
+		}
+		return catIdx.lookupColumn(tbl, colName)
+	}
+
+	// Unqualified: try each table in aliasMap.
+	for _, tbl := range aliasMap {
+		col := catIdx.lookupColumn(tbl, colName)
+		if col != nil {
+			return col
+		}
+	}
+
+	// Last resort: search all tables.
+	for _, tbl := range catIdx {
+		col := catIdx.lookupColumn(tbl, colName)
+		if col != nil {
+			return col
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Column inference
+// ---------------------------------------------------------------------------
+
+// buildAliasMap builds alias → *irv1.Table from a FROM clause.
+func buildAliasMap(from []*irv1.FromItem, catIdx catalogIndex) map[string]*irv1.Table {
+	m := make(map[string]*irv1.Table)
+	for _, fi := range from {
+		if fi == nil {
+			continue
+		}
+		if tr := fi.GetTable(); tr != nil {
+			tblName := tr.GetName().GetName()
+			alias := tr.GetAlias()
+			tbl := catIdx.lookupTable(tblName)
+			key := strings.ToLower(tblName)
+			if tbl != nil {
+				m[key] = tbl
+			}
+			if alias != "" {
+				m[strings.ToLower(alias)] = tbl
+			}
+		}
+		// For joins, recurse into left/right.
+		if jc := fi.GetJoin(); jc != nil {
+			for k, v := range buildAliasMap([]*irv1.FromItem{jc.GetLeft(), jc.GetRight()}, catIdx) {
+				m[k] = v
+			}
+		}
+	}
+	return m
+}
+
+// collectJoinTables appends tables found in JOIN clauses to the provided slice.
+func collectJoinTables(from []*irv1.FromItem, catIdx catalogIndex, out []*irv1.Table) []*irv1.Table {
+	for _, fi := range from {
+		if fi == nil {
+			continue
+		}
+		if jc := fi.GetJoin(); jc != nil {
+			out = collectJoinTables([]*irv1.FromItem{jc.GetLeft(), jc.GetRight()}, catIdx, out)
+		}
+	}
+	return out
+}
+
+// resolveFromItemTable returns the *irv1.Table for a TableRef FromItem.
+func resolveFromItemTable(fi *irv1.FromItem, catIdx catalogIndex) *irv1.Table {
+	if fi == nil {
+		return nil
+	}
+	if tr := fi.GetTable(); tr != nil {
+		return catIdx.lookupTable(tr.GetName().GetName())
+	}
+	return nil
+}
+
+// resolveTarget converts one SelectTarget to zero or more QueryColumns.
+func resolveTarget(expr *irv1.Expr, alias string, aliasMap map[string]*irv1.Table, fromTables []*irv1.Table, catIdx catalogIndex, qName string, d *catalog.Diagnostics) []*pluginv1.QueryColumn {
+	if expr == nil {
+		colName := alias
+		if colName == "" {
+			colName = "column"
+		}
+		return []*pluginv1.QueryColumn{{Name: colName}}
+	}
+
+	// ColumnRef
+	if cr := expr.GetColumnRef(); cr != nil {
+		colName := cr.GetColumn()
+		qualifier := cr.GetQualifier()
+		displayName := alias
+		if displayName == "" {
+			displayName = colName
+		}
+
+		col := resolveColumnRef(cr, aliasMap, catIdx)
+		if col == nil {
+			d.Add("info", fmt.Sprintf("column %q unresolved in query %s", colName, qName))
+			return []*pluginv1.QueryColumn{{Name: displayName}}
+		}
+		return []*pluginv1.QueryColumn{{
+			Name:     displayName,
+			Type:     col.GetType(),
+			Nullable: col.GetNullable(),
+			SourceColumn: &irv1.ObjectRef{
+				Id:   col.GetId(),
+				Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN,
+			},
+			TableAlias: qualifier,
+		}}
+	}
+
+	// StarExpr
+	if expr.GetStar() != nil {
+		qualifier := expr.GetStar().GetQualifier()
+		// Determine which table to expand.
+		if qualifier != "" {
+			tbl := aliasMap[strings.ToLower(qualifier)]
+			if tbl == nil {
+				tbl = catIdx.lookupTable(qualifier)
+			}
+			if tbl != nil {
+				return expandTableColumns(tbl, qualifier)
+			}
+			d.Add("info", fmt.Sprintf("star qualifier %q unresolved in query %s", qualifier, qName))
+			return nil
+		}
+		// Unqualified star: expand all from tables.
+		if len(fromTables) == 0 {
+			d.Add("info", fmt.Sprintf("star with no from tables in query %s", qName))
+			return nil
+		}
+		var cols []*pluginv1.QueryColumn
+		for _, tbl := range fromTables {
+			cols = append(cols, expandTableColumns(tbl, "")...)
+		}
+		return cols
+	}
+
+	// Literal
+	if lit := expr.GetLiteral(); lit != nil {
+		colName := alias
+		if colName == "" {
+			colName = "column"
+		}
+		return []*pluginv1.QueryColumn{{
+			Name: colName,
+			Type: lit.GetType(),
+		}}
+	}
+
+	// Other (function call, cast, operator, etc.) – return a column with alias or "column".
+	colName := alias
+	if colName == "" {
+		colName = "column"
+	}
+	d.Add("info", fmt.Sprintf("column expression type unresolved in query %s", qName))
+	return []*pluginv1.QueryColumn{{Name: colName}}
+}
+
+// expandTableColumns produces one QueryColumn per column in tbl.
+func expandTableColumns(tbl *irv1.Table, tableAlias string) []*pluginv1.QueryColumn {
+	if tbl == nil {
+		return nil
+	}
+	cols := make([]*pluginv1.QueryColumn, 0, len(tbl.GetColumns()))
+	for _, col := range tbl.GetColumns() {
+		cols = append(cols, &pluginv1.QueryColumn{
+			Name:     col.GetName(),
+			Type:     col.GetType(),
+			Nullable: col.GetNullable(),
+			SourceColumn: &irv1.ObjectRef{
+				Id:   col.GetId(),
+				Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN,
+			},
+			TableAlias: tableAlias,
+		})
+	}
+	return cols
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// orderedParams returns parameters sorted by position.
+func orderedParams(paramMap map[uint32]*pluginv1.QueryParameter) []*pluginv1.QueryParameter {
+	if len(paramMap) == 0 {
+		return nil
+	}
+	// Find max position.
+	var maxPos uint32
+	for pos := range paramMap {
+		if pos > maxPos {
+			maxPos = pos
+		}
+	}
+	out := make([]*pluginv1.QueryParameter, 0, len(paramMap))
+	for i := uint32(1); i <= maxPos; i++ {
+		if p, ok := paramMap[i]; ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
