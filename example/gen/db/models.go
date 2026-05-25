@@ -6,15 +6,70 @@ import (
 	"time"
 )
 
-type Authors struct {
-	ID   int64
-	Name string
-	Bio  *string
+type AppUsers struct {
+	ID        int64
+	Email     any
+	Status    any
+	ManagerID *int64
+	CreatedAt time.Time
 }
 
-type Books struct {
+type AppProfiles struct {
+	UserID  int64
+	Bio     *string
+	Address *any
+}
+
+type AppOrders struct {
+	ID       int64
+	UserID   int64
+	Total    string
+	PlacedAt time.Time
+}
+
+type AppRoles struct {
+	ID   int64
+	Name string
+}
+
+type AppUserRoles struct {
+	UserID int64
+	RoleID int64
+}
+
+type AppKitchenSink struct {
+	CInt2        *int16
+	CInt4        *int32
+	CInt8        *int64
+	CSerial      *int32
+	CNumeric     *string
+	CFloat4      *float32
+	CFloat8      *float64
+	CBool        *bool
+	CText        *string
+	CVarchar     *string
+	CChar        *string
+	CUUID        *string
+	CBytea       []byte
+	CJsonb       []byte
+	CJSON        []byte
+	CInet        *string
+	CDate        *time.Time
+	CTime        *time.Time
+	CTimestamp   *time.Time
+	CTimestamptz *time.Time
+	CInterval    *any
+	CIntArray    []int32
+	CTextArray   []string
+	CStatus      *any
+	CAddress     *any
+	CEmail       *any
+	CGenerated   *int32
+	CIdentity    int32
+}
+
+type AuditLog struct {
 	ID        int64
-	AuthorID  int64
-	Title     string
-	Published *time.Time
+	TableName string
+	ChangedAt time.Time
 }

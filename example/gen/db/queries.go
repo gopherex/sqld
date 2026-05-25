@@ -22,39 +22,38 @@ type Queries struct {
 
 func New(db DBTX) *Queries { return &Queries{db: db} }
 
-const getAuthorSQL = `SELECT id, name, bio FROM authors WHERE id = $1;`
+const getUserSQL = `SELECT id, email, status FROM app.users WHERE id = $1;`
 
-type GetAuthorRow struct {
-	ID   int64
-	Name string
-	Bio  *string
+type GetUserRow struct {
+	ID     int64
+	Email  any
+	Status any
 }
 
-func (q *Queries) GetAuthor(ctx context.Context, id int64) (GetAuthorRow, error) {
-	row := q.db.QueryRow(ctx, getAuthorSQL, id)
-	var i GetAuthorRow
-	err := row.Scan(&i.ID, &i.Name, &i.Bio)
+func (q *Queries) GetUser(ctx context.Context, id int64) (GetUserRow, error) {
+	row := q.db.QueryRow(ctx, getUserSQL, id)
+	var i GetUserRow
+	err := row.Scan(&i.ID, &i.Email, &i.Status)
 	return i, err
 }
 
-const listAuthorsSQL = `SELECT id, name, bio FROM authors;`
+const listActiveUsersSQL = `SELECT id, email FROM app.users WHERE status = 'active' ORDER BY created_at DESC;`
 
-type ListAuthorsRow struct {
-	ID   int64
-	Name string
-	Bio  *string
+type ListActiveUsersRow struct {
+	ID    int64
+	Email any
 }
 
-func (q *Queries) ListAuthors(ctx context.Context) ([]ListAuthorsRow, error) {
-	rows, err := q.db.Query(ctx, listAuthorsSQL)
+func (q *Queries) ListActiveUsers(ctx context.Context) ([]ListActiveUsersRow, error) {
+	rows, err := q.db.Query(ctx, listActiveUsersSQL)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListAuthorsRow
+	var items []ListActiveUsersRow
 	for rows.Next() {
-		var i ListAuthorsRow
-		if err := rows.Scan(&i.ID, &i.Name, &i.Bio); err != nil {
+		var i ListActiveUsersRow
+		if err := rows.Scan(&i.ID, &i.Email); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -65,25 +64,71 @@ func (q *Queries) ListAuthors(ctx context.Context) ([]ListAuthorsRow, error) {
 	return items, nil
 }
 
-const getBookSQL = `SELECT id, author_id, title, published FROM books WHERE id = $1;`
+const listUserOrdersSQL = `SELECT o.id, o.total, o.placed_at
+FROM app.orders o
+JOIN app.users u ON u.id = o.user_id
+WHERE u.id = $1;`
 
-type GetBookRow struct {
-	ID        int64
-	AuthorID  int64
-	Title     string
-	Published *time.Time
+type ListUserOrdersRow struct {
+	ID       int64
+	Total    string
+	PlacedAt time.Time
 }
 
-func (q *Queries) GetBook(ctx context.Context, id int64) (GetBookRow, error) {
-	row := q.db.QueryRow(ctx, getBookSQL, id)
-	var i GetBookRow
-	err := row.Scan(&i.ID, &i.AuthorID, &i.Title, &i.Published)
+func (q *Queries) ListUserOrders(ctx context.Context, id int64) ([]ListUserOrdersRow, error) {
+	rows, err := q.db.Query(ctx, listUserOrdersSQL, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserOrdersRow
+	for rows.Next() {
+		var i ListUserOrdersRow
+		if err := rows.Scan(&i.ID, &i.Total, &i.PlacedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const createOrderSQL = `INSERT INTO app.orders (user_id, total) VALUES ($1, $2) RETURNING id, placed_at;`
+
+type CreateOrderParams struct {
+	UserID int64
+	Total  string
+}
+
+type CreateOrderRow struct {
+	ID       int64
+	PlacedAt time.Time
+}
+
+func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (CreateOrderRow, error) {
+	row := q.db.QueryRow(ctx, createOrderSQL, arg.UserID, arg.Total)
+	var i CreateOrderRow
+	err := row.Scan(&i.ID, &i.PlacedAt)
 	return i, err
 }
 
-const deleteAuthorSQL = `DELETE FROM authors WHERE id = $1;`
+const deleteUserSQL = `DELETE FROM app.users WHERE id = $1;`
 
-func (q *Queries) DeleteAuthor(ctx context.Context, arg1 int64) error {
-	_, err := q.db.Exec(ctx, deleteAuthorSQL, arg1)
+func (q *Queries) DeleteUser(ctx context.Context, arg1 int64) error {
+	_, err := q.db.Exec(ctx, deleteUserSQL, arg1)
 	return err
+}
+
+const setUserStatusSQL = `UPDATE app.users SET status = $2 WHERE id = $1;`
+
+type SetUserStatusParams struct {
+	Arg1 int64
+	Arg2 any
+}
+
+func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (int64, error) {
+	tag, err := q.db.Exec(ctx, setUserStatusSQL, arg.Arg1, arg.Arg2)
+	return tag.RowsAffected(), err
 }

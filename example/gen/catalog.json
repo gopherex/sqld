@@ -1,0 +1,1574 @@
+{
+  "irVersion":  "v1",
+  "defaultSchema":  "public",
+  "schemas":  [
+    {
+      "id":  "app",
+      "name":  "app",
+      "tables":  [
+        {
+          "id":  "app.users",
+          "name":  {
+            "schema":  "app",
+            "name":  "users"
+          },
+          "persistence":  "TABLE_PERSISTENCE_PERMANENT",
+          "columns":  [
+            {
+              "id":  "app.users.id",
+              "name":  "id",
+              "position":  1,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "bigserial"
+              }
+            },
+            {
+              "id":  "app.users.email",
+              "name":  "email",
+              "position":  2,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "email"
+              }
+            },
+            {
+              "id":  "app.users.status",
+              "name":  "status",
+              "position":  3,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "user_status"
+              },
+              "defaultExpr":  {
+                "literal":  {
+                  "stringValue":  "active"
+                },
+                "nodeId":  "col_expr/default"
+              }
+            },
+            {
+              "id":  "app.users.manager_id",
+              "name":  "manager_id",
+              "position":  4,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int8"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.users.created_at",
+              "name":  "created_at",
+              "position":  5,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "timestamptz",
+                "modifier":  {
+                  "dateTime":  {
+                    "withTimezone":  true
+                  }
+                }
+              },
+              "defaultExpr":  {
+                "functionCall":  {
+                  "name":  {
+                    "name":  "now"
+                  }
+                },
+                "nodeId":  "col_expr/default"
+              }
+            }
+          ],
+          "constraints":  [
+            {
+              "id":  "app.users.constraint_0",
+              "type":  "CONSTRAINT_TYPE_PRIMARY_KEY",
+              "primaryKey":  {
+                "columns":  [
+                  "id"
+                ]
+              }
+            },
+            {
+              "id":  "app.users.constraint_1",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "email"
+            },
+            {
+              "id":  "app.users.constraint_2",
+              "type":  "CONSTRAINT_TYPE_UNIQUE",
+              "unique":  {
+                "columns":  [
+                  "email"
+                ]
+              }
+            },
+            {
+              "id":  "app.users.constraint_3",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "status"
+            },
+            {
+              "id":  "app.users.constraint_4",
+              "type":  "CONSTRAINT_TYPE_FOREIGN_KEY",
+              "foreignKey":  {
+                "columns":  [
+                  "manager_id"
+                ],
+                "referencedTable":  {
+                  "id":  "app.users",
+                  "kind":  "OBJECT_KIND_TABLE",
+                  "name":  {
+                    "schema":  "app",
+                    "name":  "users"
+                  }
+                },
+                "referencedColumns":  [
+                  "id"
+                ],
+                "onDelete":  "REFERENTIAL_ACTION_SET_NULL",
+                "onUpdate":  "REFERENTIAL_ACTION_NO_ACTION"
+              }
+            },
+            {
+              "id":  "app.users.constraint_5",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "created_at"
+            }
+          ],
+          "indexes":  [
+            {
+              "name":  "idx_users_email_lower",
+              "method":  "btree",
+              "unique":  true,
+              "elements":  [
+                {
+                  "expr":  {
+                    "functionCall":  {
+                      "name":  {
+                        "name":  "lower"
+                      },
+                      "arguments":  [
+                        {
+                          "columnRef":  {
+                            "column":  "email"
+                          },
+                          "nodeId":  "idx_expr:0/elem_expr/arg:0"
+                        }
+                      ]
+                    },
+                    "nodeId":  "idx_expr:0/elem_expr"
+                  }
+                }
+              ]
+            }
+          ],
+          "triggers":  [
+            {
+              "id":  "app.users_touch",
+              "kind":  "OBJECT_KIND_TRIGGER",
+              "name":  {
+                "schema":  "app",
+                "name":  "users_touch"
+              }
+            }
+          ]
+        },
+        {
+          "id":  "app.profiles",
+          "name":  {
+            "schema":  "app",
+            "name":  "profiles"
+          },
+          "persistence":  "TABLE_PERSISTENCE_PERMANENT",
+          "columns":  [
+            {
+              "id":  "app.profiles.user_id",
+              "name":  "user_id",
+              "position":  1,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int8"
+              }
+            },
+            {
+              "id":  "app.profiles.bio",
+              "name":  "bio",
+              "position":  2,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "text"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.profiles.address",
+              "name":  "address",
+              "position":  3,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "address"
+              },
+              "nullable":  true
+            }
+          ],
+          "constraints":  [
+            {
+              "id":  "app.profiles.constraint_0",
+              "type":  "CONSTRAINT_TYPE_PRIMARY_KEY",
+              "primaryKey":  {
+                "columns":  [
+                  "user_id"
+                ]
+              }
+            },
+            {
+              "id":  "app.profiles.constraint_1",
+              "type":  "CONSTRAINT_TYPE_FOREIGN_KEY",
+              "foreignKey":  {
+                "columns":  [
+                  "user_id"
+                ],
+                "referencedTable":  {
+                  "id":  "app.users",
+                  "kind":  "OBJECT_KIND_TABLE",
+                  "name":  {
+                    "schema":  "app",
+                    "name":  "users"
+                  }
+                },
+                "referencedColumns":  [
+                  "id"
+                ],
+                "onDelete":  "REFERENTIAL_ACTION_CASCADE",
+                "onUpdate":  "REFERENTIAL_ACTION_NO_ACTION"
+              }
+            }
+          ]
+        },
+        {
+          "id":  "app.orders",
+          "name":  {
+            "schema":  "app",
+            "name":  "orders"
+          },
+          "persistence":  "TABLE_PERSISTENCE_PERMANENT",
+          "columns":  [
+            {
+              "id":  "app.orders.id",
+              "name":  "id",
+              "position":  1,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int8"
+              },
+              "defaultExpr":  {
+                "functionCall":  {
+                  "name":  {
+                    "name":  "nextval"
+                  },
+                  "arguments":  [
+                    {
+                      "literal":  {
+                        "stringValue":  "app.order_number_seq"
+                      },
+                      "nodeId":  "col_expr/default/arg:0"
+                    }
+                  ]
+                },
+                "nodeId":  "col_expr/default"
+              }
+            },
+            {
+              "id":  "app.orders.user_id",
+              "name":  "user_id",
+              "position":  2,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int8"
+              }
+            },
+            {
+              "id":  "app.orders.total",
+              "name":  "total",
+              "position":  3,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "numeric",
+                "modifier":  {
+                  "numeric":  {
+                    "precision":  12,
+                    "scale":  2
+                  }
+                }
+              }
+            },
+            {
+              "id":  "app.orders.placed_at",
+              "name":  "placed_at",
+              "position":  4,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "timestamptz",
+                "modifier":  {
+                  "dateTime":  {
+                    "withTimezone":  true
+                  }
+                }
+              },
+              "defaultExpr":  {
+                "functionCall":  {
+                  "name":  {
+                    "name":  "now"
+                  }
+                },
+                "nodeId":  "col_expr/default"
+              }
+            }
+          ],
+          "constraints":  [
+            {
+              "id":  "app.orders.constraint_0",
+              "type":  "CONSTRAINT_TYPE_PRIMARY_KEY",
+              "primaryKey":  {
+                "columns":  [
+                  "id"
+                ]
+              }
+            },
+            {
+              "id":  "app.orders.constraint_1",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "user_id"
+            },
+            {
+              "id":  "app.orders.constraint_2",
+              "type":  "CONSTRAINT_TYPE_FOREIGN_KEY",
+              "foreignKey":  {
+                "columns":  [
+                  "user_id"
+                ],
+                "referencedTable":  {
+                  "id":  "app.users",
+                  "kind":  "OBJECT_KIND_TABLE",
+                  "name":  {
+                    "schema":  "app",
+                    "name":  "users"
+                  }
+                },
+                "referencedColumns":  [
+                  "id"
+                ],
+                "onDelete":  "REFERENTIAL_ACTION_CASCADE",
+                "onUpdate":  "REFERENTIAL_ACTION_NO_ACTION"
+              }
+            },
+            {
+              "id":  "app.orders.constraint_3",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "total"
+            },
+            {
+              "id":  "app.orders.constraint_4",
+              "type":  "CONSTRAINT_TYPE_CHECK",
+              "check":  {
+                "expression":  {
+                  "operator":  {
+                    "symbol":  ">=",
+                    "operands":  [
+                      {
+                        "columnRef":  {
+                          "column":  "total"
+                        },
+                        "nodeId":  "check_expr/op:0"
+                      },
+                      {
+                        "literal":  {
+                          "intValue":  "0"
+                        },
+                        "nodeId":  "check_expr/op:1"
+                      }
+                    ]
+                  },
+                  "nodeId":  "check_expr"
+                }
+              }
+            },
+            {
+              "id":  "app.orders.constraint_5",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "placed_at"
+            }
+          ],
+          "indexes":  [
+            {
+              "name":  "idx_orders_user",
+              "method":  "btree",
+              "elements":  [
+                {
+                  "column":  "user_id"
+                }
+              ]
+            },
+            {
+              "name":  "idx_orders_recent",
+              "method":  "btree",
+              "elements":  [
+                {
+                  "column":  "placed_at"
+                }
+              ],
+              "predicate":  {
+                "operator":  {
+                  "symbol":  ">",
+                  "operands":  [
+                    {
+                      "columnRef":  {
+                        "column":  "total"
+                      },
+                      "nodeId":  "idx_expr/pred/op:0"
+                    },
+                    {
+                      "literal":  {
+                        "intValue":  "100"
+                      },
+                      "nodeId":  "idx_expr/pred/op:1"
+                    }
+                  ]
+                },
+                "nodeId":  "idx_expr/pred"
+              }
+            }
+          ]
+        },
+        {
+          "id":  "app.roles",
+          "name":  {
+            "schema":  "app",
+            "name":  "roles"
+          },
+          "persistence":  "TABLE_PERSISTENCE_PERMANENT",
+          "columns":  [
+            {
+              "id":  "app.roles.id",
+              "name":  "id",
+              "position":  1,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "bigserial"
+              }
+            },
+            {
+              "id":  "app.roles.name",
+              "name":  "name",
+              "position":  2,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "text"
+              }
+            }
+          ],
+          "constraints":  [
+            {
+              "id":  "app.roles.constraint_0",
+              "type":  "CONSTRAINT_TYPE_PRIMARY_KEY",
+              "primaryKey":  {
+                "columns":  [
+                  "id"
+                ]
+              }
+            },
+            {
+              "id":  "app.roles.constraint_1",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "name"
+            },
+            {
+              "id":  "app.roles.constraint_2",
+              "type":  "CONSTRAINT_TYPE_UNIQUE",
+              "unique":  {
+                "columns":  [
+                  "name"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id":  "app.user_roles",
+          "name":  {
+            "schema":  "app",
+            "name":  "user_roles"
+          },
+          "persistence":  "TABLE_PERSISTENCE_PERMANENT",
+          "columns":  [
+            {
+              "id":  "app.user_roles.user_id",
+              "name":  "user_id",
+              "position":  1,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int8"
+              }
+            },
+            {
+              "id":  "app.user_roles.role_id",
+              "name":  "role_id",
+              "position":  2,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int8"
+              }
+            }
+          ],
+          "constraints":  [
+            {
+              "id":  "app.user_roles.constraint_0",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "user_id"
+            },
+            {
+              "id":  "app.user_roles.constraint_1",
+              "type":  "CONSTRAINT_TYPE_FOREIGN_KEY",
+              "foreignKey":  {
+                "columns":  [
+                  "user_id"
+                ],
+                "referencedTable":  {
+                  "id":  "app.users",
+                  "kind":  "OBJECT_KIND_TABLE",
+                  "name":  {
+                    "schema":  "app",
+                    "name":  "users"
+                  }
+                },
+                "referencedColumns":  [
+                  "id"
+                ],
+                "onDelete":  "REFERENTIAL_ACTION_CASCADE",
+                "onUpdate":  "REFERENTIAL_ACTION_NO_ACTION"
+              }
+            },
+            {
+              "id":  "app.user_roles.constraint_2",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "role_id"
+            },
+            {
+              "id":  "app.user_roles.constraint_3",
+              "type":  "CONSTRAINT_TYPE_FOREIGN_KEY",
+              "foreignKey":  {
+                "columns":  [
+                  "role_id"
+                ],
+                "referencedTable":  {
+                  "id":  "app.roles",
+                  "kind":  "OBJECT_KIND_TABLE",
+                  "name":  {
+                    "schema":  "app",
+                    "name":  "roles"
+                  }
+                },
+                "referencedColumns":  [
+                  "id"
+                ],
+                "onDelete":  "REFERENTIAL_ACTION_CASCADE",
+                "onUpdate":  "REFERENTIAL_ACTION_NO_ACTION"
+              }
+            },
+            {
+              "id":  "app.user_roles.constraint_4",
+              "type":  "CONSTRAINT_TYPE_PRIMARY_KEY",
+              "primaryKey":  {
+                "columns":  [
+                  "user_id",
+                  "role_id"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id":  "app.kitchen_sink",
+          "name":  {
+            "schema":  "app",
+            "name":  "kitchen_sink"
+          },
+          "persistence":  "TABLE_PERSISTENCE_PERMANENT",
+          "columns":  [
+            {
+              "id":  "app.kitchen_sink.c_int2",
+              "name":  "c_int2",
+              "position":  1,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int2"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_int4",
+              "name":  "c_int4",
+              "position":  2,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int4"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_int8",
+              "name":  "c_int8",
+              "position":  3,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int8"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_serial",
+              "name":  "c_serial",
+              "position":  4,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "serial"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_numeric",
+              "name":  "c_numeric",
+              "position":  5,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "numeric",
+                "modifier":  {
+                  "numeric":  {
+                    "precision":  10,
+                    "scale":  2
+                  }
+                }
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_float4",
+              "name":  "c_float4",
+              "position":  6,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "float4"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_float8",
+              "name":  "c_float8",
+              "position":  7,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "float8"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_bool",
+              "name":  "c_bool",
+              "position":  8,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "bool"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_text",
+              "name":  "c_text",
+              "position":  9,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "text"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_varchar",
+              "name":  "c_varchar",
+              "position":  10,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "varchar",
+                "modifier":  {
+                  "text":  {
+                    "length":  50
+                  }
+                }
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_char",
+              "name":  "c_char",
+              "position":  11,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "bpchar",
+                "modifier":  {
+                  "text":  {
+                    "length":  10
+                  }
+                }
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_uuid",
+              "name":  "c_uuid",
+              "position":  12,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "uuid"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_bytea",
+              "name":  "c_bytea",
+              "position":  13,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "bytea"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_jsonb",
+              "name":  "c_jsonb",
+              "position":  14,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "jsonb"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_json",
+              "name":  "c_json",
+              "position":  15,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "json"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_inet",
+              "name":  "c_inet",
+              "position":  16,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "inet"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_date",
+              "name":  "c_date",
+              "position":  17,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "date"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_time",
+              "name":  "c_time",
+              "position":  18,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "time"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_timestamp",
+              "name":  "c_timestamp",
+              "position":  19,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "timestamp"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_timestamptz",
+              "name":  "c_timestamptz",
+              "position":  20,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "timestamptz",
+                "modifier":  {
+                  "dateTime":  {
+                    "withTimezone":  true
+                  }
+                }
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_interval",
+              "name":  "c_interval",
+              "position":  21,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "interval"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_int_array",
+              "name":  "c_int_array",
+              "position":  22,
+              "type":  {
+                "kind":  "TYPE_KIND_ARRAY",
+                "pgName":  "int4",
+                "element":  {
+                  "kind":  "TYPE_KIND_SCALAR",
+                  "pgName":  "int4"
+                },
+                "arrayDimensions":  1
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_text_array",
+              "name":  "c_text_array",
+              "position":  23,
+              "type":  {
+                "kind":  "TYPE_KIND_ARRAY",
+                "pgName":  "text",
+                "element":  {
+                  "kind":  "TYPE_KIND_SCALAR",
+                  "pgName":  "text"
+                },
+                "arrayDimensions":  1
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_status",
+              "name":  "c_status",
+              "position":  24,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "user_status"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_address",
+              "name":  "c_address",
+              "position":  25,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "address"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_email",
+              "name":  "c_email",
+              "position":  26,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "email"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_generated",
+              "name":  "c_generated",
+              "position":  27,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int4"
+              },
+              "nullable":  true,
+              "generated":  {
+                "expression":  {
+                  "operator":  {
+                    "symbol":  "*",
+                    "operands":  [
+                      {
+                        "columnRef":  {
+                          "column":  "c_int4"
+                        },
+                        "nodeId":  "col_expr/gen/op:0"
+                      },
+                      {
+                        "literal":  {
+                          "intValue":  "2"
+                        },
+                        "nodeId":  "col_expr/gen/op:1"
+                      }
+                    ]
+                  },
+                  "nodeId":  "col_expr/gen"
+                }
+              }
+            },
+            {
+              "id":  "app.kitchen_sink.c_identity",
+              "name":  "c_identity",
+              "position":  28,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "int4"
+              },
+              "identity":  {
+                "kind":  "IDENTITY_KIND_BY_DEFAULT"
+              }
+            }
+          ]
+        }
+      ],
+      "views":  [
+        {
+          "id":  "app.active_users",
+          "name":  {
+            "schema":  "app",
+            "name":  "active_users"
+          },
+          "query":  {
+            "select":  {
+              "targets":  [
+                {
+                  "expr":  {
+                    "columnRef":  {
+                      "column":  "id"
+                    },
+                    "nodeId":  "view_query/ss/target:0"
+                  },
+                  "nodeId":  "view_query/ss/target:0"
+                },
+                {
+                  "expr":  {
+                    "columnRef":  {
+                      "column":  "email"
+                    },
+                    "nodeId":  "view_query/ss/target:1"
+                  },
+                  "nodeId":  "view_query/ss/target:1"
+                }
+              ],
+              "from":  [
+                {
+                  "table":  {
+                    "name":  {
+                      "schema":  "app",
+                      "name":  "users"
+                    }
+                  },
+                  "nodeId":  "view_query/ss/from:0"
+                }
+              ],
+              "where":  {
+                "operator":  {
+                  "symbol":  "=",
+                  "operands":  [
+                    {
+                      "columnRef":  {
+                        "column":  "status"
+                      },
+                      "nodeId":  "view_query/ss/where/op:0"
+                    },
+                    {
+                      "literal":  {
+                        "stringValue":  "active"
+                      },
+                      "nodeId":  "view_query/ss/where/op:1"
+                    }
+                  ]
+                },
+                "nodeId":  "view_query/ss/where"
+              },
+              "nodeId":  "view_query/ss"
+            },
+            "nodeId":  "view_query"
+          }
+        }
+      ],
+      "materializedViews":  [
+        {
+          "id":  "app.user_order_counts",
+          "name":  {
+            "schema":  "app",
+            "name":  "user_order_counts"
+          },
+          "query":  {
+            "select":  {
+              "targets":  [
+                {
+                  "expr":  {
+                    "columnRef":  {
+                      "qualifier":  "u",
+                      "column":  "id"
+                    },
+                    "nodeId":  "matview_query/ss/target:0"
+                  },
+                  "nodeId":  "matview_query/ss/target:0"
+                },
+                {
+                  "expr":  {
+                    "functionCall":  {
+                      "name":  {
+                        "name":  "count"
+                      },
+                      "arguments":  [
+                        {
+                          "columnRef":  {
+                            "qualifier":  "o",
+                            "column":  "id"
+                          },
+                          "nodeId":  "matview_query/ss/target:1/arg:0"
+                        }
+                      ]
+                    },
+                    "nodeId":  "matview_query/ss/target:1"
+                  },
+                  "alias":  "order_count",
+                  "nodeId":  "matview_query/ss/target:1"
+                }
+              ],
+              "from":  [
+                {
+                  "join":  {
+                    "type":  "JOIN_TYPE_LEFT",
+                    "left":  {
+                      "table":  {
+                        "name":  {
+                          "schema":  "app",
+                          "name":  "users"
+                        },
+                        "alias":  "u"
+                      },
+                      "nodeId":  "matview_query/ss/from:0/join_left"
+                    },
+                    "right":  {
+                      "table":  {
+                        "name":  {
+                          "schema":  "app",
+                          "name":  "orders"
+                        },
+                        "alias":  "o"
+                      },
+                      "nodeId":  "matview_query/ss/from:0/join_right"
+                    },
+                    "on":  {
+                      "operator":  {
+                        "symbol":  "=",
+                        "operands":  [
+                          {
+                            "columnRef":  {
+                              "qualifier":  "o",
+                              "column":  "user_id"
+                            },
+                            "nodeId":  "matview_query/ss/from:0/join_on/op:0"
+                          },
+                          {
+                            "columnRef":  {
+                              "qualifier":  "u",
+                              "column":  "id"
+                            },
+                            "nodeId":  "matview_query/ss/from:0/join_on/op:1"
+                          }
+                        ]
+                      },
+                      "nodeId":  "matview_query/ss/from:0/join_on"
+                    },
+                    "nodeId":  "matview_query/ss/from:0/join"
+                  },
+                  "nodeId":  "matview_query/ss/from:0"
+                }
+              ],
+              "groupBy":  [
+                {
+                  "columnRef":  {
+                    "qualifier":  "u",
+                    "column":  "id"
+                  },
+                  "nodeId":  "matview_query/ss/groupby:0"
+                }
+              ],
+              "nodeId":  "matview_query/ss"
+            },
+            "nodeId":  "matview_query"
+          },
+          "withData":  true
+        }
+      ],
+      "sequences":  [
+        {
+          "id":  "app.order_number_seq",
+          "name":  {
+            "schema":  "app",
+            "name":  "order_number_seq"
+          }
+        }
+      ],
+      "functions":  [
+        {
+          "id":  "app.touch_updated",
+          "name":  {
+            "schema":  "app",
+            "name":  "touch_updated"
+          },
+          "returns":  {
+            "triggerValue":  true
+          },
+          "language":  "plpgsql",
+          "body":  "\nBEGIN RETURN NEW; END "
+        }
+      ],
+      "triggers":  [
+        {
+          "id":  "app.users_touch",
+          "name":  "users_touch",
+          "table":  {
+            "id":  "app.users",
+            "kind":  "OBJECT_KIND_TABLE",
+            "name":  {
+              "schema":  "app",
+              "name":  "users"
+            }
+          },
+          "timing":  "TRIGGER_TIMING_BEFORE",
+          "events":  [
+            "TRIGGER_EVENT_UPDATE"
+          ],
+          "level":  "TRIGGER_LEVEL_ROW",
+          "function":  {
+            "id":  "app.touch_updated",
+            "kind":  "OBJECT_KIND_FUNCTION",
+            "name":  {
+              "schema":  "app",
+              "name":  "touch_updated"
+            }
+          }
+        }
+      ],
+      "enums":  [
+        {
+          "id":  "app.user_status",
+          "name":  {
+            "schema":  "app",
+            "name":  "user_status"
+          },
+          "labels":  [
+            "active",
+            "inactive",
+            "banned"
+          ]
+        }
+      ],
+      "domains":  [
+        {
+          "id":  "app.email",
+          "name":  {
+            "schema":  "app",
+            "name":  "email"
+          },
+          "baseType":  {
+            "kind":  "TYPE_KIND_SCALAR",
+            "pgName":  "text"
+          },
+          "constraints":  [
+            {
+              "check":  {
+                "operator":  {
+                  "symbol":  "~",
+                  "operands":  [
+                    {
+                      "columnRef":  {
+                        "column":  "value"
+                      },
+                      "nodeId":  "domain_expr/check/op:0"
+                    },
+                    {
+                      "literal":  {
+                        "stringValue":  "@"
+                      },
+                      "nodeId":  "domain_expr/check/op:1"
+                    }
+                  ]
+                },
+                "nodeId":  "domain_expr/check"
+              }
+            }
+          ]
+        }
+      ],
+      "composites":  [
+        {
+          "id":  "app.address",
+          "name":  {
+            "schema":  "app",
+            "name":  "address"
+          },
+          "fields":  [
+            {
+              "name":  "street",
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "text"
+              }
+            },
+            {
+              "name":  "city",
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "text"
+              }
+            },
+            {
+              "name":  "zip",
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "text"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id":  "audit",
+      "name":  "audit",
+      "tables":  [
+        {
+          "id":  "audit.log",
+          "name":  {
+            "schema":  "audit",
+            "name":  "log"
+          },
+          "persistence":  "TABLE_PERSISTENCE_PERMANENT",
+          "columns":  [
+            {
+              "id":  "audit.log.id",
+              "name":  "id",
+              "position":  1,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "bigserial"
+              }
+            },
+            {
+              "id":  "audit.log.table_name",
+              "name":  "table_name",
+              "position":  2,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "text"
+              }
+            },
+            {
+              "id":  "audit.log.changed_at",
+              "name":  "changed_at",
+              "position":  3,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "timestamptz",
+                "modifier":  {
+                  "dateTime":  {
+                    "withTimezone":  true
+                  }
+                }
+              },
+              "defaultExpr":  {
+                "functionCall":  {
+                  "name":  {
+                    "name":  "now"
+                  }
+                },
+                "nodeId":  "col_expr/default"
+              }
+            }
+          ],
+          "constraints":  [
+            {
+              "id":  "audit.log.constraint_0",
+              "type":  "CONSTRAINT_TYPE_PRIMARY_KEY",
+              "primaryKey":  {
+                "columns":  [
+                  "id"
+                ]
+              }
+            },
+            {
+              "id":  "audit.log.constraint_1",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "table_name"
+            },
+            {
+              "id":  "audit.log.constraint_2",
+              "type":  "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn":  "changed_at"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships":  [
+    {
+      "id":  "app.users->app.users:manager_id",
+      "kind":  "RELATIONSHIP_KIND_MANY_TO_ONE",
+      "fromTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "fromColumns":  [
+        "manager_id"
+      ],
+      "toTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "toColumns":  [
+        "id"
+      ],
+      "viaConstraint":  {
+        "id":  "app.users.constraint_4",
+        "kind":  "OBJECT_KIND_CONSTRAINT",
+        "name":  {}
+      },
+      "optional":  true,
+      "suggestedName":  "users"
+    },
+    {
+      "id":  "app.users->app.users:id",
+      "kind":  "RELATIONSHIP_KIND_ONE_TO_MANY",
+      "fromTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "fromColumns":  [
+        "id"
+      ],
+      "toTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "toColumns":  [
+        "manager_id"
+      ],
+      "viaConstraint":  {
+        "id":  "app.users.constraint_4",
+        "kind":  "OBJECT_KIND_CONSTRAINT",
+        "name":  {}
+      },
+      "optional":  true,
+      "suggestedName":  "users"
+    },
+    {
+      "id":  "app.profiles->app.users:user_id",
+      "kind":  "RELATIONSHIP_KIND_ONE_TO_ONE",
+      "fromTable":  {
+        "id":  "app.profiles",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "profiles"
+        }
+      },
+      "fromColumns":  [
+        "user_id"
+      ],
+      "toTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "toColumns":  [
+        "id"
+      ],
+      "viaConstraint":  {
+        "id":  "app.profiles.constraint_1",
+        "kind":  "OBJECT_KIND_CONSTRAINT",
+        "name":  {}
+      },
+      "suggestedName":  "users"
+    },
+    {
+      "id":  "app.users->app.profiles:id",
+      "kind":  "RELATIONSHIP_KIND_ONE_TO_ONE",
+      "fromTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "fromColumns":  [
+        "id"
+      ],
+      "toTable":  {
+        "id":  "app.profiles",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "profiles"
+        }
+      },
+      "toColumns":  [
+        "user_id"
+      ],
+      "viaConstraint":  {
+        "id":  "app.profiles.constraint_1",
+        "kind":  "OBJECT_KIND_CONSTRAINT",
+        "name":  {}
+      },
+      "suggestedName":  "profiles"
+    },
+    {
+      "id":  "app.orders->app.users:user_id",
+      "kind":  "RELATIONSHIP_KIND_MANY_TO_ONE",
+      "fromTable":  {
+        "id":  "app.orders",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "orders"
+        }
+      },
+      "fromColumns":  [
+        "user_id"
+      ],
+      "toTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "toColumns":  [
+        "id"
+      ],
+      "viaConstraint":  {
+        "id":  "app.orders.constraint_2",
+        "kind":  "OBJECT_KIND_CONSTRAINT",
+        "name":  {}
+      },
+      "suggestedName":  "users"
+    },
+    {
+      "id":  "app.users->app.orders:id",
+      "kind":  "RELATIONSHIP_KIND_ONE_TO_MANY",
+      "fromTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "fromColumns":  [
+        "id"
+      ],
+      "toTable":  {
+        "id":  "app.orders",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "orders"
+        }
+      },
+      "toColumns":  [
+        "user_id"
+      ],
+      "viaConstraint":  {
+        "id":  "app.orders.constraint_2",
+        "kind":  "OBJECT_KIND_CONSTRAINT",
+        "name":  {}
+      },
+      "suggestedName":  "orders"
+    },
+    {
+      "id":  "app.users->app.roles:user_id",
+      "kind":  "RELATIONSHIP_KIND_MANY_TO_MANY",
+      "fromTable":  {
+        "id":  "app.users",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "users"
+        }
+      },
+      "fromColumns":  [
+        "id"
+      ],
+      "toTable":  {
+        "id":  "app.roles",
+        "kind":  "OBJECT_KIND_TABLE",
+        "name":  {
+          "schema":  "app",
+          "name":  "roles"
+        }
+      },
+      "toColumns":  [
+        "id"
+      ],
+      "joinTable":  {
+        "table":  {
+          "id":  "app.user_roles",
+          "kind":  "OBJECT_KIND_TABLE",
+          "name":  {
+            "schema":  "app",
+            "name":  "user_roles"
+          }
+        },
+        "fromColumns":  [
+          "user_id"
+        ],
+        "fromConstraint":  {
+          "id":  "app.user_roles.constraint_1",
+          "kind":  "OBJECT_KIND_CONSTRAINT",
+          "name":  {}
+        },
+        "toColumns":  [
+          "role_id"
+        ],
+        "toConstraint":  {
+          "id":  "app.user_roles.constraint_3",
+          "kind":  "OBJECT_KIND_CONSTRAINT",
+          "name":  {}
+        }
+      },
+      "suggestedName":  "roles"
+    }
+  ]
+}

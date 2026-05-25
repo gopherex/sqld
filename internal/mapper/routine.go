@@ -373,15 +373,17 @@ func parseFunctionOptions(opts []*pg.Node) (
 // Returns nil for nil input.
 //
 // Timing bitmask (empirically verified):
-//   BEFORE    = 2   (bit 1)
-//   AFTER     = 0   (no bit set)
-//   INSTEAD_OF = 64  (bit 6)
+//
+//	BEFORE    = 2   (bit 1)
+//	AFTER     = 0   (no bit set)
+//	INSTEAD_OF = 64  (bit 6)
 //
 // Event bitmask:
-//   INSERT   = 4   (bit 2)
-//   DELETE   = 8   (bit 3)
-//   UPDATE   = 16  (bit 4)
-//   TRUNCATE = 32  (bit 5)
+//
+//	INSERT   = 4   (bit 2)
+//	DELETE   = 8   (bit 3)
+//	UPDATE   = 16  (bit 4)
+//	TRUNCATE = 32  (bit 5)
 func MapCreateTrigger(ct *pg.CreateTrigStmt) *irv1.Trigger {
 	if ct == nil {
 		return nil
