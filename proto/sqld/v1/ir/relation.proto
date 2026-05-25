@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package sqld.v1.ir;
+
+import "sqld/v1/ir/common.proto";
+
+option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+
+// ----------------------------------------------------------------------------
+// Derived relationship graph (design fork 1c).
+//
+// Foreign keys on tables remain the lossless source of truth (schema.proto).
+// Relationship edges are derived from them for codegen convenience: ORM
+// associations, ER diagrams, navigation. Tables/columns are referenced by id.
+// ----------------------------------------------------------------------------
+
+enum RelationshipKind {
+  RELATIONSHIP_KIND_UNSPECIFIED = 0;
+  RELATIONSHIP_KIND_ONE_TO_ONE = 1;   // FK columns are unique
+  RELATIONSHIP_KIND_ONE_TO_MANY = 2;  // viewed from the referenced side
+  RELATIONSHIP_KIND_MANY_TO_ONE = 3;  // viewed from the referencing side
+  RELATIONSHIP_KIND_MANY_TO_MANY = 4; // resolved through a join table
+}
+
+// JoinTable describes the link table of a many-to-many relationship.
+message JoinTable {
+  ObjectRef table = 1;
+  repeated string from_columns = 2;   // join-table cols referencing `from`
+  ObjectRef from_constraint = 3;      // FK to the `from` table
+  repeated string to_columns = 4;     // join-table cols referencing `to`
+  ObjectRef to_constraint = 5;        // FK to the `to` table
+}
+
+// Relationship is one directional edge derived from foreign-key metadata.
+message Relationship {
+  string id = 1;
+  RelationshipKind kind = 2;
+
+  // The referencing/owning side.
+  ObjectRef from_table = 3;
+  repeated string from_columns = 4;
+
+  // The referenced/target side.
+  ObjectRef to_table = 5;
+  repeated string to_columns = 6;
+
+  ObjectRef via_constraint = 7; // source FK constraint (empty for many-to-many)
+  JoinTable join_table = 8;     // set only for MANY_TO_MANY
+
+  bool optional = 9;            // true if the FK columns are nullable
+  string suggested_name = 10;   // generator-friendly association name
+
+  Metadata meta = 15;
+}

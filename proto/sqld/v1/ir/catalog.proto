@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package sqld.v1.ir;
+
+import "sqld/v1/ir/common.proto";
+import "sqld/v1/ir/schema.proto";
+import "sqld/v1/ir/routine.proto";
+import "sqld/v1/ir/relation.proto";
+
+option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+
+// ----------------------------------------------------------------------------
+// Root of the IR. A generator plugin consumes a single Catalog message.
+// ----------------------------------------------------------------------------
+
+// Schema is a PostgreSQL namespace and the container for its objects.
+message Schema {
+  string id = 1;   // = name
+  string name = 2;
+  string owner = 3;
+  repeated Table tables = 4;
+  repeated View views = 5;
+  repeated MaterializedView materialized_views = 6;
+  repeated Sequence sequences = 7;
+  repeated Function functions = 8;
+  repeated Procedure procedures = 9;
+  repeated Trigger triggers = 10; // resolved targets of Table.triggers
+  repeated EnumType enums = 11;
+  repeated DomainType domains = 12;
+  repeated CompositeType composites = 13;
+  repeated RangeType ranges = 14;
+  Metadata meta = 20;
+}
+
+// Catalog is the whole database snapshot.
+message Catalog {
+  string name = 1;               // database name
+  string database_version = 2;   // e.g. "PostgreSQL 16.2"
+  string ir_version = 3;         // IR producer version
+  string default_schema = 4;     // usually "public"
+  repeated string search_path = 5;
+
+  repeated Schema schemas = 6;
+
+  // Derived relationship graph spanning all schemas (see relation.proto).
+  repeated Relationship relationships = 7;
+
+  Metadata meta = 15;
+}

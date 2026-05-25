@@ -1,0 +1,223 @@
+syntax = "proto3";
+
+package sqld.v1.ir;
+
+import "sqld/v1/ir/common.proto";
+import "sqld/v1/ir/type.proto";
+import "sqld/v1/ir/expr.proto";
+import "sqld/v1/ir/schema.proto"; // for Index (materialized view indexes)
+
+option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+
+// ----------------------------------------------------------------------------
+// Programmable objects: views, functions, procedures, triggers, and
+// user-defined types. Tables/columns are referenced by ObjectRef (id); the
+// schema.proto import is only for Index (materialized view indexes). schema
+// does not import routine, so the dependency stays acyclic.
+// ----------------------------------------------------------------------------
+
+// --- User-defined types -----------------------------------------------------
+
+message EnumType {
+  string id = 1;
+  QualifiedName name = 2;
+  repeated string labels = 3; // ordered
+  Metadata meta = 15;
+}
+
+message DomainConstraint {
+  string name = 1;
+  Expr check = 2;
+}
+
+message DomainType {
+  string id = 1;
+  QualifiedName name = 2;
+  TypeRef base_type = 3;
+  bool nullable = 4;     // false => NOT NULL
+  Expr default_expr = 5;
+  string collation = 6;
+  repeated DomainConstraint constraints = 7;
+  Metadata meta = 15;
+}
+
+message CompositeField {
+  string name = 1;
+  TypeRef type = 2;
+  string collation = 3;
+}
+
+message CompositeType {
+  string id = 1;
+  QualifiedName name = 2;
+  repeated CompositeField fields = 3;
+  Metadata meta = 15;
+}
+
+message RangeType {
+  string id = 1;
+  QualifiedName name = 2;
+  TypeRef subtype = 3;
+  string subtype_opclass = 4;
+  string collation = 5;
+  string canonical = 6;     // canonical function name
+  string subtype_diff = 7;  // subtype_diff function name
+  string multirange = 8;    // associated multirange type name (PG 14+)
+  Metadata meta = 15;
+}
+
+// --- Views -------------------------------------------------------------------
+
+enum CheckOption {
+  CHECK_OPTION_UNSPECIFIED = 0; // no WITH CHECK OPTION
+  CHECK_OPTION_LOCAL = 1;
+  CHECK_OPTION_CASCADED = 2;
+}
+
+message View {
+  string id = 1;
+  QualifiedName name = 2;
+  repeated string columns = 3; // explicit column list, if given
+  SelectStmt query = 4;
+  CheckOption check_option = 5;
+  bool security_barrier = 6;
+  Metadata meta = 15;
+}
+
+message MaterializedView {
+  string id = 1;
+  QualifiedName name = 2;
+  repeated string columns = 3;
+  SelectStmt query = 4;
+  bool with_data = 5;        // WITH DATA vs WITH NO DATA
+  repeated Index indexes = 6;
+  string tablespace = 7;
+  Metadata meta = 15;
+}
+
+// --- Functions and procedures ------------------------------------------------
+
+enum ArgMode {
+  ARG_MODE_UNSPECIFIED = 0; // IN (default)
+  ARG_MODE_IN = 1;
+  ARG_MODE_OUT = 2;
+  ARG_MODE_INOUT = 3;
+  ARG_MODE_VARIADIC = 4;
+}
+
+message Argument {
+  string name = 1; // may be empty for positional-only
+  TypeRef type = 2;
+  ArgMode mode = 3;
+  Expr default_value = 4; // DEFAULT expr
+}
+
+message SetofType {
+  TypeRef type = 1; // RETURNS SETOF <type>
+}
+
+message TableColumn {
+  string name = 1;
+  TypeRef type = 2;
+}
+
+message TableReturn {
+  repeated TableColumn columns = 1; // RETURNS TABLE(col type, ...)
+}
+
+message ReturnType {
+  oneof kind {
+    TypeRef scalar = 1;
+    SetofType setof = 2;
+    TableReturn table = 3;
+    bool void_value = 4;    // RETURNS void
+    bool trigger_value = 5; // RETURNS trigger
+  }
+}
+
+enum Volatility {
+  VOLATILITY_UNSPECIFIED = 0; // VOLATILE (default)
+  VOLATILITY_VOLATILE = 1;
+  VOLATILITY_STABLE = 2;
+  VOLATILITY_IMMUTABLE = 3;
+}
+
+enum ParallelSafety {
+  PARALLEL_SAFETY_UNSPECIFIED = 0; // UNSAFE (default)
+  PARALLEL_SAFETY_UNSAFE = 1;
+  PARALLEL_SAFETY_RESTRICTED = 2;
+  PARALLEL_SAFETY_SAFE = 3;
+}
+
+enum NullInputBehavior {
+  NULL_INPUT_BEHAVIOR_UNSPECIFIED = 0; // CALLED ON NULL INPUT (default)
+  NULL_INPUT_BEHAVIOR_CALLED = 1;
+  NULL_INPUT_BEHAVIOR_STRICT = 2;      // RETURNS NULL ON NULL INPUT
+}
+
+message Function {
+  string id = 1;
+  QualifiedName name = 2;
+  repeated Argument arguments = 3;
+  ReturnType returns = 4;
+  string language = 5; // sql, plpgsql, c, ...
+  Volatility volatility = 6;
+  NullInputBehavior null_input = 7;
+  bool security_definer = 8; // false => SECURITY INVOKER
+  bool leakproof = 9;
+  ParallelSafety parallel = 10;
+  int32 estimated_cost = 11;
+  int32 estimated_rows = 12;
+  string body = 13;               // routine body source (AS '...')
+  repeated SelectStmt sql_body = 14; // standard SQL-body (BEGIN ATOMIC ...)
+  Metadata meta = 20;
+}
+
+message Procedure {
+  string id = 1;
+  QualifiedName name = 2;
+  repeated Argument arguments = 3;
+  string language = 4;
+  bool security_definer = 5;
+  string body = 6;
+  repeated SelectStmt sql_body = 7;
+  Metadata meta = 15;
+}
+
+// --- Triggers ----------------------------------------------------------------
+
+enum TriggerTiming {
+  TRIGGER_TIMING_UNSPECIFIED = 0;
+  TRIGGER_TIMING_BEFORE = 1;
+  TRIGGER_TIMING_AFTER = 2;
+  TRIGGER_TIMING_INSTEAD_OF = 3;
+}
+
+enum TriggerEvent {
+  TRIGGER_EVENT_UNSPECIFIED = 0;
+  TRIGGER_EVENT_INSERT = 1;
+  TRIGGER_EVENT_UPDATE = 2;
+  TRIGGER_EVENT_DELETE = 3;
+  TRIGGER_EVENT_TRUNCATE = 4;
+}
+
+enum TriggerLevel {
+  TRIGGER_LEVEL_UNSPECIFIED = 0;
+  TRIGGER_LEVEL_ROW = 1;       // FOR EACH ROW
+  TRIGGER_LEVEL_STATEMENT = 2; // FOR EACH STATEMENT
+}
+
+message Trigger {
+  string id = 1;
+  string name = 2;
+  ObjectRef table = 3; // table the trigger is attached to
+  TriggerTiming timing = 4;
+  repeated TriggerEvent events = 5;
+  repeated string update_columns = 6; // UPDATE OF col, ...
+  TriggerLevel level = 7;
+  bool constraint = 8;        // CONSTRAINT TRIGGER
+  Expr when = 9;              // WHEN (condition)
+  ObjectRef function = 10;    // EXECUTE FUNCTION ...
+  repeated string arguments = 11; // function arguments
+  Metadata meta = 15;
+}

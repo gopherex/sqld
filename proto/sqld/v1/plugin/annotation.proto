@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package sqld.v1.plugin;
+
+import "sqld/v1/ir/common.proto";
+
+option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin;pluginv1";
+
+// ----------------------------------------------------------------------------
+// Annotation grammar (plugin -> host).
+//
+// The plugin declares the set of annotations it understands and HOW to parse
+// each one. The host is a generic parser driven by this schema: it never needs
+// plugin-specific code. Parsed results are returned as sqld.v1.ir.AnnotationValue
+// (see ir/common.proto).
+// ----------------------------------------------------------------------------
+
+// AnnotationForm is the shape of an annotation's value part.
+enum AnnotationForm {
+  ANNOTATION_FORM_UNSPECIFIED = 0;
+  ANNOTATION_FORM_FLAG = 1;       // presence only: `@deprecated`
+  ANNOTATION_FORM_SCALAR = 2;     // one typed value: `@name GetUser`, `@ttl 30s`
+  ANNOTATION_FORM_POSITIONAL = 3; // ordered fields: `@fk users id`
+  ANNOTATION_FORM_KEYED = 4;      // key=value pairs: `@cache ttl=30s region=eu`
+  ANNOTATION_FORM_LIST = 5;       // delimited list: `@index a,b,c`
+  ANNOTATION_FORM_FREEFORM = 6;   // remainder captured raw: `@doc any text`
+}
+
+enum AnnotationCardinality {
+  ANNOTATION_CARDINALITY_UNSPECIFIED = 0;
+  ANNOTATION_CARDINALITY_SINGLE = 1;   // at most one per target
+  ANNOTATION_CARDINALITY_REPEATED = 2; // may appear multiple times
+}
+
+// CommentPlacement constrains where the annotation may appear.
+enum CommentPlacement {
+  COMMENT_PLACEMENT_UNSPECIFIED = 0;
+  COMMENT_PLACEMENT_LEADING = 1;    // comment block immediately before object
+  COMMENT_PLACEMENT_TRAILING = 2;   // inline/trailing comment (e.g. on a column)
+  COMMENT_PLACEMENT_COMMENT_ON = 3; // inside COMMENT ON ... IS '...'
+  COMMENT_PLACEMENT_ANY = 4;
+}
+
+// FieldSpec describes one field the host should extract (a positional slot or a
+// named key).
+message FieldSpec {
+  string name = 1;                       // key name / positional label
+  sqld.v1.ir.AnnotationArgType type = 2; // how to coerce the token
+  bool required = 3;
+  repeated string enum_values = 4;       // allowed values when type == ENUM
+  string default = 5;                    // raw default when omitted
+  bool variadic = 6;                     // last positional captures remainder
+  string doc = 7;
+}
+
+// AnnotationValueSpec tells the host how to parse the value part of an
+// annotation into sqld.v1.ir.AnnotationArg values.
+message AnnotationValueSpec {
+  AnnotationForm form = 1;
+
+  // POSITIONAL / KEYED: the expected fields. For KEYED, `name` is the key; for
+  // POSITIONAL, order matters and `name` labels the produced arg.
+  repeated FieldSpec fields = 2;
+
+  // SCALAR: the single value's type.
+  sqld.v1.ir.AnnotationArgType scalar_type = 3;
+
+  // LIST: the element type (its `name` is ignored).
+  FieldSpec element = 4;
+
+  // Separators (sensible defaults applied by the host when empty).
+  string item_separator = 5; // LIST items; default ","
+  string pair_separator = 6; // KEYED pairs; default whitespace
+  string kv_separator = 7;   // KEYED key/value; default "="
+}
+
+// AnnotationDef declares one annotation the plugin understands.
+message AnnotationDef {
+  string name = 1;                                  // e.g. "name", "cache"
+  repeated string aliases = 2;                      // alternate spellings
+  string doc = 3;
+  repeated sqld.v1.ir.AnnotationTargetKind targets = 4; // where it may attach
+  AnnotationCardinality cardinality = 5;
+  CommentPlacement placement = 6;
+  bool required = 7;                                // must be present on target
+  AnnotationValueSpec value = 8;
+}
+
+// AnnotationSchema is the complete grammar a plugin declares. Returned in
+// GetInfoResponse so the host can parse comments before calling Generate.
+message AnnotationSchema {
+  string sigil = 1;                  // marker before the name, e.g. "@"; empty = bare key
+  bool case_insensitive = 2;         // match names ignoring case
+  repeated string comment_styles = 3; // comment syntaxes to scan: "--", "/* */", "#"
+  repeated AnnotationDef annotations = 4;
+}

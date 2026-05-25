@@ -1,0 +1,170 @@
+syntax = "proto3";
+
+package sqld.v1.ir;
+
+import "sqld/v1/ir/common.proto";
+import "sqld/v1/ir/expr.proto";
+
+option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+
+// ----------------------------------------------------------------------------
+// Write statements. SELECT lives in expr.proto (mutually recursive with Expr);
+// these reuse Expr, SelectStmt, FromItem, Values, etc. one-directionally.
+// ----------------------------------------------------------------------------
+
+// Statement is the top-level wrapper for any single DML statement.
+message Statement {
+  oneof statement {
+    SelectStmt select = 1;
+    InsertStmt insert = 2;
+    UpdateStmt update = 3;
+    DeleteStmt delete = 4;
+    MergeStmt merge = 5;
+    // Escape hatch for any statement not structured above (TRUNCATE, COPY,
+    // DDL, transaction control, utility...). Keeps the statement level lossless.
+    RawStatement raw = 6;
+  }
+  Metadata meta = 15;
+  string node_id = 21; // stable host-assigned AST id
+}
+
+// StatementKind is a best-effort classification of a RawStatement.
+enum StatementKind {
+  STATEMENT_KIND_UNSPECIFIED = 0;
+  STATEMENT_KIND_MERGE = 1;     // MERGE not structured into MergeStmt
+  STATEMENT_KIND_TRUNCATE = 2;
+  STATEMENT_KIND_COPY = 3;
+  STATEMENT_KIND_DDL = 4;       // CREATE / ALTER / DROP / ...
+  STATEMENT_KIND_TCL = 5;       // BEGIN / COMMIT / ROLLBACK / SAVEPOINT
+  STATEMENT_KIND_UTILITY = 6;   // VACUUM / ANALYZE / SET / EXPLAIN / ...
+  STATEMENT_KIND_OTHER = 7;
+}
+
+// RawStatement carries a statement the IR does not (yet) model structurally,
+// as raw SQL plus a best-effort kind. Lossless fallback at the statement level.
+message RawStatement {
+  StatementKind kind = 1;
+  string sql = 2;
+}
+
+// Assignment is `column = value` in UPDATE SET / ON CONFLICT DO UPDATE SET.
+message Assignment {
+  repeated string columns = 1; // 1 col, or multi-col (a, b) = (...)
+  Expr value = 2;              // scalar value or row/subquery for multi-col
+  string node_id = 21;         // stable host-assigned AST id
+}
+
+enum OnConflictAction {
+  ON_CONFLICT_ACTION_UNSPECIFIED = 0;
+  ON_CONFLICT_ACTION_DO_NOTHING = 1;
+  ON_CONFLICT_ACTION_DO_UPDATE = 2;
+}
+
+// OnConflict models INSERT ... ON CONFLICT [target] action.
+message OnConflict {
+  repeated string target_columns = 1; // ON CONFLICT (col, ...)
+  string target_constraint = 2;        // ON CONFLICT ON CONSTRAINT name
+  Expr index_predicate = 3;            // partial-index predicate
+  OnConflictAction action = 4;
+  repeated Assignment set = 5;         // DO UPDATE SET ...
+  Expr update_where = 6;               // DO UPDATE ... WHERE ...
+}
+
+message InsertStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+  ObjectRef table = 3;
+  QualifiedName table_name = 4;
+  string alias = 5;
+  repeated string columns = 6; // target column list; empty => all
+  oneof source {
+    Values values = 7;        // VALUES (...), (...)
+    SelectStmt query = 8;     // INSERT ... SELECT
+    bool default_values = 9;  // DEFAULT VALUES
+  }
+  OnConflict on_conflict = 10;
+  repeated SelectTarget returning = 11; // RETURNING ...
+  bool overriding_system = 12;          // OVERRIDING SYSTEM VALUE
+  Metadata meta = 15;
+  string node_id = 21;                  // stable host-assigned AST id
+}
+
+message UpdateStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+  ObjectRef table = 3;
+  QualifiedName table_name = 4;
+  string alias = 5;
+  bool only = 6;                  // UPDATE ONLY t
+  repeated Assignment set = 7;
+  repeated FromItem from = 8;     // UPDATE ... FROM ...
+  Expr where = 9;
+  repeated SelectTarget returning = 10;
+  Metadata meta = 15;
+  string node_id = 21; // stable host-assigned AST id
+}
+
+message DeleteStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+  ObjectRef table = 3;
+  QualifiedName table_name = 4;
+  string alias = 5;
+  bool only = 6;                 // DELETE FROM ONLY t
+  repeated FromItem using = 7;   // USING ...
+  Expr where = 8;
+  repeated SelectTarget returning = 9;
+  Metadata meta = 15;
+  string node_id = 21; // stable host-assigned AST id
+}
+
+// --- MERGE (PostgreSQL 15+) --------------------------------------------------
+
+// MergeStmt is `MERGE INTO target USING source ON cond WHEN ... THEN ...`.
+message MergeStmt {
+  repeated CommonTableExpr with = 1;
+  bool with_recursive = 2;
+  ObjectRef target = 3;
+  QualifiedName target_name = 4;
+  string target_alias = 5;
+  FromItem source = 6;                  // USING <table | subquery | values>
+  Expr on = 7;                          // ON <join condition>
+  repeated MergeWhen whens = 8;
+  repeated SelectTarget returning = 9;  // RETURNING (PG 17+)
+  Metadata meta = 15;
+  string node_id = 21;                  // stable host-assigned AST id
+}
+
+enum MergeMatch {
+  MERGE_MATCH_UNSPECIFIED = 0;
+  MERGE_MATCH_MATCHED = 1;                // WHEN MATCHED
+  MERGE_MATCH_NOT_MATCHED_BY_TARGET = 2;  // WHEN NOT MATCHED [BY TARGET]
+  MERGE_MATCH_NOT_MATCHED_BY_SOURCE = 3;  // WHEN NOT MATCHED BY SOURCE (PG 17+)
+}
+
+// MergeWhen is one WHEN clause with an optional extra `AND` condition.
+message MergeWhen {
+  MergeMatch match = 1;
+  Expr condition = 2; // AND <condition>; unset if none
+  MergeAction action = 3;
+}
+
+enum MergeActionKind {
+  MERGE_ACTION_KIND_UNSPECIFIED = 0;
+  MERGE_ACTION_KIND_INSERT = 1;
+  MERGE_ACTION_KIND_UPDATE = 2;
+  MERGE_ACTION_KIND_DELETE = 3;
+  MERGE_ACTION_KIND_DO_NOTHING = 4;
+}
+
+// MergeAction is the THEN action of a WHEN clause.
+message MergeAction {
+  MergeActionKind kind = 1;
+  repeated Assignment set = 2;        // UPDATE SET ...
+  repeated string insert_columns = 3; // INSERT (cols)
+  oneof insert_values {
+    Values values = 4;                // INSERT ... VALUES (...)
+    bool default_values = 5;          // INSERT DEFAULT VALUES
+  }
+  bool overriding_system = 6;         // OVERRIDING SYSTEM VALUE
+}
