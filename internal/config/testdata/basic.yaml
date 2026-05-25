@@ -1,0 +1,9 @@
+version: "1"
+engine: ENGINE_POSTGRESQL
+sql:
+  - dir: ./schema
+    kind: SQL_KIND_SCHEMA
+plugins:
+  - name: go
+    source: { binary: ./bin/sqld-gen-go }
+    out: ./gen
