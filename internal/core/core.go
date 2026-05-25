@@ -3,19 +3,24 @@
 package core
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/yaroher/sqld/internal/catalog"
 	"github.com/yaroher/sqld/internal/mapper"
 	"github.com/yaroher/sqld/internal/nodeid"
 	"github.com/yaroher/sqld/internal/parse"
+	"github.com/yaroher/sqld/internal/plugin"
 	"github.com/yaroher/sqld/internal/query"
 	"github.com/yaroher/sqld/internal/relate"
 	"github.com/yaroher/sqld/internal/source"
+	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
 )
 
 // Result is the full output of a collection pass.
@@ -24,6 +29,7 @@ type Result struct {
 	Queries     []*pluginv1.Query
 	Migrations  []*pluginv1.Migration
 	Diagnostics *catalog.Diagnostics
+	Units       []source.Unit
 }
 
 // Collect parses the configured SQL + migrations into the IR Catalog.
@@ -126,5 +132,102 @@ func gather(cfg *configv1.Config) (*Result, error) {
 		Queries:     queries,
 		Migrations:  migrations,
 		Diagnostics: diags,
+		Units:       units,
 	}, nil
+}
+
+// Generate runs each configured plugin against the collected IR and writes
+// the generated files to disk.
+//
+// Note: the Enabled field on PluginConfig is currently not consulted — all
+// configured plugins are run. Annotation→Metadata mirroring is deferred;
+// annotations are delivered via GenerateRequest.Annotations only.
+func Generate(cfg *configv1.Config) error {
+	r, err := gather(cfg)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+
+	for _, pc := range cfg.GetPlugins() {
+		runner, err := plugin.Open(pc)
+		if err != nil {
+			return fmt.Errorf("plugin %q: %w", pc.GetName(), err)
+		}
+
+		info, err := runner.GetInfo(ctx)
+		if err != nil {
+			_ = runner.Close()
+			return fmt.Errorf("plugin %q: %w", pc.GetName(), err)
+		}
+
+		// Build annotations best-effort: skip per-unit errors.
+		var anns []*irv1.AnnotationValue
+		if info.GetAnnotationSchema() != nil {
+			for _, u := range r.Units {
+				vs, _ := plugin.Annotate(u.SQL, u.Path, info.GetAnnotationSchema())
+				anns = append(anns, vs...)
+			}
+		}
+
+		req := &pluginv1.GenerateRequest{
+			Catalog:     r.Catalog,
+			Queries:     r.Queries,
+			Migrations:  r.Migrations,
+			Options:     pc.GetOptions(),
+			OutDir:      pc.GetOut(),
+			Annotations: anns,
+			Context: &pluginv1.PluginContext{
+				HostVersion: "dev",
+				Engine:      cfg.GetEngine(),
+				Env:         pc.GetEnv(),
+			},
+		}
+
+		resp, err := runner.Generate(ctx, req)
+		if err != nil {
+			_ = runner.Close()
+			return fmt.Errorf("plugin %q: %w", pc.GetName(), err)
+		}
+
+		// Check for error-severity diagnostics.
+		var diagMsgs []string
+		for _, d := range resp.GetDiagnostics() {
+			if d.GetSeverity() == pluginv1.DiagnosticSeverity_DIAGNOSTIC_SEVERITY_ERROR {
+				diagMsgs = append(diagMsgs, d.GetMessage())
+			}
+		}
+		if len(diagMsgs) > 0 {
+			_ = runner.Close()
+			var errs []error
+			for _, msg := range diagMsgs {
+				errs = append(errs, errors.New(msg))
+			}
+			return fmt.Errorf("plugin %q failed: %w", pc.GetName(), errors.Join(errs...))
+		}
+
+		// Write generated files.
+		for _, f := range resp.GetFiles() {
+			out := filepath.Join(pc.GetOut(), f.GetPath())
+			if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+				_ = runner.Close()
+				return fmt.Errorf("plugin %q: mkdir %q: %w", pc.GetName(), filepath.Dir(out), err)
+			}
+			mode := os.FileMode(0o644)
+			if f.GetExecutable() {
+				mode = 0o755
+			}
+			if err := os.WriteFile(out, f.GetContents(), mode); err != nil {
+				_ = runner.Close()
+				return fmt.Errorf("plugin %q: write %q: %w", pc.GetName(), out, err)
+			}
+		}
+
+		if err := runner.Close(); err != nil {
+			return fmt.Errorf("plugin %q: close: %w", pc.GetName(), err)
+		}
+	}
+
+	return nil
 }
