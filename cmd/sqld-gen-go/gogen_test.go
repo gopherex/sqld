@@ -10,14 +10,21 @@ import (
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
 
+// TestGenerateDynamicQuery tests the new WHERE-aware dynamic builder with
+// named params, @if FLAG annotations, and @orderby LIST annotation.
 func TestGenerateDynamicQuery(t *testing.T) {
-	sql := "SELECT id, email, status FROM app.users WHERE true\n" +
-		"/*@if name*/ AND email = $1 /*@endif*/\n" +
-		"/*@slice ids*/ AND id = ANY($2) /*@endif*/\n" +
-		"/*@orderby allow=created_at,email*/"
+	// Query.Sql as produced by the host: $N placeholders, named parameters,
+	// trailing "-- @if" FLAG comments on optional condition lines, and a
+	// standalone "-- @orderby ..." comment line.
+	sql := "SELECT id, email, status FROM app.users\n" +
+		"WHERE\n" +
+		"      email = $1     -- @if\n" +
+		"  AND id = ANY($2)   -- @if\n" +
+		"-- @orderby created_at, email"
 
-	// offNth finds the start/end of the n-th occurrence (0-based) of sub in sql.
-	offNth := func(sub string, n int) (uint32, uint32) {
+	// offNth finds the start/end byte offsets of the n-th occurrence (0-based)
+	// of sub in sql.
+	offNth := func(sub string, n int) (uint64, uint64) {
 		idx := 0
 		for i := 0; i <= n; i++ {
 			j := strings.Index(sql[idx:], sub)
@@ -26,37 +33,50 @@ func TestGenerateDynamicQuery(t *testing.T) {
 			}
 			if i == n {
 				start := idx + j
-				return uint32(start), uint32(start + len(sub))
+				return uint64(start), uint64(start + len(sub))
 			}
 			idx += j + len(sub)
 		}
 		panic("unreachable")
 	}
-	off := func(sub string) (uint32, uint32) { return offNth(sub, 0) }
+	off := func(sub string) (uint64, uint64) { return offNth(sub, 0) }
 
-	mk := func(name, argName, argVal string, s, e uint32) *irv1.AnnotationValue {
+	// mkFlag creates a FLAG annotation (no args).
+	mkFlag := func(name string, s, e uint64) *irv1.AnnotationValue {
+		return &irv1.AnnotationValue{
+			Name: name,
+			Target: &irv1.AnnotationTargetRef{
+				Kind:      irv1.AnnotationTargetKind_ANNOTATION_TARGET_KIND_QUERY,
+				QueryName: "SearchUsers",
+				Source:    &irv1.SourceSpan{StartOffset: s, EndOffset: e},
+			},
+		}
+	}
+
+	// mkList creates a LIST annotation with multiple string-value args (one per column).
+	mkList := func(name string, s, e uint64, cols ...string) *irv1.AnnotationValue {
 		av := &irv1.AnnotationValue{
 			Name: name,
 			Target: &irv1.AnnotationTargetRef{
 				Kind:      irv1.AnnotationTargetKind_ANNOTATION_TARGET_KIND_QUERY,
 				QueryName: "SearchUsers",
-				Source:    &irv1.SourceSpan{StartOffset: uint64(s), EndOffset: uint64(e)},
+				Source:    &irv1.SourceSpan{StartOffset: s, EndOffset: e},
 			},
 		}
-		if argName != "" {
-			av.Args = []*irv1.AnnotationArg{{
-				Name:  argName,
-				Value: &irv1.AnnotationArg_StringValue{StringValue: argVal},
-			}}
+		for i, col := range cols {
+			av.Args = append(av.Args, &irv1.AnnotationArg{
+				Index: uint32(i),
+				Value: &irv1.AnnotationArg_StringValue{StringValue: col},
+				Raw:   col,
+			})
 		}
 		return av
 	}
 
-	ifS, ifE := off("/*@if name*/")
-	endif1S, endif1E := offNth("/*@endif*/", 0)
-	sliceS, sliceE := off("/*@slice ids*/")
-	endif2S, endif2E := offNth("/*@endif*/", 1)
-	orderbyS, orderbyE := off("/*@orderby allow=created_at,email*/")
+	// Locate the two "-- @if" comments (one per condition line).
+	if1S, if1E := off("-- @if")
+	if2S, if2E := offNth("-- @if", 1)
+	orderbyS, orderbyE := off("-- @orderby created_at, email")
 
 	req := &pluginv1.GenerateRequest{
 		Queries: []*pluginv1.Query{{
@@ -64,8 +84,8 @@ func TestGenerateDynamicQuery(t *testing.T) {
 			Sql:     sql,
 			Command: pluginv1.QueryCommand_QUERY_COMMAND_MANY,
 			Parameters: []*pluginv1.QueryParameter{
-				{Number: 1, Type: &irv1.TypeRef{PgName: "text"}},
-				{Number: 2, Type: &irv1.TypeRef{PgName: "int8"}},
+				{Number: 1, Name: "email", Type: &irv1.TypeRef{PgName: "text"}},
+				{Number: 2, Name: "ids", Type: &irv1.TypeRef{PgName: "int8"}},
 			},
 			Columns: []*pluginv1.QueryColumn{
 				{Name: "id", Type: &irv1.TypeRef{PgName: "int8"}},
@@ -74,11 +94,9 @@ func TestGenerateDynamicQuery(t *testing.T) {
 			},
 		}},
 		Annotations: []*irv1.AnnotationValue{
-			mk("if", "condition", "name", ifS, ifE),
-			mk("endif", "", "", endif1S, endif1E),
-			mk("slice", "param", "ids", sliceS, sliceE),
-			mk("endif", "", "", endif2S, endif2E),
-			mk("orderby", "allow", "created_at,email", orderbyS, orderbyE),
+			mkFlag("if", if1S, if1E),
+			mkFlag("if", if2S, if2E),
+			mkList("orderby", orderbyS, orderbyE, "created_at", "email"),
 		},
 	}
 
@@ -86,6 +104,7 @@ func TestGenerateDynamicQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var q string
 	for _, f := range resp.GetFiles() {
 		if f.GetPath() == "queries.go" {
@@ -96,94 +115,51 @@ func TestGenerateDynamicQuery(t *testing.T) {
 		t.Fatal("queries.go not found in response")
 	}
 
+	// ---- Positive assertions ----
+	// Note: gofmt aligns struct fields so we check field names and types
+	// separately rather than requiring exact spacing.
 	for _, want := range []string{
-		"SearchUsersParams",
-		"Name",
+		// Typed OrderBy enum for this query.
+		"type SearchUsersOrderBy string",
+		"SearchUsersOrderByCreatedAt",
+		"SearchUsersOrderByEmail",
+		// Shared direction type.
+		"type OrderDir string",
+		"OrderAsc",
+		"OrderDesc",
+		// Params struct fields (names).
+		"type SearchUsersParams struct",
+		"Email",
 		"*string",
 		"Ids",
 		"[]int64",
 		"OrderBy",
-		"string",
-		"arg.Name != nil",
-		"len(arg.Ids) > 0",
-		"ANY($%d)",
-		"invalid order by",
-		// Conditional fragments MUST carry a single leading space so the
-		// assembled SQL is valid (e.g. "WHERE true AND email = $1", not "trueAND").
-		` AND email = $%d`,
-		` AND id = ANY($%d)`,
+		"SearchUsersOrderBy",
+		// WHERE-aware builder.
+		"var conds []string",
+		`strings.Join(conds, " AND ")`,
+		`b.WriteString(" WHERE " + `,
+		// ORDER BY block.
+		`ORDER BY %s %s`,
 	} {
 		if !strings.Contains(q, want) {
 			t.Fatalf("missing %q in:\n%s", want, q)
 		}
 	}
 
-	// Guard against the original bug: no concatenation without a separating space.
+	// ---- Negative assertions ----
 	for _, bad := range []string{
-		`"AND email = $%d"`,   // fragment with no leading space
-		`"AND id = ANY($%d)"`, // fragment with no leading space
-		"trueAND",             // the malformed-SQL signature
+		"WHERE true",
 	} {
 		if strings.Contains(q, bad) {
-			t.Fatalf("found malformed (no-space) fragment %q in:\n%s", bad, q)
+			t.Fatalf("found disallowed %q in:\n%s", bad, q)
 		}
 	}
 
-	// Each conditional Fprintf format string must begin with a space.
-	for _, line := range strings.Split(q, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "fmt.Fprintf(&b, ") {
-			continue
-		}
-		// Extract the quoted format string (first arg after &b, ).
-		rest := strings.TrimPrefix(trimmed, "fmt.Fprintf(&b, ")
-		if !strings.HasPrefix(rest, `" `) {
-			t.Fatalf("Fprintf format string does not start with a space: %q", line)
-		}
-	}
-
+	// ---- Valid Go ----
 	if _, err := format.Source([]byte(q)); err != nil {
 		t.Fatalf("invalid Go: %v\n%s", err, q)
 	}
-
-	// STRONGER: replicate the runtime assembly for this example and assert the
-	// produced SQL is well-formed (no "trueAND", single spaces between fragments).
-	assembled := assembleSearchUsersSQL(strPtr("alice"), []int64{1, 2})
-	wantSQL := "SELECT id, email, status FROM app.users WHERE true AND email = $1 AND id = ANY($2)"
-	if normalizeSpaces(assembled) != wantSQL {
-		t.Fatalf("assembled SQL = %q; want %q", normalizeSpaces(assembled), wantSQL)
-	}
-	if strings.Contains(assembled, "trueAND") {
-		t.Fatalf("assembled SQL contains 'trueAND': %q", assembled)
-	}
-	if strings.Contains(assembled, "  ") {
-		t.Fatalf("assembled SQL contains a double space: %q", assembled)
-	}
-}
-
-// assembleSearchUsersSQL replicates the runtime SQL assembly that the generated
-// SearchUsers method performs, mirroring the exact WriteString/Fprintf calls so
-// we can assert the assembled SQL is well-formed without running generated code.
-func assembleSearchUsersSQL(name *string, ids []int64) string {
-	var b strings.Builder
-	var args []any
-	b.WriteString("SELECT id, email, status FROM app.users WHERE true")
-	if name != nil {
-		args = append(args, *name)
-		fmt.Fprintf(&b, " AND email = $%d", len(args))
-	}
-	if len(ids) > 0 {
-		args = append(args, ids)
-		fmt.Fprintf(&b, " AND id = ANY($%d)", len(args))
-	}
-	return b.String()
-}
-
-func strPtr(s string) *string { return &s }
-
-// normalizeSpaces collapses runs of whitespace to single spaces and trims ends.
-func normalizeSpaces(s string) string {
-	return strings.Join(strings.Fields(s), " ")
 }
 
 func keys(m map[string]string) []string {
@@ -253,6 +229,40 @@ func TestInfoResponse(t *testing.T) {
 	if len(info.GetSupportedEngines()) == 0 {
 		t.Error("Info().SupportedEngines is empty")
 	}
+	// Verify new annotation schema: @if (FLAG) and @orderby (LIST).
+	schema := info.GetAnnotationSchema()
+	if schema == nil {
+		t.Fatal("AnnotationSchema is nil")
+	}
+	annsByName := map[string]*pluginv1.AnnotationDef{}
+	for _, a := range schema.GetAnnotations() {
+		annsByName[a.GetName()] = a
+	}
+	ifAnn, ok := annsByName["if"]
+	if !ok {
+		t.Fatal("missing @if annotation definition")
+	}
+	if ifAnn.GetValue().GetForm() != pluginv1.AnnotationForm_ANNOTATION_FORM_FLAG {
+		t.Errorf("@if form = %v; want FLAG", ifAnn.GetValue().GetForm())
+	}
+	obAnn, ok := annsByName["orderby"]
+	if !ok {
+		t.Fatal("missing @orderby annotation definition")
+	}
+	if obAnn.GetValue().GetForm() != pluginv1.AnnotationForm_ANNOTATION_FORM_LIST {
+		t.Errorf("@orderby form = %v; want LIST", obAnn.GetValue().GetForm())
+	}
+	if obAnn.GetValue().GetElement() == nil {
+		t.Error("@orderby element spec is nil")
+	} else if obAnn.GetValue().GetElement().GetType() != irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT {
+		t.Errorf("@orderby element type = %v; want IDENT", obAnn.GetValue().GetElement().GetType())
+	}
+	// Old annotations (endif, slice) must NOT be present.
+	for _, badName := range []string{"endif", "slice"} {
+		if _, found := annsByName[badName]; found {
+			t.Errorf("old annotation @%s should not be present in new schema", badName)
+		}
+	}
 }
 
 func TestGenerateNoQueries(t *testing.T) {
@@ -311,3 +321,14 @@ func TestPackageFromOutDir(t *testing.T) {
 		}
 	}
 }
+
+// strPtr is a helper to make a *string from a literal.
+func strPtr(s string) *string { return &s }
+
+// normalizeSpaces collapses runs of whitespace to single spaces and trims ends.
+func normalizeSpaces(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// Ensure fmt is used (suppress import-not-used if a test is removed).
+var _ = fmt.Sprintf
