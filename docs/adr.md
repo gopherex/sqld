@@ -37,6 +37,7 @@ The companion design doc with full rationale and examples lives at
 - [ADR-0025 — Go module path & go_package alignment](#adr-0025)
 - [ADR-0026 — Statement-level losslessness: MERGE + RawStatement](#adr-0026)
 - [ADR-0027 — Core engine implemented; plugin transport is stdio-framed protobuf](#adr-0027)
+- [ADR-0028 — Dynamic queries implemented (@if/@slice/@orderby → runtime builder)](#adr-0028)
 - [Semantics reference](#semantics-reference)
 
 ---
@@ -562,6 +563,43 @@ plan, subagent-driven). `Collect(cfg) (*irv1.Catalog, error)` and
 - Annotation→`Metadata` mirroring is deferred; parsed annotations are delivered via `GenerateRequest.annotations` only.
 - Structured `MERGE` maps to `RawStatement{kind=MERGE}`; advanced DDL maps to `RawStatement{kind=DDL}` (the `Catalog` is the post-DDL snapshot).
 - `cmd/` binaries and `pkg/migrate` not yet built (ADR-0023/0024).
+
+---
+
+<a id="adr-0028"></a>
+## ADR-0028 — Dynamic queries implemented (@if/@slice/@orderby → runtime builder)
+
+**Status:** accepted (implemented)
+
+**Context:** The headline feature vs sqlc (ADR-0020) — dynamic queries (optional
+filters, variable IN-lists, runtime ORDER BY) — was only foundation (node_id,
+annotation model). It is now implemented end-to-end through the real pipeline.
+
+**Decision / outcome:**
+- **Directive grammar** (block or line comments in a named query's SQL):
+  `/*@if cond*/ ... /*@endif*/` (optional fragment guarded by an optional param),
+  `/*@slice param*/ ... /*@endif*/` (fragment whose `$N` param is a slice,
+  included when non-empty), `/*@orderby allow=col,col*/` (runtime ORDER BY from a
+  schema-derived allowlist). The base SQL (comments ignored by libpg_query) stays
+  valid, so column/param inference works and the result shape is fixed.
+- **Host parses, plugin interprets** (per ADR-0016/0020): `sqld-gen-go` declares
+  these directives in its `AnnotationSchema` (`GetInfo`). The host's `Annotate`
+  scans `--` and `/* */` comments, records byte offsets within each query's SQL,
+  and binds every `AnnotationValue` to its query (`Target.QueryName`). The plugin
+  pairs opens/closes by offset, slices fragments out of `Query.Sql`, maps each
+  `$N` to its inferred `QueryParameter` type, and emits a runtime builder.
+- **Generated Go**: a `<Name>Params` struct (optional `@if` → `*T` pointer,
+  `@slice` → `[]T`, `@orderby` → `OrderBy string`), and a method that assembles
+  parameterized SQL with `strings.Builder`, **omitting absent clauses entirely**
+  (not `OR NULL`), **renumbering `$N` placeholders** in append order, validating
+  the sort column against the allowlist (no injection). Fixed typed result row.
+
+**Consequences:** Typed dynamic queries — sqlc's blocking gap — work end-to-end
+(`example/queries/search.sql` → `SearchUsers`). Fragment boundaries are space-
+separated (regression-tested against the `trueAND` bug). Known gap: domain/enum
+params render as `*any` until UDT→Go typing lands (the type is correct, just
+opaque). Multi-statement/nested-region edge cases beyond one `$N` per region are
+best-effort.
 
 ---
 
