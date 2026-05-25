@@ -32,3 +32,8 @@ go.work.sum
 # .vscode/
 bin
 .idea
+
+# Built binaries (use `make build` -> bin/)
+/sqld
+/sqld-gen-go
+/sqld-migrate
