@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/yaroher/sqld/internal/catalog"
@@ -200,6 +201,30 @@ func collectParamsFromSimpleSelect(ss *irv1.SimpleSelect, paramMap map[uint32]*p
 	for _, d := range ss.GetDistinctOn() {
 		walkExpr(d, paramMap)
 	}
+	// Walk FROM items: collect params from JOIN ON conditions and subqueries.
+	collectParamsFromFromItems(ss.GetFrom(), paramMap)
+}
+
+// collectParamsFromFromItems walks a FROM clause recursively to collect params
+// from JOIN ON conditions, FROM-subqueries, and FROM-functions.
+func collectParamsFromFromItems(from []*irv1.FromItem, paramMap map[uint32]*pluginv1.QueryParameter) {
+	for _, fi := range from {
+		if fi == nil {
+			continue
+		}
+		if jc := fi.GetJoin(); jc != nil {
+			// Walk the ON condition.
+			walkExpr(jc.GetOn(), paramMap)
+			// Recurse into both join sides.
+			collectParamsFromFromItems([]*irv1.FromItem{jc.GetLeft(), jc.GetRight()}, paramMap)
+		}
+		if sq := fi.GetSubquery(); sq != nil {
+			collectParamsFromSelect(sq.GetQuery(), paramMap)
+		}
+		if fn := fi.GetFunction(); fn != nil {
+			walkExpr(fn.GetCall(), paramMap)
+		}
+	}
 }
 
 func collectParamsFromExprs(e *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter) {
@@ -343,6 +368,32 @@ func inferParamTypesInSelect(sel *irv1.SelectStmt, paramMap map[uint32]*pluginv1
 			inferParamTypesInExpr(g, paramMap, aliasMap, catIdx)
 		}
 		inferParamTypesInExpr(ss.GetHaving(), paramMap, aliasMap, catIdx)
+		// Walk FROM items for JOIN ON conditions and subqueries.
+		inferParamTypesInFromItems(ss.GetFrom(), paramMap, aliasMap, catIdx)
+	}
+	if so := sel.GetSetOperation(); so != nil {
+		inferParamTypesInSelect(so.GetLeft(), paramMap, aliasMap, catIdx)
+		inferParamTypesInSelect(so.GetRight(), paramMap, aliasMap, catIdx)
+	}
+}
+
+// inferParamTypesInFromItems walks FROM items to infer param types from JOIN ON
+// conditions and FROM-subqueries.
+func inferParamTypesInFromItems(from []*irv1.FromItem, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
+	for _, fi := range from {
+		if fi == nil {
+			continue
+		}
+		if jc := fi.GetJoin(); jc != nil {
+			inferParamTypesInExpr(jc.GetOn(), paramMap, aliasMap, catIdx)
+			inferParamTypesInFromItems([]*irv1.FromItem{jc.GetLeft(), jc.GetRight()}, paramMap, aliasMap, catIdx)
+		}
+		if sq := fi.GetSubquery(); sq != nil {
+			inferParamTypesInSelect(sq.GetQuery(), paramMap, aliasMap, catIdx)
+		}
+		if fn := fi.GetFunction(); fn != nil {
+			inferParamTypesInExpr(fn.GetCall(), paramMap, aliasMap, catIdx)
+		}
 	}
 }
 
@@ -460,9 +511,15 @@ func resolveColumnRef(cr *irv1.ColumnRef, aliasMap map[string]*irv1.Table, catId
 		}
 	}
 
-	// Last resort: search all tables.
-	for _, tbl := range catIdx {
-		col := catIdx.lookupColumn(tbl, colName)
+	// Last resort: search all tables in stable (sorted) order to ensure
+	// deterministic resolution when the column name is ambiguous.
+	tableNames := make([]string, 0, len(catIdx))
+	for name := range catIdx {
+		tableNames = append(tableNames, name)
+	}
+	sort.Strings(tableNames)
+	for _, name := range tableNames {
+		col := catIdx.lookupColumn(catIdx[name], colName)
 		if col != nil {
 			return col
 		}
@@ -504,13 +561,29 @@ func buildAliasMap(from []*irv1.FromItem, catIdx catalogIndex) map[string]*irv1.
 }
 
 // collectJoinTables appends tables found in JOIN clauses to the provided slice.
+// For each join side that is a TableRef it resolves and appends the table;
+// for nested joins it recurses so that arbitrarily-deep join trees are handled.
 func collectJoinTables(from []*irv1.FromItem, catIdx catalogIndex, out []*irv1.Table) []*irv1.Table {
 	for _, fi := range from {
 		if fi == nil {
 			continue
 		}
 		if jc := fi.GetJoin(); jc != nil {
-			out = collectJoinTables([]*irv1.FromItem{jc.GetLeft(), jc.GetRight()}, catIdx, out)
+			// Resolve left and right sides as concrete tables when possible.
+			for _, side := range []*irv1.FromItem{jc.GetLeft(), jc.GetRight()} {
+				if side == nil {
+					continue
+				}
+				if side.GetJoin() != nil {
+					// Nested join — recurse.
+					out = collectJoinTables([]*irv1.FromItem{side}, catIdx, out)
+				} else {
+					// TableRef, SubqueryRef, etc.
+					if tbl := resolveFromItemTable(side, catIdx); tbl != nil {
+						out = append(out, tbl)
+					}
+				}
+			}
 		}
 	}
 	return out
