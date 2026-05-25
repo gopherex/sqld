@@ -4,6 +4,8 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -131,4 +133,54 @@ type SetUserStatusParams struct {
 func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (int64, error) {
 	tag, err := q.db.Exec(ctx, setUserStatusSQL, arg.Arg1, arg.Arg2)
 	return tag.RowsAffected(), err
+}
+
+var searchUsersOrderBy = map[string]string{"created_at": "created_at", "email": "email"}
+
+type SearchUsersParams struct {
+	Name    *any
+	Ids     []int64
+	OrderBy string
+}
+
+type SearchUsersRow struct {
+	ID     int64
+	Email  any
+	Status any
+}
+
+func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]SearchUsersRow, error) {
+	var b strings.Builder
+	var args []any
+	b.WriteString("SELECT id, email, status FROM app.users\nWHERE true")
+	if arg.Name != nil {
+		args = append(args, *arg.Name)
+		fmt.Fprintf(&b, " AND email = $%d", len(args))
+	}
+	if len(arg.Ids) > 0 {
+		args = append(args, arg.Ids)
+		fmt.Fprintf(&b, " AND id = ANY($%d)", len(args))
+	}
+	if arg.OrderBy != "" {
+		col, ok := searchUsersOrderBy[arg.OrderBy]
+		if !ok {
+			return nil, fmt.Errorf("invalid order by: %s", arg.OrderBy)
+		}
+		fmt.Fprintf(&b, " ORDER BY %s", col)
+	}
+	b.WriteString(";")
+	rows, err := q.db.Query(ctx, b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchUsersRow
+	for rows.Next() {
+		var i SearchUsersRow
+		if err := rows.Scan(&i.ID, &i.Email, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	return items, rows.Err()
 }
