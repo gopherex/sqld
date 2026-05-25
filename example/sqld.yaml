@@ -2,9 +2,8 @@ version: "1"
 engine: postgresql
 options:
   defaultSchema: public
-sql:
+queries:
   - dir: example/queries
-    kind: query
 migrations:
   - dir: example/migrations
 plugins:

@@ -61,15 +61,12 @@ func Gather(cfg *config.Config) (*Result, error) {
 		return nil, fmt.Errorf("source.Resolve: %w", err)
 	}
 
-	// Step 2: split units by kind, build schemaStmts.
-	var schemaUnits []source.Unit
+	// Step 2: split units by kind.
 	var migrationUpUnits []source.Unit
 	var queryUnits []source.Unit
 
 	for _, u := range units {
 		switch u.Kind {
-		case source.KindSchema:
-			schemaUnits = append(schemaUnits, u)
 		case source.KindMigrationUp:
 			migrationUpUnits = append(migrationUpUnits, u)
 		case source.KindQuery:
@@ -77,15 +74,8 @@ func Gather(cfg *config.Config) (*Result, error) {
 		}
 	}
 
-	// Build schemaStmts: schema units first, then migration-up units.
+	// Build schemaStmts from migration-up units (applied in version order).
 	var schemaStmts []parse.Stmt
-	for _, u := range schemaUnits {
-		stmts, err := parse.Statements(u.SQL)
-		if err != nil {
-			return nil, fmt.Errorf("parse schema %q: %w", u.Path, err)
-		}
-		schemaStmts = append(schemaStmts, stmts...)
-	}
 	for _, u := range migrationUpUnits {
 		stmts, err := parse.Statements(u.SQL)
 		if err != nil {

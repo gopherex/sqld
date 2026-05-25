@@ -18,20 +18,26 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+// writeMigrations writes a single 0001.sql migration file into a temp dir and
+// returns the directory path.
+func writeMigrations(t *testing.T, sql string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "0001.sql"), sql)
+	return dir
+}
+
 func tempProject(t *testing.T) *config.Config {
 	t.Helper()
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "schema", "001.sql"), `
+	migDir := writeMigrations(t, `
 		CREATE TABLE users(id bigint primary key, email text not null);
 		CREATE TABLE orders(id bigint primary key, user_id bigint not null references users(id));
 	`)
-	writeFile(t, filepath.Join(root, "queries", "q.sql"),
-		"-- name: GetUser :one\nSELECT id, email FROM users WHERE id = $1;\n")
 	return &config.Config{
-		Engine: config.EnginePostgreSQL,
-		SQL: []config.SQLSource{
-			{Dir: filepath.Join(root, "schema"), Kind: config.SQLSchema},
-			{Dir: filepath.Join(root, "queries"), Kind: config.SQLQuery},
+		Engine:     config.EnginePostgreSQL,
+		Migrations: []config.MigrationSource{{Dir: migDir}},
+		Queries: []config.Source{
+			{Inline: "-- name: GetUser :one\nSELECT id, email FROM users WHERE id = $1;\n"},
 		},
 	}
 }

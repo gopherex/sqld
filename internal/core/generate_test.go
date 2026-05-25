@@ -10,10 +10,8 @@ import (
 )
 
 func TestGenerateWritesFiles(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "schema", "001.sql"),
-		"CREATE TABLE users(id bigint primary key, email text not null);")
-	outDir := filepath.Join(root, "gen")
+	migDir := writeMigrations(t, "CREATE TABLE users(id bigint primary key, email text not null);")
+	outDir := filepath.Join(t.TempDir(), "gen")
 
 	// build the fake plugin binary
 	bin := filepath.Join(t.TempDir(), "fakeplugin")
@@ -24,11 +22,8 @@ func TestGenerateWritesFiles(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Engine: config.EnginePostgreSQL,
-		SQL: []config.SQLSource{{
-			Dir:  filepath.Join(root, "schema"),
-			Kind: config.SQLSchema,
-		}},
+		Engine:     config.EnginePostgreSQL,
+		Migrations: []config.MigrationSource{{Dir: migDir}},
 		Plugins: []config.PluginConfig{{
 			Name:   "fake",
 			Binary: bin,

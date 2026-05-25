@@ -42,9 +42,9 @@ func (cfg *Config) Validate() error {
 		cfg.Options.DefaultSchema = "public"
 	}
 
-	// SQL sources.
-	for i := range cfg.SQL {
-		s := &cfg.SQL[i]
+	// Query sources.
+	for i := range cfg.Queries {
+		s := &cfg.Queries[i]
 		// Exactly one source field must be set.
 		set := 0
 		if s.File != "" {
@@ -57,14 +57,7 @@ func (cfg *Config) Validate() error {
 			set++
 		}
 		if set != 1 {
-			return fmt.Errorf("sql[%d]: set exactly one of file|dir|inline", i)
-		}
-		// Kind default.
-		if s.Kind == "" {
-			s.Kind = SQLSchema
-		}
-		if s.Kind != SQLSchema && s.Kind != SQLQuery {
-			return fmt.Errorf("sql[%d]: kind must be %q or %q, got %q", i, SQLSchema, SQLQuery, s.Kind)
+			return fmt.Errorf("queries[%d]: set exactly one of file|dir|inline", i)
 		}
 		// Glob default for dir sources.
 		if s.Dir != "" && s.Glob == "" {

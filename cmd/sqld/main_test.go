@@ -2,18 +2,25 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-const testConfigYAML = `sql:
-  - inline: "CREATE TABLE users(id bigint primary key, email text not null);"
-    kind: schema
-`
-
 func TestCollectCommand(t *testing.T) {
+	// Write a temp migrations dir with the schema.
+	migDir := t.TempDir()
+	migFile := filepath.Join(migDir, "0001.sql")
+	if err := os.WriteFile(migFile, []byte("CREATE TABLE users(id bigint primary key, email text not null);"), 0o644); err != nil {
+		t.Fatalf("write migration: %v", err)
+	}
+
+	testConfigYAML := fmt.Sprintf(`migrations:
+  - dir: %q
+`, migDir)
+
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "sqld.yaml")
 	if err := os.WriteFile(cfgPath, []byte(testConfigYAML), 0o644); err != nil {
