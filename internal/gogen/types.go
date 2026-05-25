@@ -29,11 +29,11 @@ func goType(t *irv1.TypeRef, nullable bool) (goExpr string, imports []string) {
 // scalarGoType maps a PostgreSQL scalar type name to its Go expression.
 func scalarGoType(pgName string) (string, []string) {
 	switch pgName {
-	case "int2":
+	case "int2", "smallserial":
 		return "int16", nil
-	case "int4":
+	case "int4", "serial":
 		return "int32", nil
-	case "int8":
+	case "int8", "bigserial":
 		return "int64", nil
 	case "bool":
 		return "bool", nil
