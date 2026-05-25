@@ -17,6 +17,6 @@ func main() {
 	defer pool.Close()
 
 	q := db.New(pool)
-	_, _ = q.GetAuthor(ctx, 1)
-	_, _ = q.ListAuthors(ctx)
+	_, _ = q.GetUser(ctx, 1)
+	_, _ = q.ListActiveUsers(ctx)
 }

@@ -1,10 +1,12 @@
 version: "1"
 engine: ENGINE_POSTGRESQL
+options:
+  default_schema: public
 sql:
-  - file: example/schema.sql
-    kind: SQL_KIND_SCHEMA
-  - file: example/query.sql
+  - dir: example/queries
     kind: SQL_KIND_QUERY
+migrations:
+  - dir: example/migrations
 plugins:
   - name: go
     source:

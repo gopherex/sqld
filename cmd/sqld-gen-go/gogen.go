@@ -305,7 +305,10 @@ func generateQueries(pkg string, queries []*pluginv1.Query) ([]byte, []*pluginv1
 		for _, p := range q.GetParameters() {
 			pName := p.GetName()
 			if pName == "" {
-				// Try to infer from the output column at the same 0-based index
+				// For SELECT queries, try to infer from the output column at the
+				// same 0-based index (e.g. SELECT ... WHERE id = $1 → param named "id").
+				// This heuristic is only applied when there is no better source of naming
+				// (INSERT column lists are resolved in the infer pass instead).
 				idx := int(p.GetNumber()) - 1
 				if idx >= 0 && idx < len(qCols) && qCols[idx].GetName() != "" {
 					pName = qCols[idx].GetName()

@@ -50,37 +50,155 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	q.Parameters = ordered
 
 	// ------------------------------------------------------------------ //
-	// 3. Column inference (SELECT only).
+	// 3. Column inference (SELECT, or RETURNING for INSERT/UPDATE/DELETE).
 	// ------------------------------------------------------------------ //
-	sel := q.Ast.GetSelect()
-	if sel == nil {
-		return
-	}
-	ss := sel.GetSelect()
-	if ss == nil {
-		return
-	}
+	switch {
+	case q.Ast.GetSelect() != nil:
+		sel := q.Ast.GetSelect()
+		ss := sel.GetSelect()
+		if ss == nil {
+			return
+		}
 
-	// Build a table alias map from the FROM clause.
-	// aliasMap: alias-or-name → *irv1.Table
-	aliasMap := buildAliasMap(ss.GetFrom(), catIdx)
+		// Build a table alias map from the FROM clause.
+		aliasMap := buildAliasMap(ss.GetFrom(), catIdx)
 
-	// Collect all tables referenced (for star expansion).
-	var fromTables []*irv1.Table
-	for _, fi := range ss.GetFrom() {
-		tbl := resolveFromItemTable(fi, catIdx)
+		// Collect all tables referenced (for star expansion).
+		var fromTables []*irv1.Table
+		for _, fi := range ss.GetFrom() {
+			tbl := resolveFromItemTable(fi, catIdx)
+			if tbl != nil {
+				fromTables = append(fromTables, tbl)
+			}
+		}
+		fromTables = collectJoinTables(ss.GetFrom(), catIdx, fromTables)
+
+		for _, target := range ss.GetTargets() {
+			expr := target.GetExpr()
+			alias := target.GetAlias()
+			cols := resolveTarget(expr, alias, aliasMap, fromTables, catIdx, q.GetName(), d)
+			q.Columns = append(q.Columns, cols...)
+		}
+
+	case q.Ast.GetInsert() != nil:
+		ins := q.Ast.GetInsert()
+		returning := ins.GetReturning()
+		if len(returning) == 0 {
+			return
+		}
+		// Resolve aliasMap from the target table.
+		tbl := catIdx.lookupTable(ins.GetTableName().GetName())
+		aliasMap := make(map[string]*irv1.Table)
 		if tbl != nil {
-			fromTables = append(fromTables, tbl)
+			aliasMap[strings.ToLower(ins.GetTableName().GetName())] = tbl
+			if ins.GetAlias() != "" {
+				aliasMap[strings.ToLower(ins.GetAlias())] = tbl
+			}
+		}
+		var fromTables []*irv1.Table
+		if tbl != nil {
+			fromTables = []*irv1.Table{tbl}
+		}
+		for _, target := range returning {
+			cols := resolveTarget(target.GetExpr(), target.GetAlias(), aliasMap, fromTables, catIdx, q.GetName(), d)
+			q.Columns = append(q.Columns, cols...)
+		}
+
+		// Also infer INSERT parameter types from the column list + table schema.
+		inferInsertParamTypes(ins, paramMap, tbl)
+
+	case q.Ast.GetUpdate() != nil:
+		upd := q.Ast.GetUpdate()
+		returning := upd.GetReturning()
+		if len(returning) == 0 {
+			return
+		}
+		tbl := catIdx.lookupTable(upd.GetTableName().GetName())
+		aliasMap := make(map[string]*irv1.Table)
+		if tbl != nil {
+			aliasMap[strings.ToLower(upd.GetTableName().GetName())] = tbl
+			if upd.GetAlias() != "" {
+				aliasMap[strings.ToLower(upd.GetAlias())] = tbl
+			}
+		}
+		var fromTables []*irv1.Table
+		if tbl != nil {
+			fromTables = []*irv1.Table{tbl}
+		}
+		for _, target := range returning {
+			cols := resolveTarget(target.GetExpr(), target.GetAlias(), aliasMap, fromTables, catIdx, q.GetName(), d)
+			q.Columns = append(q.Columns, cols...)
+		}
+
+	case q.Ast.GetDelete() != nil:
+		del := q.Ast.GetDelete()
+		returning := del.GetReturning()
+		if len(returning) == 0 {
+			return
+		}
+		tbl := catIdx.lookupTable(del.GetTableName().GetName())
+		aliasMap := make(map[string]*irv1.Table)
+		if tbl != nil {
+			aliasMap[strings.ToLower(del.GetTableName().GetName())] = tbl
+			if del.GetAlias() != "" {
+				aliasMap[strings.ToLower(del.GetAlias())] = tbl
+			}
+		}
+		var fromTables []*irv1.Table
+		if tbl != nil {
+			fromTables = []*irv1.Table{tbl}
+		}
+		for _, target := range returning {
+			cols := resolveTarget(target.GetExpr(), target.GetAlias(), aliasMap, fromTables, catIdx, q.GetName(), d)
+			q.Columns = append(q.Columns, cols...)
 		}
 	}
-	// Also collect join sides.
-	fromTables = collectJoinTables(ss.GetFrom(), catIdx, fromTables)
+}
 
-	for _, target := range ss.GetTargets() {
-		expr := target.GetExpr()
-		alias := target.GetAlias()
-		cols := resolveTarget(expr, alias, aliasMap, fromTables, catIdx, q.GetName(), d)
-		q.Columns = append(q.Columns, cols...)
+// inferInsertParamTypes attempts to assign types to INSERT VALUES parameters
+// by matching them positionally to the INSERT column list against the table schema.
+func inferInsertParamTypes(ins *irv1.InsertStmt, paramMap map[uint32]*pluginv1.QueryParameter, tbl *irv1.Table) {
+	if tbl == nil || ins == nil {
+		return
+	}
+	cols := ins.GetColumns()
+	if len(cols) == 0 {
+		return
+	}
+	vals := ins.GetValues()
+	if vals == nil {
+		return
+	}
+	// Build col→type lookup.
+	colType := make(map[string]*irv1.TypeRef, len(tbl.GetColumns()))
+	colNullable := make(map[string]bool, len(tbl.GetColumns()))
+	for _, c := range tbl.GetColumns() {
+		colType[strings.ToLower(c.GetName())] = c.GetType()
+		colNullable[strings.ToLower(c.GetName())] = c.GetNullable()
+	}
+	for _, row := range vals.GetRows() {
+		for i, expr := range row.GetValues() {
+			if i >= len(cols) {
+				break
+			}
+			param := expr.GetParameter()
+			if param == nil {
+				continue
+			}
+			pos := param.GetPosition()
+			p, ok := paramMap[pos]
+			if !ok || p.GetType() != nil {
+				continue
+			}
+			colName := strings.ToLower(cols[i])
+			if t, ok := colType[colName]; ok {
+				p.Type = t
+				p.Nullable = colNullable[colName]
+				if p.Name == "" {
+					p.Name = cols[i]
+				}
+			}
+		}
 	}
 }
 
