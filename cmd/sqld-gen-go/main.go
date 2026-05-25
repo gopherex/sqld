@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 
-	gogen "github.com/yaroher/sqld/internal/gogen"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 	"google.golang.org/protobuf/proto"
 )
@@ -22,13 +21,13 @@ func run(stdin io.Reader, stdout io.Writer) error {
 	var out proto.Message
 	switch tag {
 	case 0: // GetInfo
-		out = gogen.Info()
+		out = Info()
 	case 1: // Generate
 		req := &pluginv1.GenerateRequest{}
 		if err := proto.Unmarshal(payload, req); err != nil {
 			return fmt.Errorf("unmarshal request: %w", err)
 		}
-		resp, err := gogen.Generate(req)
+		resp, err := Generate(req)
 		if err != nil {
 			return fmt.Errorf("generate: %w", err)
 		}

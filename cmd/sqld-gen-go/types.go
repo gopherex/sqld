@@ -1,4 +1,4 @@
-package gogen
+package main
 
 import (
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"

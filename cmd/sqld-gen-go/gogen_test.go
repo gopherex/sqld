@@ -1,4 +1,4 @@
-package gogen
+package main
 
 import (
 	"go/format"
