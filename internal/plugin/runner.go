@@ -43,7 +43,7 @@ func Open(pc *configv1.PluginConfig) (Runner, error) {
 	case *configv1.PluginSource_Command:
 		return newBinaryRunner(loc.Command, src.GetArgs(), pc.GetEnv()), nil
 	case *configv1.PluginSource_Wasm:
-		return nil, fmt.Errorf("plugin %q: wasm transport not yet implemented (Task 16)", pc.GetName())
+		return newWasmRunner(loc.Wasm, pc.GetSource().GetArgs(), pc.GetEnv())
 	default:
 		return nil, fmt.Errorf("plugin %q: no source location set", pc.GetName())
 	}
