@@ -35,10 +35,10 @@ func ParseQueries(sql, sourceFile string) ([]*pluginv1.Query, error) {
 	lines := splitLines(sql)
 
 	type block struct {
-		name       string
-		command    pluginv1.QueryCommand
-		bodyLines  []string
-		comment    string // non-header comment lines immediately before the header
+		name      string
+		command   pluginv1.QueryCommand
+		bodyLines []string
+		comment   string // non-header comment lines immediately before the header
 	}
 
 	var blocks []block

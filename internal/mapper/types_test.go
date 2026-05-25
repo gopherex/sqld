@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	pg "github.com/pganalyze/pg_query_go/v6"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 	"github.com/yaroher/sqld/internal/parse"
+	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 func typeNameFor(t *testing.T, typeSQL string) *pg.TypeName {
