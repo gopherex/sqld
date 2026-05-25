@@ -34,15 +34,16 @@ type Result struct {
 
 // Collect parses the configured SQL + migrations into the IR Catalog.
 func Collect(cfg *configv1.Config) (*irv1.Catalog, error) {
-	r, err := gather(cfg)
+	r, err := Gather(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return r.Catalog, nil
 }
 
-// gather runs the full pipeline: catalog + queries + migrations.
-func gather(cfg *configv1.Config) (*Result, error) {
+// Gather runs the full pipeline and returns the catalog, queries, migrations,
+// source units, and accumulated diagnostics.
+func Gather(cfg *configv1.Config) (*Result, error) {
 	// Step 1: resolve all source units.
 	units, err := source.Resolve(cfg)
 	if err != nil {
@@ -143,7 +144,7 @@ func gather(cfg *configv1.Config) (*Result, error) {
 // configured plugins are run. Annotation→Metadata mirroring is deferred;
 // annotations are delivered via GenerateRequest.Annotations only.
 func Generate(cfg *configv1.Config) error {
-	r, err := gather(cfg)
+	r, err := Gather(cfg)
 	if err != nil {
 		return err
 	}

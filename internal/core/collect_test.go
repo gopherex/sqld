@@ -47,7 +47,7 @@ func TestCollectCatalog(t *testing.T) {
 }
 
 func TestGatherQueries(t *testing.T) {
-	r, err := gather(tempProject(t))
+	r, err := Gather(tempProject(t))
 	if err != nil {
 		t.Fatal(err)
 	}
