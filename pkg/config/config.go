@@ -1,0 +1,66 @@
+package config
+
+// Engine identifies the SQL dialect.
+type Engine string
+
+const EnginePostgreSQL Engine = "postgresql"
+
+// SQLKind distinguishes DDL schema files from named DML query files.
+type SQLKind string
+
+const (
+	SQLSchema SQLKind = "schema"
+	SQLQuery  SQLKind = "query"
+)
+
+// Config is the root of a generation run, read from a YAML file.
+type Config struct {
+	Version    string            `yaml:"version"`
+	Engine     Engine            `yaml:"engine"`
+	SQL        []SQLSource       `yaml:"sql"`
+	Migrations []MigrationSource `yaml:"migrations"`
+	Plugins    []PluginConfig    `yaml:"plugins"`
+	Options    GlobalOptions     `yaml:"options"`
+}
+
+// SQLSource describes a single SQL input: either a file, a directory, inline
+// SQL text, or a glob pattern applied to the current directory.
+type SQLSource struct {
+	File      string  `yaml:"file"`
+	Dir       string  `yaml:"dir"`
+	Inline    string  `yaml:"inline"`
+	Glob      string  `yaml:"glob"`
+	Recursive bool    `yaml:"recursive"`
+	Kind      SQLKind `yaml:"kind"`
+}
+
+// MigrationSource points at a directory (or glob) of up-migration SQL files.
+type MigrationSource struct {
+	Dir  string `yaml:"dir"`
+	Glob string `yaml:"glob"`
+}
+
+// PluginConfig describes one code-generation plugin.
+type PluginConfig struct {
+	Name    string            `yaml:"name"`
+	Wasm    string            `yaml:"wasm"`
+	Binary  string            `yaml:"binary"`
+	Command string            `yaml:"command"`
+	Args    []string          `yaml:"args"`
+	SHA256  string            `yaml:"sha256"`
+	Out     string            `yaml:"out"`
+	Options map[string]any    `yaml:"options"`
+	Env     map[string]string `yaml:"env"`
+	Enabled *bool             `yaml:"enabled"` // nil means true
+}
+
+// GlobalOptions are host-wide generation settings.
+type GlobalOptions struct {
+	DefaultSchema string            `yaml:"defaultSchema"`
+	SearchPath    []string          `yaml:"searchPath"`
+	TypeOverrides map[string]string `yaml:"typeOverrides"`
+	Strict        bool              `yaml:"strict"`
+}
+
+// IsEnabled reports whether the plugin should run (default true when Enabled is nil).
+func (p PluginConfig) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }

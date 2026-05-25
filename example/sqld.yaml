@@ -1,14 +1,15 @@
 version: "1"
-engine: ENGINE_POSTGRESQL
+engine: postgresql
 options:
-  default_schema: public
+  defaultSchema: public
 sql:
   - dir: example/queries
-    kind: SQL_KIND_QUERY
+    kind: query
 migrations:
   - dir: example/migrations
 plugins:
   - name: go
-    source:
-      binary: ./bin/sqld-gen-go
+    binary: ./bin/sqld-gen-go
     out: example/gen/db
+    options:
+      package: db

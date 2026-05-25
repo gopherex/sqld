@@ -4,6 +4,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,7 +19,7 @@ import (
 	"github.com/yaroher/sqld/internal/query"
 	"github.com/yaroher/sqld/internal/relate"
 	"github.com/yaroher/sqld/internal/source"
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
@@ -32,8 +33,18 @@ type Result struct {
 	Units       []source.Unit
 }
 
+// engineToIR maps the config Engine string to the protobuf irv1.Engine value.
+func engineToIR(e config.Engine) irv1.Engine {
+	switch e {
+	case config.EnginePostgreSQL:
+		return irv1.Engine_ENGINE_POSTGRESQL
+	default:
+		return irv1.Engine_ENGINE_UNSPECIFIED
+	}
+}
+
 // Collect parses the configured SQL + migrations into the IR Catalog.
-func Collect(cfg *configv1.Config) (*irv1.Catalog, error) {
+func Collect(cfg *config.Config) (*irv1.Catalog, error) {
 	r, err := Gather(cfg)
 	if err != nil {
 		return nil, err
@@ -43,7 +54,7 @@ func Collect(cfg *configv1.Config) (*irv1.Catalog, error) {
 
 // Gather runs the full pipeline and returns the catalog, queries, migrations,
 // source units, and accumulated diagnostics.
-func Gather(cfg *configv1.Config) (*Result, error) {
+func Gather(cfg *config.Config) (*Result, error) {
 	// Step 1: resolve all source units.
 	units, err := source.Resolve(cfg)
 	if err != nil {
@@ -138,12 +149,9 @@ func Gather(cfg *configv1.Config) (*Result, error) {
 }
 
 // Generate runs each configured plugin against the collected IR and writes
-// the generated files to disk.
-//
-// Note: the Enabled field on PluginConfig is currently not consulted — all
-// configured plugins are run. Annotation→Metadata mirroring is deferred;
-// annotations are delivered via GenerateRequest.Annotations only.
-func Generate(cfg *configv1.Config) error {
+// the generated files to disk. Disabled plugins (IsEnabled() == false) are
+// skipped.
+func Generate(cfg *config.Config) error {
 	r, err := Gather(cfg)
 	if err != nil {
 		return err
@@ -151,16 +159,20 @@ func Generate(cfg *configv1.Config) error {
 
 	ctx := context.Background()
 
-	for _, pc := range cfg.GetPlugins() {
+	for _, pc := range cfg.Plugins {
+		if !pc.IsEnabled() {
+			continue
+		}
+
 		runner, err := plugin.Open(pc)
 		if err != nil {
-			return fmt.Errorf("plugin %q: %w", pc.GetName(), err)
+			return fmt.Errorf("plugin %q: %w", pc.Name, err)
 		}
 
 		info, err := runner.GetInfo(ctx)
 		if err != nil {
 			_ = runner.Close()
-			return fmt.Errorf("plugin %q: %w", pc.GetName(), err)
+			return fmt.Errorf("plugin %q: %w", pc.Name, err)
 		}
 
 		// Build annotations best-effort: skip per-unit errors.
@@ -172,24 +184,34 @@ func Generate(cfg *configv1.Config) error {
 			}
 		}
 
+		// Marshal plugin options to JSON bytes (nil when no options).
+		var optBytes []byte
+		if pc.Options != nil {
+			optBytes, err = json.Marshal(pc.Options)
+			if err != nil {
+				_ = runner.Close()
+				return fmt.Errorf("plugin %q: marshal options: %w", pc.Name, err)
+			}
+		}
+
 		req := &pluginv1.GenerateRequest{
 			Catalog:     r.Catalog,
 			Queries:     r.Queries,
 			Migrations:  r.Migrations,
-			Options:     pc.GetOptions(),
-			OutDir:      pc.GetOut(),
+			Options:     optBytes,
+			OutDir:      pc.Out,
 			Annotations: anns,
 			Context: &pluginv1.PluginContext{
 				HostVersion: "dev",
-				Engine:      cfg.GetEngine(),
-				Env:         pc.GetEnv(),
+				Engine:      engineToIR(cfg.Engine),
+				Env:         pc.Env,
 			},
 		}
 
 		resp, err := runner.Generate(ctx, req)
 		if err != nil {
 			_ = runner.Close()
-			return fmt.Errorf("plugin %q: %w", pc.GetName(), err)
+			return fmt.Errorf("plugin %q: %w", pc.Name, err)
 		}
 
 		// Check for error-severity diagnostics.
@@ -205,15 +227,15 @@ func Generate(cfg *configv1.Config) error {
 			for _, msg := range diagMsgs {
 				errs = append(errs, errors.New(msg))
 			}
-			return fmt.Errorf("plugin %q failed: %w", pc.GetName(), errors.Join(errs...))
+			return fmt.Errorf("plugin %q failed: %w", pc.Name, errors.Join(errs...))
 		}
 
 		// Write generated files.
 		for _, f := range resp.GetFiles() {
-			out := filepath.Join(pc.GetOut(), f.GetPath())
+			out := filepath.Join(pc.Out, f.GetPath())
 			if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 				_ = runner.Close()
-				return fmt.Errorf("plugin %q: mkdir %q: %w", pc.GetName(), filepath.Dir(out), err)
+				return fmt.Errorf("plugin %q: mkdir %q: %w", pc.Name, filepath.Dir(out), err)
 			}
 			mode := os.FileMode(0o644)
 			if f.GetExecutable() {
@@ -221,12 +243,12 @@ func Generate(cfg *configv1.Config) error {
 			}
 			if err := os.WriteFile(out, f.GetContents(), mode); err != nil {
 				_ = runner.Close()
-				return fmt.Errorf("plugin %q: write %q: %w", pc.GetName(), out, err)
+				return fmt.Errorf("plugin %q: write %q: %w", pc.Name, out, err)
 			}
 		}
 
 		if err := runner.Close(); err != nil {
-			return fmt.Errorf("plugin %q: close: %w", pc.GetName(), err)
+			return fmt.Errorf("plugin %q: close: %w", pc.Name, err)
 		}
 	}
 

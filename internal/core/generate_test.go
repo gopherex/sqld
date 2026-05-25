@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 )
 
 func TestGenerateWritesFiles(t *testing.T) {
@@ -23,14 +23,15 @@ func TestGenerateWritesFiles(t *testing.T) {
 		t.Fatalf("build fake plugin: %v", err)
 	}
 
-	cfg := &configv1.Config{
-		Sql: []*configv1.SqlSource{{
-			Source: &configv1.SqlSource_Dir{Dir: filepath.Join(root, "schema")},
-			Kind:   configv1.SqlKind_SQL_KIND_SCHEMA,
+	cfg := &config.Config{
+		Engine: config.EnginePostgreSQL,
+		SQL: []config.SQLSource{{
+			Dir:  filepath.Join(root, "schema"),
+			Kind: config.SQLSchema,
 		}},
-		Plugins: []*configv1.PluginConfig{{
+		Plugins: []config.PluginConfig{{
 			Name:   "fake",
-			Source: &configv1.PluginSource{Location: &configv1.PluginSource_Binary{Binary: bin}},
+			Binary: bin,
 			Out:    outDir,
 		}},
 	}

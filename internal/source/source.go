@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 )
 
 type Kind int
@@ -28,16 +28,16 @@ type Unit struct {
 }
 
 // Resolve reads all SQL and migration sources into ordered units.
-func Resolve(cfg *configv1.Config) ([]Unit, error) {
+func Resolve(cfg *config.Config) ([]Unit, error) {
 	var units []Unit
-	for _, s := range cfg.GetSql() {
+	for _, s := range cfg.SQL {
 		us, err := resolveSQL(s)
 		if err != nil {
 			return nil, err
 		}
 		units = append(units, us...)
 	}
-	for _, m := range cfg.GetMigrations() {
+	for _, m := range cfg.Migrations {
 		us, err := resolveMigration(m)
 		if err != nil {
 			return nil, err
@@ -47,30 +47,30 @@ func Resolve(cfg *configv1.Config) ([]Unit, error) {
 	return units, nil
 }
 
-func kindOf(k configv1.SqlKind) Kind {
-	if k == configv1.SqlKind_SQL_KIND_QUERY {
+func kindOf(k config.SQLKind) Kind {
+	if k == config.SQLQuery {
 		return KindQuery
 	}
 	return KindSchema
 }
 
-func resolveSQL(s *configv1.SqlSource) ([]Unit, error) {
-	k := kindOf(s.GetKind())
-	switch src := s.GetSource().(type) {
-	case *configv1.SqlSource_Inline:
-		return []Unit{{Path: "<inline>", SQL: src.Inline, Kind: k}}, nil
-	case *configv1.SqlSource_File:
-		b, err := os.ReadFile(src.File)
+func resolveSQL(s config.SQLSource) ([]Unit, error) {
+	k := kindOf(s.Kind)
+	switch {
+	case s.Inline != "":
+		return []Unit{{Path: "<inline>", SQL: s.Inline, Kind: k}}, nil
+	case s.File != "":
+		b, err := os.ReadFile(s.File)
 		if err != nil {
 			return nil, err
 		}
-		return []Unit{{Path: src.File, SQL: string(b), Kind: k}}, nil
-	case *configv1.SqlSource_Dir:
-		glob := s.GetGlob()
+		return []Unit{{Path: s.File, SQL: string(b), Kind: k}}, nil
+	case s.Dir != "":
+		glob := s.Glob
 		if glob == "" {
 			glob = "*.sql"
 		}
-		return readDir(src.Dir, glob, s.GetRecursive(), k)
+		return readDir(s.Dir, glob, s.Recursive, k)
 	default:
 		return nil, fmt.Errorf("sql source: empty")
 	}
@@ -108,12 +108,12 @@ func readDir(dir, glob string, recursive bool, k Kind) ([]Unit, error) {
 	return units, nil
 }
 
-func resolveMigration(m *configv1.MigrationSource) ([]Unit, error) {
-	glob := m.GetGlob()
+func resolveMigration(m config.MigrationSource) ([]Unit, error) {
+	glob := m.Glob
 	if glob == "" {
 		glob = "*.sql"
 	}
-	us, err := readDir(m.GetDir(), glob, false, KindMigrationUp)
+	us, err := readDir(m.Dir, glob, false, KindMigrationUp)
 	if err != nil {
 		return nil, err
 	}

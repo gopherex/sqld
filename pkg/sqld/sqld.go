@@ -9,17 +9,20 @@
 //	// or
 //	err = sqld.Generate(cfg)        // Collect, then run the configured plugins
 //
-// The IR, config, and plugin contract messages are protobuf types under
-// github.com/yaroher/sqld/pkg/proto/sqld/v1/{ir,config,plugin}.
+// The IR and plugin contract messages are protobuf types under
+// github.com/yaroher/sqld/pkg/proto/sqld/v1/{ir,plugin}.
+// The config is a plain Go struct under github.com/yaroher/sqld/pkg/config.
 package sqld
 
 import (
-	"github.com/yaroher/sqld/internal/config"
 	"github.com/yaroher/sqld/internal/core"
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
+
+// Config re-exports the config type for callers who import only pkg/sqld.
+type Config = config.Config
 
 // Diagnostic is a non-fatal issue surfaced while building the IR (e.g. an
 // unresolved column type or an unhandled statement).
@@ -36,19 +39,19 @@ type Result struct {
 	Diagnostics []Diagnostic
 }
 
-// LoadConfig reads and parses a YAML config file into a Config message.
-func LoadConfig(path string) (*configv1.Config, error) {
+// LoadConfig reads and parses a YAML config file into a Config struct.
+func LoadConfig(path string) (*Config, error) {
 	return config.Load(path)
 }
 
 // Collect parses the configured SQL and migrations into the IR Catalog.
-func Collect(cfg *configv1.Config) (*irv1.Catalog, error) {
+func Collect(cfg *Config) (*irv1.Catalog, error) {
 	return core.Collect(cfg)
 }
 
 // CollectAll runs the full pipeline and returns the Catalog together with the
 // inferred queries, parsed migrations, and any diagnostics.
-func CollectAll(cfg *configv1.Config) (*Result, error) {
+func CollectAll(cfg *Config) (*Result, error) {
 	r, err := core.Gather(cfg)
 	if err != nil {
 		return nil, err
@@ -68,7 +71,7 @@ func CollectAll(cfg *configv1.Config) (*Result, error) {
 
 // Generate runs Collect and then drives the configured plugins, writing their
 // output files to disk.
-func Generate(cfg *configv1.Config) error {
+func Generate(cfg *Config) error {
 	return core.Generate(cfg)
 }
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
 
@@ -29,22 +29,19 @@ type Runner interface {
 }
 
 // Open constructs a Runner for the plugin described by pc.
-// Transport is selected based on pc.Source.Location:
-//   - Binary / Command → stdio framing over an exec'd process (binaryRunner).
-//   - Wasm             → not yet implemented (Task 16).
-func Open(pc *configv1.PluginConfig) (Runner, error) {
-	src := pc.GetSource()
-	if src == nil {
-		return nil, fmt.Errorf("plugin %q: source is nil", pc.GetName())
-	}
-	switch loc := src.GetLocation().(type) {
-	case *configv1.PluginSource_Binary:
-		return newBinaryRunner(loc.Binary, src.GetArgs(), pc.GetEnv()), nil
-	case *configv1.PluginSource_Command:
-		return newBinaryRunner(loc.Command, src.GetArgs(), pc.GetEnv()), nil
-	case *configv1.PluginSource_Wasm:
-		return newWasmRunner(loc.Wasm, pc.GetSource().GetArgs(), pc.GetEnv())
+// Transport is selected based on which of pc.Binary/Command/Wasm is non-empty:
+//   - Binary  → stdio-framed protobuf over an exec'd process (binaryRunner).
+//   - Command → same as Binary but the field name differs.
+//   - Wasm    → WASI module via wazero (wasmRunner).
+func Open(pc config.PluginConfig) (Runner, error) {
+	switch {
+	case pc.Binary != "":
+		return newBinaryRunner(pc.Binary, pc.Args, pc.Env), nil
+	case pc.Command != "":
+		return newBinaryRunner(pc.Command, pc.Args, pc.Env), nil
+	case pc.Wasm != "":
+		return newWasmRunner(pc.Wasm, pc.Args, pc.Env)
 	default:
-		return nil, fmt.Errorf("plugin %q: no source location set", pc.GetName())
+		return nil, fmt.Errorf("plugin %q: no source location set (set binary, command, or wasm)", pc.Name)
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 )
 
 func TestResolveSchemaDir(t *testing.T) {
@@ -13,9 +13,9 @@ func TestResolveSchemaDir(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.sql"), []byte("CREATE TABLE a(id int);"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.sql"), []byte("CREATE TABLE b(id int);"), 0o644)
 
-	cfg := &configv1.Config{Sql: []*configv1.SqlSource{{
-		Source: &configv1.SqlSource_Dir{Dir: dir},
-		Kind:   configv1.SqlKind_SQL_KIND_SCHEMA,
+	cfg := &config.Config{SQL: []config.SQLSource{{
+		Dir:  dir,
+		Kind: config.SQLSchema,
 	}}}
 	units, err := Resolve(cfg)
 	if err != nil {
@@ -33,7 +33,7 @@ func TestResolveMigrationsOrdered(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "0002_b.sql"), []byte("ALTER TABLE a ADD c int;"), 0o644)
 	os.WriteFile(filepath.Join(dir, "0001_a.sql"), []byte("CREATE TABLE a(id int);"), 0o644)
-	cfg := &configv1.Config{Migrations: []*configv1.MigrationSource{{Dir: dir}}}
+	cfg := &config.Config{Migrations: []config.MigrationSource{{Dir: dir}}}
 	units, err := Resolve(cfg)
 	if err != nil {
 		t.Fatal(err)

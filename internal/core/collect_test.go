@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -18,7 +18,7 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func tempProject(t *testing.T) *configv1.Config {
+func tempProject(t *testing.T) *config.Config {
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "schema", "001.sql"), `
@@ -27,10 +27,13 @@ func tempProject(t *testing.T) *configv1.Config {
 	`)
 	writeFile(t, filepath.Join(root, "queries", "q.sql"),
 		"-- name: GetUser :one\nSELECT id, email FROM users WHERE id = $1;\n")
-	return &configv1.Config{Sql: []*configv1.SqlSource{
-		{Source: &configv1.SqlSource_Dir{Dir: filepath.Join(root, "schema")}, Kind: configv1.SqlKind_SQL_KIND_SCHEMA},
-		{Source: &configv1.SqlSource_Dir{Dir: filepath.Join(root, "queries")}, Kind: configv1.SqlKind_SQL_KIND_QUERY},
-	}}
+	return &config.Config{
+		Engine: config.EnginePostgreSQL,
+		SQL: []config.SQLSource{
+			{Dir: filepath.Join(root, "schema"), Kind: config.SQLSchema},
+			{Dir: filepath.Join(root, "queries"), Kind: config.SQLQuery},
+		},
+	}
 }
 
 func TestCollectCatalog(t *testing.T) {
