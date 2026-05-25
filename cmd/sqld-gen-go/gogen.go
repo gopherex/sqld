@@ -876,15 +876,19 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 			writeStaticSegment(sb, seg.text)
 
 		case dynSegIf:
-			// if arg.X != nil { args = append(args, *arg.X); fmt.Fprintf(&b, "... $%d ...", len(args)) }
-			rewritten := rewriteFragment(seg.text)
+			// if arg.X != nil { args = append(args, *arg.X); fmt.Fprintf(&b, " ... $%d ...", len(args)) }
+			// The fragment is trimmed of surrounding whitespace, so prefix a single
+			// leading space to keep the assembled SQL separated (avoid e.g. "trueAND").
+			rewritten := " " + rewriteFragment(seg.text)
 			sb.WriteString(fmt.Sprintf("\tif arg.%s != nil {\n", seg.fieldName))
 			sb.WriteString(fmt.Sprintf("\t\targs = append(args, *arg.%s)\n", seg.fieldName))
 			sb.WriteString(fmt.Sprintf("\t\tfmt.Fprintf(&b, %q, len(args))\n", rewritten))
 			sb.WriteString("\t}\n")
 
 		case dynSegSlice:
-			rewritten := rewriteFragment(seg.text)
+			// Prefix a single leading space (fragment is trimmed) so consecutive
+			// conditional fragments stay separated by exactly one space.
+			rewritten := " " + rewriteFragment(seg.text)
 			sb.WriteString(fmt.Sprintf("\tif len(arg.%s) > 0 {\n", seg.fieldName))
 			sb.WriteString(fmt.Sprintf("\t\targs = append(args, arg.%s)\n", seg.fieldName))
 			sb.WriteString(fmt.Sprintf("\t\tfmt.Fprintf(&b, %q, len(args))\n", rewritten))
