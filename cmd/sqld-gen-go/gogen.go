@@ -1,6 +1,6 @@
 // Package gogen is the pure-function core of the sqld Go code generator.
 // It has no I/O; the plugin binary wrapper calls Info and Generate.
-package gogen
+package main
 
 import (
 	"encoding/json"
