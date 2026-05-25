@@ -134,13 +134,10 @@ func MapExpr(node *pg.Node, id nodeid.Builder) *irv1.Expr {
 		return mapRowExpr(node.GetRowExpr(), id)
 
 	// ------------------------------------------------------------------ //
-	//  SubLink  → raw_sql fallback (TODO task8: structured SubqueryExpr)
+	//  SubLink  → structured SubqueryExpr
 	// ------------------------------------------------------------------ //
 	case node.GetSubLink() != nil:
-		return &irv1.Expr{
-			Node:   &irv1.Expr_RawSql{RawSql: deparseNode(node)}, // TODO(task8): structured SubqueryExpr
-			NodeId: id.String(),
-		}
+		return mapSubLink(node.GetSubLink(), id)
 
 	// ------------------------------------------------------------------ //
 	//  CoalesceExpr  (COALESCE(a, b, …) — libpg_query promotes this)
@@ -565,6 +562,81 @@ func mapRowExpr(re *pg.RowExpr, id nodeid.Builder) *irv1.Expr {
 	return &irv1.Expr{
 		Node:   &irv1.Expr_List{List: &irv1.ListExpr{Elements: elems, IsRow: true}},
 		NodeId: id.String(),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SubLink / SubqueryExpr helper
+// ---------------------------------------------------------------------------
+
+// mapSubLink converts a pg SubLink node to an irv1.Expr_Subquery.
+//
+// SubLinkType to SubqueryKind mapping:
+//
+//	EXPR_SUBLINK  → SCALAR  (plain scalar subquery)
+//	EXISTS_SUBLINK → EXISTS
+//	ANY_SUBLINK   → IN / ANY depending on oper_name
+//	ALL_SUBLINK   → ALL
+//
+// The Testexpr (LHS of IN/ANY/ALL) maps to Operand; the OperName first element
+// maps to Symbol (e.g. "=" for IN, "<>" for !=, etc.).
+func mapSubLink(sl *pg.SubLink, id nodeid.Builder) *irv1.Expr {
+	kind := subLinkKind(sl)
+
+	sq := &irv1.SubqueryExpr{Kind: kind}
+
+	// Inner query
+	if inner := sl.GetSubselect().GetSelectStmt(); inner != nil {
+		sq.Query = mapSelectStmt(inner, id.Child("sublink_sel"))
+	}
+
+	// Operand (LHS for IN/ANY/ALL)
+	if sl.GetTestexpr() != nil {
+		sq.Operand = MapExpr(sl.GetTestexpr(), id.Child("sublink_lhs"))
+	}
+
+	// Operator symbol (ANY/ALL only)
+	for _, opNode := range sl.GetOperName() {
+		if s := opNode.GetString_().GetSval(); s != "" {
+			sq.Symbol = s
+			break
+		}
+	}
+
+	return &irv1.Expr{
+		Node:   &irv1.Expr_Subquery{Subquery: sq},
+		NodeId: id.String(),
+	}
+}
+
+// subLinkKind maps pg SubLinkType to irv1 SubqueryKind.
+func subLinkKind(sl *pg.SubLink) irv1.SubqueryKind {
+	switch sl.GetSubLinkType() {
+	case pg.SubLinkType_EXISTS_SUBLINK:
+		return irv1.SubqueryKind_SUBQUERY_KIND_EXISTS
+	case pg.SubLinkType_ALL_SUBLINK:
+		return irv1.SubqueryKind_SUBQUERY_KIND_ALL
+	case pg.SubLinkType_ANY_SUBLINK:
+		// ANY_SUBLINK is used for both x IN (SELECT ...) and x op ANY (SELECT ...).
+		// When OperName is empty or contains "=" it's IN semantics; when OperName
+		// contains a different operator it's a generic ANY.
+		hasNonEqOp := false
+		for _, n := range sl.GetOperName() {
+			sym := n.GetString_().GetSval()
+			if sym != "" && sym != "=" {
+				hasNonEqOp = true
+				break
+			}
+		}
+		if hasNonEqOp {
+			return irv1.SubqueryKind_SUBQUERY_KIND_ANY
+		}
+		return irv1.SubqueryKind_SUBQUERY_KIND_IN
+	case pg.SubLinkType_EXPR_SUBLINK:
+		return irv1.SubqueryKind_SUBQUERY_KIND_SCALAR
+	default:
+		// ROWCOMPARE, MULTIEXPR, ARRAY, CTE — best effort: treat as scalar
+		return irv1.SubqueryKind_SUBQUERY_KIND_SCALAR
 	}
 }
 
