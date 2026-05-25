@@ -124,6 +124,10 @@ func (b *builder) dispatch(stmt parse.Stmt) {
 	node := stmt.Node
 
 	switch {
+	// CREATE SCHEMA
+	case node.GetCreateSchemaStmt() != nil:
+		b.handleCreateSchema(node.GetCreateSchemaStmt())
+
 	// CREATE TABLE
 	case node.GetCreateStmt() != nil:
 		b.handleCreateTable(node.GetCreateStmt())
@@ -135,6 +139,26 @@ func (b *builder) dispatch(stmt parse.Stmt) {
 	// CREATE TYPE ... AS ENUM
 	case node.GetCreateEnumStmt() != nil:
 		b.handleCreateEnum(node.GetCreateEnumStmt())
+
+	// CREATE DOMAIN
+	case node.GetCreateDomainStmt() != nil:
+		b.handleCreateDomain(node.GetCreateDomainStmt())
+
+	// CREATE TYPE ... AS (composite)
+	case node.GetCompositeTypeStmt() != nil:
+		b.handleCompositeType(node.GetCompositeTypeStmt())
+
+	// CREATE FUNCTION / CREATE PROCEDURE
+	case node.GetCreateFunctionStmt() != nil:
+		b.handleCreateFunction(node.GetCreateFunctionStmt())
+
+	// CREATE TRIGGER
+	case node.GetCreateTrigStmt() != nil:
+		b.handleCreateTrigger(node.GetCreateTrigStmt())
+
+	// CREATE MATERIALIZED VIEW (and plain CREATE TABLE AS — check objtype)
+	case node.GetCreateTableAsStmt() != nil:
+		b.handleCreateTableAs(node.GetCreateTableAsStmt())
 
 	// CREATE INDEX
 	case node.GetIndexStmt() != nil:
@@ -261,6 +285,128 @@ func (b *builder) handleCreateSequence(cs *pg.CreateSeqStmt) {
 	}
 	ss := b.getOrCreateSchema(schemaName)
 	ss.schema.Sequences = append(ss.schema.Sequences, seq)
+}
+
+// ---------------------------------------------------------------------------
+// CREATE SCHEMA
+// ---------------------------------------------------------------------------
+
+func (b *builder) handleCreateSchema(cs *pg.CreateSchemaStmt) {
+	schemaName := cs.GetSchemaname()
+	if schemaName == "" {
+		b.diag.Add("warning", "CREATE SCHEMA: empty schema name, skipping")
+		return
+	}
+	ss := b.getOrCreateSchema(schemaName)
+	// Set owner from AUTHORIZATION role if provided (best-effort).
+	if ar := cs.GetAuthrole(); ar != nil && ar.GetRolename() != "" {
+		ss.schema.Owner = ar.GetRolename()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CREATE DOMAIN
+// ---------------------------------------------------------------------------
+
+func (b *builder) handleCreateDomain(ds *pg.CreateDomainStmt) {
+	dt := mapper.MapCreateDomain(ds)
+	if dt == nil {
+		b.diag.Add("warning", "MapCreateDomain returned nil")
+		return
+	}
+	schemaName := resolveSchema(dt.GetName())
+	if dt.Name != nil {
+		dt.Name.Schema = schemaName
+	}
+	ss := b.getOrCreateSchema(schemaName)
+	ss.schema.Domains = append(ss.schema.Domains, dt)
+}
+
+// ---------------------------------------------------------------------------
+// CREATE TYPE ... AS (composite)
+// ---------------------------------------------------------------------------
+
+func (b *builder) handleCompositeType(cs *pg.CompositeTypeStmt) {
+	ct := mapper.MapCompositeType(cs)
+	if ct == nil {
+		b.diag.Add("warning", "MapCompositeType returned nil")
+		return
+	}
+	schemaName := resolveSchema(ct.GetName())
+	if ct.Name != nil {
+		ct.Name.Schema = schemaName
+	}
+	ss := b.getOrCreateSchema(schemaName)
+	ss.schema.Composites = append(ss.schema.Composites, ct)
+}
+
+// ---------------------------------------------------------------------------
+// CREATE FUNCTION / CREATE PROCEDURE
+// ---------------------------------------------------------------------------
+
+func (b *builder) handleCreateFunction(cf *pg.CreateFunctionStmt) {
+	fn, proc := mapper.MapCreateFunction(cf)
+	if fn != nil {
+		schemaName := resolveSchema(fn.GetName())
+		if fn.Name != nil {
+			fn.Name.Schema = schemaName
+		}
+		ss := b.getOrCreateSchema(schemaName)
+		ss.schema.Functions = append(ss.schema.Functions, fn)
+	} else if proc != nil {
+		schemaName := resolveSchema(proc.GetName())
+		if proc.Name != nil {
+			proc.Name.Schema = schemaName
+		}
+		ss := b.getOrCreateSchema(schemaName)
+		ss.schema.Procedures = append(ss.schema.Procedures, proc)
+	} else {
+		b.diag.Add("warning", "MapCreateFunction returned (nil, nil)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CREATE TRIGGER
+// ---------------------------------------------------------------------------
+
+func (b *builder) handleCreateTrigger(ct *pg.CreateTrigStmt) {
+	trig := mapper.MapCreateTrigger(ct)
+	if trig == nil {
+		b.diag.Add("warning", "MapCreateTrigger returned nil")
+		return
+	}
+	// Schema for the trigger is determined by the table it's ON.
+	var schemaName string
+	if trig.GetTable() != nil && trig.GetTable().GetName() != nil {
+		schemaName = trig.GetTable().GetName().GetSchema()
+	}
+	if schemaName == "" {
+		schemaName = "public"
+	}
+	ss := b.getOrCreateSchema(schemaName)
+	ss.schema.Triggers = append(ss.schema.Triggers, trig)
+}
+
+// ---------------------------------------------------------------------------
+// CREATE MATERIALIZED VIEW (CREATE TABLE AS with objtype=OBJECT_MATVIEW)
+// ---------------------------------------------------------------------------
+
+func (b *builder) handleCreateTableAs(cta *pg.CreateTableAsStmt) {
+	if cta.GetObjtype() != pg.ObjectType_OBJECT_MATVIEW {
+		b.diag.Add("info", fmt.Sprintf("CREATE TABLE AS with objtype %v: not a materialized view, skipping", cta.GetObjtype()))
+		return
+	}
+	mv := mapper.MapMaterializedView(cta)
+	if mv == nil {
+		b.diag.Add("warning", "MapMaterializedView returned nil")
+		return
+	}
+	schemaName := resolveSchema(mv.GetName())
+	if mv.Name != nil {
+		mv.Name.Schema = schemaName
+	}
+	ss := b.getOrCreateSchema(schemaName)
+	ss.schema.MaterializedViews = append(ss.schema.MaterializedViews, mv)
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +664,47 @@ func (b *builder) assignIDs() {
 				et.Id = schemaName + "." + et.GetName().GetName()
 			}
 		}
+
+		for _, dt := range ss.schema.Domains {
+			if dt.Id == "" && dt.GetName() != nil {
+				dt.Id = schemaName + "." + dt.GetName().GetName()
+			}
+		}
+
+		for _, ct := range ss.schema.Composites {
+			if ct.Id == "" && ct.GetName() != nil {
+				ct.Id = schemaName + "." + ct.GetName().GetName()
+			}
+		}
+
+		for _, fn := range ss.schema.Functions {
+			if fn.Id == "" && fn.GetName() != nil {
+				fn.Id = schemaName + "." + fn.GetName().GetName()
+			}
+		}
+
+		for _, proc := range ss.schema.Procedures {
+			if proc.Id == "" && proc.GetName() != nil {
+				proc.Id = schemaName + "." + proc.GetName().GetName()
+			}
+		}
+
+		for _, mv := range ss.schema.MaterializedViews {
+			if mv.Id == "" && mv.GetName() != nil {
+				mv.Id = schemaName + "." + mv.GetName().GetName()
+			}
+		}
+
+		for _, trig := range ss.schema.Triggers {
+			if trig.Id == "" {
+				trig.Id = schemaName + "." + trig.GetName()
+			}
+		}
 	}
+
+	// Second pass: resolve trigger table/function ObjectRef IDs after all
+	// objects have been assigned IDs in the first pass above.
+	b.resolveTriggers()
 }
 
 // ---------------------------------------------------------------------------
@@ -561,6 +747,78 @@ func (b *builder) resolveFKs() {
 				ref.Id = refID // still set the id for best-effort
 				ref.Kind = irv1.ObjectKind_OBJECT_KIND_TABLE
 				b.diag.Add("warning", fmt.Sprintf("FK in table %q references unknown table %q", tbl.GetId(), refID))
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Trigger resolution pass
+// ---------------------------------------------------------------------------
+
+// resolveTriggers resolves Trigger.Table.Id and Trigger.Function.Id for every
+// trigger in the catalog, and appends a back-ref ObjectRef to the referenced
+// Table.Triggers slice when the table exists.
+func (b *builder) resolveTriggers() {
+	for _, schemaName := range b.schemaOrder {
+		ss := b.schemas[schemaName]
+		for _, trig := range ss.schema.Triggers {
+			// --- resolve Table ref ---
+			if tableRef := trig.GetTable(); tableRef != nil {
+				tableQN := tableRef.GetName()
+				refSchema := schemaName // default to trigger's own schema
+				if tableQN != nil && tableQN.GetSchema() != "" {
+					refSchema = tableQN.GetSchema()
+				}
+				refTableName := ""
+				if tableQN != nil {
+					refTableName = tableQN.GetName()
+				}
+				tableID := refSchema + "." + refTableName
+				tableRef.Id = tableID
+				tableRef.Kind = irv1.ObjectKind_OBJECT_KIND_TABLE
+				if tableQN != nil {
+					tableQN.Schema = refSchema
+				}
+
+				// Append back-ref to Table.Triggers if the table exists.
+				if refSS, ok := b.schemas[refSchema]; ok {
+					if refTbl, ok := refSS.tableIndex[refTableName]; ok {
+						trigRef := &irv1.ObjectRef{
+							Id:   trig.GetId(),
+							Kind: irv1.ObjectKind_OBJECT_KIND_TRIGGER,
+							Name: &irv1.QualifiedName{
+								Schema: schemaName,
+								Name:   trig.GetName(),
+							},
+						}
+						refTbl.Triggers = append(refTbl.Triggers, trigRef)
+					} else {
+						b.diag.Add("warning", fmt.Sprintf("trigger %q: referenced table %q not found in catalog",
+							trig.GetId(), tableID))
+					}
+				} else {
+					b.diag.Add("warning", fmt.Sprintf("trigger %q: referenced schema %q not found",
+						trig.GetId(), refSchema))
+				}
+			}
+
+			// --- resolve Function ref ---
+			if fnRef := trig.GetFunction(); fnRef != nil {
+				fnQN := fnRef.GetName()
+				refFnSchema := schemaName // default to trigger's own schema
+				if fnQN != nil && fnQN.GetSchema() != "" {
+					refFnSchema = fnQN.GetSchema()
+				}
+				refFnName := ""
+				if fnQN != nil {
+					refFnName = fnQN.GetName()
+				}
+				fnRef.Id = refFnSchema + "." + refFnName
+				fnRef.Kind = irv1.ObjectKind_OBJECT_KIND_FUNCTION
+				if fnQN != nil {
+					fnQN.Schema = refFnSchema
+				}
 			}
 		}
 	}
