@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
 
@@ -25,9 +25,10 @@ func buildFakePlugin(t *testing.T) string {
 
 func TestBinaryRunner(t *testing.T) {
 	bin := buildFakePlugin(t)
-	r, err := Open(&configv1.PluginConfig{
+	r, err := Open(config.PluginConfig{
 		Name:   "fake",
-		Source: &configv1.PluginSource{Location: &configv1.PluginSource_Binary{Binary: bin}},
+		Binary: bin,
+		Out:    "./gen",
 	})
 	if err != nil {
 		t.Fatal(err)

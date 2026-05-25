@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
 
@@ -25,9 +25,10 @@ func buildFakeWasm(t *testing.T) string {
 
 func TestWasmRunner(t *testing.T) {
 	wasmPath := buildFakeWasm(t)
-	r, err := Open(&configv1.PluginConfig{
-		Name:   "fake",
-		Source: &configv1.PluginSource{Location: &configv1.PluginSource_Wasm{Wasm: wasmPath}},
+	r, err := Open(config.PluginConfig{
+		Name: "fake",
+		Wasm: wasmPath,
+		Out:  "./gen",
 	})
 	if err != nil {
 		t.Fatal(err)

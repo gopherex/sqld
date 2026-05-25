@@ -3,16 +3,16 @@ package sqld_test
 import (
 	"testing"
 
-	configv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/config"
+	"github.com/yaroher/sqld/pkg/config"
 	"github.com/yaroher/sqld/pkg/sqld"
 )
 
-func inlineConfig(schema string) *configv1.Config {
-	return &configv1.Config{
-		Engine: 0,
-		Sql: []*configv1.SqlSource{{
-			Source: &configv1.SqlSource_Inline{Inline: schema},
-			Kind:   configv1.SqlKind_SQL_KIND_SCHEMA,
+func inlineConfig(schema string) *config.Config {
+	return &config.Config{
+		Engine: config.EnginePostgreSQL,
+		SQL: []config.SQLSource{{
+			Inline: schema,
+			Kind:   config.SQLSchema,
 		}},
 	}
 }
@@ -35,15 +35,16 @@ func TestCollect(t *testing.T) {
 }
 
 func TestCollectAll(t *testing.T) {
-	cfg := &configv1.Config{
-		Sql: []*configv1.SqlSource{
+	cfg := &config.Config{
+		Engine: config.EnginePostgreSQL,
+		SQL: []config.SQLSource{
 			{
-				Source: &configv1.SqlSource_Inline{Inline: "CREATE TABLE users(id bigint primary key, email text not null);"},
-				Kind:   configv1.SqlKind_SQL_KIND_SCHEMA,
+				Inline: "CREATE TABLE users(id bigint primary key, email text not null);",
+				Kind:   config.SQLSchema,
 			},
 			{
-				Source: &configv1.SqlSource_Inline{Inline: "-- name: GetUser :one\nSELECT id, email FROM users WHERE id = $1;\n"},
-				Kind:   configv1.SqlKind_SQL_KIND_QUERY,
+				Inline: "-- name: GetUser :one\nSELECT id, email FROM users WHERE id = $1;\n",
+				Kind:   config.SQLQuery,
 			},
 		},
 	}

@@ -10,7 +10,7 @@ import (
 
 const testConfigYAML = `sql:
   - inline: "CREATE TABLE users(id bigint primary key, email text not null);"
-    kind: SQL_KIND_SCHEMA
+    kind: schema
 `
 
 func TestCollectCommand(t *testing.T) {
