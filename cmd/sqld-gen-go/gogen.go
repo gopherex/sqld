@@ -22,6 +22,43 @@ func Info() *pluginv1.GetInfoResponse {
 		Name:             "go",
 		Version:          "0.1.0",
 		SupportedEngines: []irv1.Engine{irv1.Engine_ENGINE_POSTGRESQL},
+		AnnotationSchema: &pluginv1.AnnotationSchema{
+			Sigil:         "@",
+			CommentStyles: []string{"--", "/* */"},
+			Annotations: []*pluginv1.AnnotationDef{
+				{
+					Name: "if",
+					Value: &pluginv1.AnnotationValueSpec{
+						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_POSITIONAL,
+						Fields: []*pluginv1.FieldSpec{
+							{Name: "condition", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT},
+						},
+					},
+				},
+				{
+					Name:  "endif",
+					Value: &pluginv1.AnnotationValueSpec{Form: pluginv1.AnnotationForm_ANNOTATION_FORM_FLAG},
+				},
+				{
+					Name: "slice",
+					Value: &pluginv1.AnnotationValueSpec{
+						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_POSITIONAL,
+						Fields: []*pluginv1.FieldSpec{
+							{Name: "param", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT},
+						},
+					},
+				},
+				{
+					Name: "orderby",
+					Value: &pluginv1.AnnotationValueSpec{
+						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_KEYED,
+						Fields: []*pluginv1.FieldSpec{
+							{Name: "allow", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_STRING},
+						},
+					},
+				},
+			},
+		},
 	}
 }
 

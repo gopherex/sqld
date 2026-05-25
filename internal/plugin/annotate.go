@@ -11,41 +11,166 @@ import (
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
 
-// Annotate scans sql line by line for SQL comments that match entries in
-// schema, and returns a slice of typed AnnotationValues in document order.
-// It never panics; malformed comments are skipped or parsed best-effort.
+// wantLineComments reports whether the schema's CommentStyles includes "--".
+// When CommentStyles is empty we default to scanning "--" for backwards
+// compatibility.
+func wantLineComments(schema *pluginv1.AnnotationSchema) bool {
+	styles := schema.GetCommentStyles()
+	if len(styles) == 0 {
+		return true
+	}
+	for _, s := range styles {
+		if s == "--" {
+			return true
+		}
+	}
+	return false
+}
+
+// wantBlockComments reports whether the schema's CommentStyles includes "/* */".
+func wantBlockComments(schema *pluginv1.AnnotationSchema) bool {
+	for _, s := range schema.GetCommentStyles() {
+		if s == "/* */" {
+			return true
+		}
+	}
+	return false
+}
+
+// commentCandidate holds the inner text of a comment together with the byte
+// offsets of the comment delimiters in the original sql string.
+type commentCandidate struct {
+	text        string // inner text, stripped of delimiters and leading whitespace
+	startOffset int    // byte index of opening delimiter ("--" or "/*")
+	endOffset   int    // byte index just past the closing delimiter
+	line        int    // 1-based line number of the opening delimiter
+}
+
+// scanComments extracts all comment candidates from sql according to the
+// enabled comment styles.
+func scanComments(sql string, schema *pluginv1.AnnotationSchema) []commentCandidate {
+	var results []commentCandidate
+
+	doLine := wantLineComments(schema)
+	doBlock := wantBlockComments(schema)
+
+	// Walk the string byte by byte to find comment openings.  We track the
+	// current line number so we can populate SourceSpan.StartLine.
+	line := 1
+	i := 0
+	n := len(sql)
+	for i < n {
+		// Track newlines for line counting.
+		if sql[i] == '\n' {
+			line++
+			i++
+			continue
+		}
+
+		// Check for line comment "--".
+		if doLine && i+1 < n && sql[i] == '-' && sql[i+1] == '-' {
+			startOff := i
+			startLine := line
+			// Advance past "--"
+			i += 2
+			// Consume until end of line (but not the newline itself).
+			for i < n && sql[i] != '\n' {
+				i++
+			}
+			// raw text is everything from startOff to i.
+			endOff := i
+			inner := sql[startOff+2 : endOff] // strip "--"
+			// Optionally strip a single leading space.
+			if len(inner) > 0 && inner[0] == ' ' {
+				inner = inner[1:]
+			}
+			results = append(results, commentCandidate{
+				text:        inner,
+				startOffset: startOff,
+				endOffset:   endOff,
+				line:        startLine,
+			})
+			continue
+		}
+
+		// Check for block comment "/* ... */".
+		if doBlock && i+1 < n && sql[i] == '/' && sql[i+1] == '*' {
+			startOff := i
+			startLine := line
+			// Advance past "/*"
+			i += 2
+			// Find closing "*/".
+			closeIdx := strings.Index(sql[i:], "*/")
+			var inner string
+			var endOff int
+			if closeIdx < 0 {
+				// Unterminated block comment: consume to end of string.
+				inner = sql[i:]
+				endOff = n
+				i = n
+			} else {
+				inner = sql[i : i+closeIdx]
+				endOff = i + closeIdx + 2 // just past "*/"
+				// Count newlines inside the block comment for line tracking.
+				for _, ch := range sql[i : i+closeIdx+2] {
+					if ch == '\n' {
+						line++
+					}
+				}
+				i = endOff
+			}
+			// Strip leading/trailing whitespace from the inner text.
+			inner = strings.TrimSpace(inner)
+			results = append(results, commentCandidate{
+				text:        inner,
+				startOffset: startOff,
+				endOffset:   endOff,
+				line:        startLine,
+			})
+			continue
+		}
+
+		i++
+	}
+
+	return results
+}
+
+// Annotate scans sql for SQL comments that match entries in schema, and returns
+// a slice of typed AnnotationValues in document order.  It never panics;
+// malformed comments are skipped or parsed best-effort.
+//
+// Supported comment styles are controlled by schema.CommentStyles:
+//   - "--"    line comments  (default when CommentStyles is empty)
+//   - "/* */" block comments
+//
+// Every produced AnnotationValue has Source.StartOffset/EndOffset set to the
+// byte range of the comment within sql (StartOffset = index of "--" or "/*",
+// EndOffset = index just past end-of-line or "*/").
 func Annotate(sql, sourceFile string, schema *pluginv1.AnnotationSchema) ([]*irv1.AnnotationValue, error) {
 	if schema == nil {
 		return nil, nil
 	}
 
+	sigil := schema.GetSigil()
 	var results []*irv1.AnnotationValue
 
-	lines := splitLines(sql)
-	for lineIdx, line := range lines {
-		lineNo := lineIdx + 1 // 1-based
-
-		commentText, ok := extractLineComment(line)
-		if !ok {
-			continue
-		}
-
-		commentText = strings.TrimSpace(commentText)
-		if commentText == "" {
+	for _, cand := range scanComments(sql, schema) {
+		text := strings.TrimSpace(cand.text)
+		if text == "" {
 			continue
 		}
 
 		// Strip sigil and extract candidate name.
-		sigil := schema.GetSigil()
 		if sigil != "" {
-			if !strings.HasPrefix(commentText, sigil) {
+			if !strings.HasPrefix(text, sigil) {
 				continue
 			}
-			commentText = commentText[len(sigil):]
+			text = text[len(sigil):]
 		}
 
 		// Split into name token and remainder.
-		name, remainder := splitFirst(commentText)
+		name, remainder := splitFirst(text)
 		if name == "" {
 			continue
 		}
@@ -57,8 +182,10 @@ func Annotate(sql, sourceFile string, schema *pluginv1.AnnotationSchema) ([]*irv
 		}
 
 		source := &irv1.SourceSpan{
-			File:      sourceFile,
-			StartLine: uint32(lineNo),
+			File:        sourceFile,
+			StartLine:   uint32(cand.line),
+			StartOffset: uint64(cand.startOffset),
+			EndOffset:   uint64(cand.endOffset),
 		}
 
 		// Determine target kind.
@@ -72,8 +199,8 @@ func Annotate(sql, sourceFile string, schema *pluginv1.AnnotationSchema) ([]*irv
 			Source: source,
 		}
 
-		// Full raw text is the original comment text (with sigil included if any).
-		rawText := schema.GetSigil() + name
+		// Full raw text is the original annotation text (with sigil).
+		rawText := sigil + name
 		if remainder != "" {
 			rawText = rawText + " " + remainder
 		}
@@ -102,26 +229,6 @@ func Annotate(sql, sourceFile string, schema *pluginv1.AnnotationSchema) ([]*irv
 	}
 
 	return results, nil
-}
-
-// splitLines splits sql into lines, preserving empty trailing lines.
-func splitLines(sql string) []string {
-	return strings.Split(sql, "\n")
-}
-
-// extractLineComment checks if the trimmed line starts with "--" and returns
-// the text after "-- " (or after "--"), along with a boolean ok.
-func extractLineComment(line string) (string, bool) {
-	trimmed := strings.TrimLeftFunc(line, unicode.IsSpace)
-	if !strings.HasPrefix(trimmed, "--") {
-		return "", false
-	}
-	rest := trimmed[2:] // strip "--"
-	// Optionally strip a single leading space.
-	if len(rest) > 0 && rest[0] == ' ' {
-		rest = rest[1:]
-	}
-	return rest, true
 }
 
 // splitFirst splits s into the first whitespace-delimited token and the rest.
