@@ -165,12 +165,24 @@ func Generate(cfg *config.Config) error {
 			return fmt.Errorf("plugin %q: %w", pc.Name, err)
 		}
 
-		// Build annotations best-effort: skip per-unit errors.
+		// Build annotations per query (best-effort; per-query errors are skipped).
+		// Offsets in each AnnotationValue are relative to Query.Sql, which is
+		// exactly what we pass to Annotate.
 		var anns []*irv1.AnnotationValue
-		if info.GetAnnotationSchema() != nil {
-			for _, u := range r.Units {
-				vs, _ := plugin.Annotate(u.SQL, u.Path, info.GetAnnotationSchema())
-				anns = append(anns, vs...)
+		if schema := info.GetAnnotationSchema(); schema != nil {
+			for _, q := range r.Queries {
+				vals, err := plugin.Annotate(q.GetSql(), q.GetSourceFile(), schema)
+				if err != nil {
+					continue // best-effort
+				}
+				for _, v := range vals {
+					if v.GetTarget() == nil {
+						v.Target = &irv1.AnnotationTargetRef{}
+					}
+					v.Target.Kind = irv1.AnnotationTargetKind_ANNOTATION_TARGET_KIND_QUERY
+					v.Target.QueryName = q.GetName()
+				}
+				anns = append(anns, vals...)
 			}
 		}
 

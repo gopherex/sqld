@@ -22,6 +22,43 @@ func Info() *pluginv1.GetInfoResponse {
 		Name:             "go",
 		Version:          "0.1.0",
 		SupportedEngines: []irv1.Engine{irv1.Engine_ENGINE_POSTGRESQL},
+		AnnotationSchema: &pluginv1.AnnotationSchema{
+			Sigil:         "@",
+			CommentStyles: []string{"--", "/* */"},
+			Annotations: []*pluginv1.AnnotationDef{
+				{
+					Name: "if",
+					Value: &pluginv1.AnnotationValueSpec{
+						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_POSITIONAL,
+						Fields: []*pluginv1.FieldSpec{
+							{Name: "condition", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT},
+						},
+					},
+				},
+				{
+					Name:  "endif",
+					Value: &pluginv1.AnnotationValueSpec{Form: pluginv1.AnnotationForm_ANNOTATION_FORM_FLAG},
+				},
+				{
+					Name: "slice",
+					Value: &pluginv1.AnnotationValueSpec{
+						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_POSITIONAL,
+						Fields: []*pluginv1.FieldSpec{
+							{Name: "param", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT},
+						},
+					},
+				},
+				{
+					Name: "orderby",
+					Value: &pluginv1.AnnotationValueSpec{
+						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_KEYED,
+						Fields: []*pluginv1.FieldSpec{
+							{Name: "allow", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_STRING},
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -42,7 +79,7 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 
 	// queries.go — only when there are queries
 	if qs := req.GetQueries(); len(qs) > 0 {
-		qBytes, qDiags := generateQueries(pkg, qs)
+		qBytes, qDiags := generateQueries(pkg, qs, req.GetAnnotations())
 		diagnostics = append(diagnostics, qDiags...)
 		files = append(files, &pluginv1.GeneratedFile{
 			Path:     "queries.go",
@@ -291,24 +328,68 @@ type qInfo struct {
 	paramStructName string
 }
 
-func generateQueries(pkg string, queries []*pluginv1.Query) ([]byte, []*pluginv1.Diagnostic) {
+func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.AnnotationValue) ([]byte, []*pluginv1.Diagnostic) {
+	// Index annotations by query name.
+	annotByQuery := make(map[string][]*irv1.AnnotationValue)
+	for _, a := range annotations {
+		if t := a.GetTarget(); t != nil && t.GetQueryName() != "" {
+			qn := t.GetQueryName()
+			annotByQuery[qn] = append(annotByQuery[qn], a)
+		}
+	}
+
+	// Determine if any query is dynamic (has annotations).
+	hasDynamic := false
+	for _, q := range queries {
+		if len(annotByQuery[q.GetName()]) > 0 {
+			hasDynamic = true
+			break
+		}
+	}
+
 	var allImports []string
 	allImports = append(allImports, "context", "github.com/jackc/pgx/v5", "github.com/jackc/pgx/v5/pgconn")
+	if hasDynamic {
+		allImports = append(allImports, "fmt", "strings")
+	}
 
-	var qInfos []qInfo
+	// Separate static and dynamic queries. Collect import contributions from both.
+	type staticEntry struct {
+		qi qInfo
+	}
+	type dynamicEntry struct {
+		q    *pluginv1.Query
+		anns []*irv1.AnnotationValue
+		cols []qField
+	}
+
+	var staticEntries []staticEntry
+	var dynamicEntries []dynamicEntry
+
 	for _, q := range queries {
+		qAnns := annotByQuery[q.GetName()]
+		isDynamic := len(qAnns) > 0
+
+		qCols := q.GetColumns()
+		var cols []qField
+		for _, c := range qCols {
+			gt, imps := goType(c.GetType(), c.GetNullable())
+			allImports = append(allImports, imps...)
+			cols = append(cols, qField{name: pascal(c.GetName()), goType: gt})
+		}
+
+		if isDynamic {
+			dynamicEntries = append(dynamicEntries, dynamicEntry{q: q, anns: qAnns, cols: cols})
+			continue
+		}
+
 		methodName := pascal(q.GetName())
 		constName := lowerCamel(q.GetName()) + "SQL"
 
-		qCols := q.GetColumns()
 		var params []qParam
 		for _, p := range q.GetParameters() {
 			pName := p.GetName()
 			if pName == "" {
-				// For SELECT queries, try to infer from the output column at the
-				// same 0-based index (e.g. SELECT ... WHERE id = $1 → param named "id").
-				// This heuristic is only applied when there is no better source of naming
-				// (INSERT column lists are resolved in the infer pass instead).
 				idx := int(p.GetNumber()) - 1
 				if idx >= 0 && idx < len(qCols) && qCols[idx].GetName() != "" {
 					pName = qCols[idx].GetName()
@@ -321,14 +402,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query) ([]byte, []*pluginv1
 			params = append(params, qParam{goName: lowerCamel(pName), goType: gt})
 		}
 
-		var cols []qField
-		for _, c := range q.GetColumns() {
-			gt, imps := goType(c.GetType(), c.GetNullable())
-			allImports = append(allImports, imps...)
-			cols = append(cols, qField{name: pascal(c.GetName()), goType: gt})
-		}
-
-		qInfos = append(qInfos, qInfo{
+		staticEntries = append(staticEntries, staticEntry{qi: qInfo{
 			methodName:      methodName,
 			constName:       constName,
 			sql:             q.GetSql(),
@@ -337,7 +411,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query) ([]byte, []*pluginv1
 			cols:            cols,
 			hasParamStruct:  len(params) >= 2,
 			paramStructName: methodName + "Params",
-		})
+		}})
 	}
 
 	var sb strings.Builder
@@ -376,8 +450,12 @@ func generateQueries(pkg string, queries []*pluginv1.Query) ([]byte, []*pluginv1
 	sb.WriteString("type Queries struct {\n\tdb DBTX\n}\n\n")
 	sb.WriteString("func New(db DBTX) *Queries { return &Queries{db: db} }\n\n")
 
-	for _, qi := range qInfos {
-		writeQueryCode(&sb, qi)
+	for _, se := range staticEntries {
+		writeQueryCode(&sb, se.qi)
+	}
+
+	for _, de := range dynamicEntries {
+		writeDynamicQueryCode(&sb, de.q, de.anns, de.cols)
 	}
 
 	return formatSource(sb.String(), "queries.go")
@@ -511,6 +589,399 @@ func formatSource(src, filename string) ([]byte, []*pluginv1.Diagnostic) {
 		}}
 	}
 	return formatted, nil
+}
+
+// ---- dynamic query generation ----
+
+// dynSegKind classifies a segment within a dynamic query's SQL.
+type dynSegKind int
+
+const (
+	dynSegStatic  dynSegKind = iota // verbatim SQL text (may contain $N placeholders)
+	dynSegIf                        // @if region
+	dynSegSlice                     // @slice region
+	dynSegOrderBy                   // @orderby marker
+)
+
+type dynSegment struct {
+	kind        dynSegKind
+	text        string // static: SQL text; conditional: fragment SQL
+	fieldName   string // if/slice: Go field name (PascalCase)
+	goType      string // slice: element type; if: pointer-base type
+	allowList   string // orderby: comma-sep allowed columns
+	paramNumber uint32 // for if/slice: the $N inside the fragment
+}
+
+// writeDynamicQueryCode generates a query method that builds SQL at runtime.
+func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.AnnotationValue, cols []qField) {
+	sql := q.GetSql()
+	methodName := pascal(q.GetName())
+	lowerName := lowerCamel(q.GetName())
+
+	// Build a map from param number to QueryParameter.
+	paramByNum := make(map[uint32]*pluginv1.QueryParameter)
+	for _, p := range q.GetParameters() {
+		paramByNum[p.GetNumber()] = p
+	}
+
+	// Sort annotations by StartOffset.
+	sorted := make([]*irv1.AnnotationValue, len(anns))
+	copy(sorted, anns)
+	sort.Slice(sorted, func(i, j int) bool {
+		si := sorted[i].GetTarget().GetSource().GetStartOffset()
+		sj := sorted[j].GetTarget().GetSource().GetStartOffset()
+		return si < sj
+	})
+
+	// Pair opens (if/slice) with the next endif, in order.
+	// Build a list of "events" over the SQL: open, close, orderby.
+	type annEvent struct {
+		name     string
+		startOff uint64
+		endOff   uint64
+		argValue string // condition/param name or allow list
+	}
+	var events []annEvent
+	for _, a := range sorted {
+		src := a.GetTarget().GetSource()
+		argVal := ""
+		if len(a.GetArgs()) > 0 {
+			argVal = a.GetArgs()[0].GetStringValue()
+		}
+		events = append(events, annEvent{
+			name:     a.GetName(),
+			startOff: src.GetStartOffset(),
+			endOff:   src.GetEndOffset(),
+			argValue: argVal,
+		})
+	}
+
+	// Walk events and build segments, tracking excluded byte ranges.
+	// excluded ranges = all directive comment byte ranges.
+	type byteRange struct{ start, end uint64 }
+	var excluded []byteRange
+	for _, ev := range events {
+		excluded = append(excluded, byteRange{ev.startOff, ev.endOff})
+	}
+
+	// Build ordered segments by processing events left-to-right.
+	// We maintain a cursor over the SQL and pop off each directive.
+	var segments []dynSegment
+	cursor := uint64(0)
+
+	// Stack of open regions: each entry = index into events of the opener.
+	type openEntry struct {
+		evIdx     int
+		openEvent annEvent
+	}
+	var openStack []openEntry
+
+	for i, ev := range events {
+		switch ev.name {
+		case "if", "slice":
+			// Emit static text from cursor to start of this directive.
+			if ev.startOff > cursor {
+				staticText := strings.TrimRight(sql[cursor:ev.startOff], " \t\n\r")
+				if staticText != "" {
+					segments = append(segments, dynSegment{kind: dynSegStatic, text: staticText})
+				}
+			}
+			cursor = ev.endOff
+			openStack = append(openStack, openEntry{evIdx: i, openEvent: ev})
+
+		case "endif":
+			if len(openStack) == 0 {
+				// Orphan endif — treat as static exclusion.
+				cursor = ev.endOff
+				continue
+			}
+			opener := openStack[len(openStack)-1]
+			openStack = openStack[:len(openStack)-1]
+
+			// Fragment text: from end of opener directive to start of this endif.
+			fragText := ""
+			if ev.startOff > opener.openEvent.endOff {
+				fragText = strings.TrimSpace(sql[opener.openEvent.endOff:ev.startOff])
+			}
+
+			// Find the $N inside the fragment.
+			paramNum := findFirstParamNum(fragText)
+
+			var fieldName, goTypeStr string
+			switch opener.openEvent.name {
+			case "if":
+				fieldName = pascal(opener.openEvent.argValue)
+				// Get the param's base type (no pointer — we'll add * when generating).
+				if p, ok := paramByNum[paramNum]; ok {
+					gt, _ := goType(p.GetType(), false)
+					goTypeStr = gt
+				} else {
+					goTypeStr = "any"
+				}
+				segments = append(segments, dynSegment{
+					kind:        dynSegIf,
+					text:        fragText,
+					fieldName:   fieldName,
+					goType:      goTypeStr,
+					paramNumber: paramNum,
+				})
+			case "slice":
+				fieldName = pascal(opener.openEvent.argValue)
+				// Determine element type.
+				if p, ok := paramByNum[paramNum]; ok {
+					tr := p.GetType()
+					if tr != nil && tr.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
+						gt, _ := goType(tr.GetElement(), false)
+						goTypeStr = gt
+					} else {
+						gt, _ := goType(tr, false)
+						goTypeStr = gt
+					}
+				} else {
+					goTypeStr = "any"
+				}
+				segments = append(segments, dynSegment{
+					kind:        dynSegSlice,
+					text:        fragText,
+					fieldName:   fieldName,
+					goType:      goTypeStr,
+					paramNumber: paramNum,
+				})
+			}
+			cursor = ev.endOff
+
+		case "orderby":
+			// Emit static text before this directive.
+			if ev.startOff > cursor {
+				staticText := strings.TrimRight(sql[cursor:ev.startOff], " \t\n\r")
+				if staticText != "" {
+					segments = append(segments, dynSegment{kind: dynSegStatic, text: staticText})
+				}
+			}
+			segments = append(segments, dynSegment{
+				kind:      dynSegOrderBy,
+				allowList: ev.argValue,
+			})
+			cursor = ev.endOff
+		}
+	}
+
+	// Emit any trailing static text.
+	if int(cursor) < len(sql) {
+		staticText := strings.TrimRight(sql[cursor:], " \t\n\r")
+		if staticText != "" {
+			segments = append(segments, dynSegment{kind: dynSegStatic, text: staticText})
+		}
+	}
+
+	// Collect Params struct fields.
+	type paramField struct {
+		name      string
+		goType    string // full type including * or []
+		kind      dynSegKind
+		allowList string
+	}
+	var fields []paramField
+	hasOrderBy := false
+	for _, seg := range segments {
+		switch seg.kind {
+		case dynSegIf:
+			fields = append(fields, paramField{name: seg.fieldName, goType: "*" + seg.goType, kind: dynSegIf})
+		case dynSegSlice:
+			fields = append(fields, paramField{name: seg.fieldName, goType: "[]" + seg.goType, kind: dynSegSlice})
+		case dynSegOrderBy:
+			if !hasOrderBy {
+				fields = append(fields, paramField{name: "OrderBy", goType: "string", kind: dynSegOrderBy, allowList: seg.allowList})
+				hasOrderBy = true
+			}
+		}
+	}
+
+	// Emit orderby allowlist map var (before the method).
+	if hasOrderBy {
+		mapVarName := lowerName + "OrderBy"
+		// Collect allowed columns.
+		var allowCols []string
+		for _, seg := range segments {
+			if seg.kind == dynSegOrderBy {
+				for _, col := range strings.Split(seg.allowList, ",") {
+					col = strings.TrimSpace(col)
+					if col != "" {
+						allowCols = append(allowCols, col)
+					}
+				}
+				break
+			}
+		}
+		sb.WriteString(fmt.Sprintf("var %s = map[string]string{", mapVarName))
+		for i, col := range allowCols {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%q: %q", col, col))
+		}
+		sb.WriteString("}\n\n")
+	}
+
+	// Params struct.
+	paramsStructName := methodName + "Params"
+	sb.WriteString(fmt.Sprintf("type %s struct {\n", paramsStructName))
+	for _, f := range fields {
+		sb.WriteString(fmt.Sprintf("\t%s %s\n", f.name, f.goType))
+	}
+	sb.WriteString("}\n\n")
+
+	// Row struct.
+	rowTypeName := methodName + "Row"
+	isExec := isExecCommand(q.GetCommand())
+	if !isExec && len(cols) > 0 {
+		sb.WriteString(fmt.Sprintf("type %s struct {\n", rowTypeName))
+		for _, c := range cols {
+			sb.WriteString(fmt.Sprintf("\t%s %s\n", c.name, c.goType))
+		}
+		sb.WriteString("}\n\n")
+	}
+
+	// Method signature.
+	var retType string
+	switch {
+	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_ONE:
+		retType = fmt.Sprintf("(%s, error)", rowTypeName)
+	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_MANY:
+		retType = fmt.Sprintf("([]%s, error)", rowTypeName)
+	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_EXEC_ROWS:
+		retType = "(int64, error)"
+	default:
+		retType = "error"
+	}
+
+	if retType == "error" {
+		sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context, arg %s) error {\n",
+			methodName, paramsStructName))
+	} else {
+		sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context, arg %s) %s {\n",
+			methodName, paramsStructName, retType))
+	}
+
+	// Body: build SQL string at runtime.
+	sb.WriteString("\tvar b strings.Builder\n")
+	sb.WriteString("\tvar args []any\n")
+
+	mapVarName := lowerName + "OrderBy"
+
+	for _, seg := range segments {
+		switch seg.kind {
+		case dynSegStatic:
+			// Handle $N placeholders within the static text.
+			writeStaticSegment(sb, seg.text)
+
+		case dynSegIf:
+			// if arg.X != nil { args = append(args, *arg.X); fmt.Fprintf(&b, " ... $%d ...", len(args)) }
+			// The fragment is trimmed of surrounding whitespace, so prefix a single
+			// leading space to keep the assembled SQL separated (avoid e.g. "trueAND").
+			rewritten := " " + rewriteFragment(seg.text)
+			sb.WriteString(fmt.Sprintf("\tif arg.%s != nil {\n", seg.fieldName))
+			sb.WriteString(fmt.Sprintf("\t\targs = append(args, *arg.%s)\n", seg.fieldName))
+			sb.WriteString(fmt.Sprintf("\t\tfmt.Fprintf(&b, %q, len(args))\n", rewritten))
+			sb.WriteString("\t}\n")
+
+		case dynSegSlice:
+			// Prefix a single leading space (fragment is trimmed) so consecutive
+			// conditional fragments stay separated by exactly one space.
+			rewritten := " " + rewriteFragment(seg.text)
+			sb.WriteString(fmt.Sprintf("\tif len(arg.%s) > 0 {\n", seg.fieldName))
+			sb.WriteString(fmt.Sprintf("\t\targs = append(args, arg.%s)\n", seg.fieldName))
+			sb.WriteString(fmt.Sprintf("\t\tfmt.Fprintf(&b, %q, len(args))\n", rewritten))
+			sb.WriteString("\t}\n")
+
+		case dynSegOrderBy:
+			sb.WriteString("\tif arg.OrderBy != \"\" {\n")
+			sb.WriteString(fmt.Sprintf("\t\tcol, ok := %s[arg.OrderBy]\n", mapVarName))
+			sb.WriteString("\t\tif !ok {\n")
+			sb.WriteString("\t\t\treturn " + dynReturnNil(q.GetCommand()) + "fmt.Errorf(\"invalid order by: %s\", arg.OrderBy)\n")
+			sb.WriteString("\t\t}\n")
+			sb.WriteString("\t\tfmt.Fprintf(&b, \" ORDER BY %s\", col)\n")
+			sb.WriteString("\t}\n")
+		}
+	}
+
+	// Execute the built query.
+	switch {
+	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_ONE:
+		sb.WriteString("\trow := q.db.QueryRow(ctx, b.String(), args...)\n")
+		sb.WriteString(fmt.Sprintf("\tvar i %s\n", rowTypeName))
+		sb.WriteString(fmt.Sprintf("\terr := row.Scan(%s)\n", buildScanList(cols, "i")))
+		sb.WriteString("\treturn i, err\n")
+
+	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_MANY:
+		sb.WriteString("\trows, err := q.db.Query(ctx, b.String(), args...)\n")
+		sb.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+		sb.WriteString("\tdefer rows.Close()\n")
+		sb.WriteString(fmt.Sprintf("\tvar items []%s\n", rowTypeName))
+		sb.WriteString("\tfor rows.Next() {\n")
+		sb.WriteString(fmt.Sprintf("\t\tvar i %s\n", rowTypeName))
+		sb.WriteString(fmt.Sprintf("\t\tif err := rows.Scan(%s); err != nil {\n", buildScanList(cols, "i")))
+		sb.WriteString("\t\t\treturn nil, err\n\t\t}\n")
+		sb.WriteString("\t\titems = append(items, i)\n\t}\n")
+		sb.WriteString("\treturn items, rows.Err()\n")
+
+	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_EXEC_ROWS:
+		sb.WriteString("\ttag, err := q.db.Exec(ctx, b.String(), args...)\n")
+		sb.WriteString("\treturn tag.RowsAffected(), err\n")
+
+	default: // exec
+		sb.WriteString("\t_, err := q.db.Exec(ctx, b.String(), args...)\n")
+		sb.WriteString("\treturn err\n")
+	}
+
+	sb.WriteString("}\n\n")
+}
+
+// dynReturnNil returns the prefix to prepend before an error return for dynamic
+// queries that have non-error return types (e.g. "nil, ").
+func dynReturnNil(cmd pluginv1.QueryCommand) string {
+	switch cmd {
+	case pluginv1.QueryCommand_QUERY_COMMAND_ONE, pluginv1.QueryCommand_QUERY_COMMAND_MANY:
+		return "nil, "
+	case pluginv1.QueryCommand_QUERY_COMMAND_EXEC_ROWS:
+		return "0, "
+	default:
+		return ""
+	}
+}
+
+// findFirstParamNum scans text for the first $N and returns N.
+// Returns 0 if not found.
+func findFirstParamNum(text string) uint32 {
+	re := regexp.MustCompile(`\$(\d+)`)
+	m := re.FindStringSubmatch(text)
+	if m == nil {
+		return 0
+	}
+	var n uint32
+	fmt.Sscanf(m[1], "%d", &n)
+	return n
+}
+
+// rewriteFragment replaces the first $N in a fragment with $%d (for fmt.Fprintf).
+func rewriteFragment(text string) string {
+	re := regexp.MustCompile(`\$\d+`)
+	return re.ReplaceAllString(text, "$%d")
+}
+
+// writeStaticSegment emits b.WriteString / fmt.Fprintf calls for a static
+// SQL segment that may contain $N placeholders. Each $N is replaced with
+// a runtime-numbered $%d after appending the corresponding argument.
+// Since static segments outside any region use positional params that are
+// always present, we just emit the text as a WriteString (no args to append —
+// static params outside conditional regions are not supported in dynamic queries;
+// all params must be inside regions). If the static text has no $N we simply
+// emit a WriteString.
+func writeStaticSegment(sb *strings.Builder, text string) {
+	// For the current design, static text outside regions should not contain
+	// $N (those are always inside regions in a dynamic query). We write it
+	// literally via b.WriteString.
+	sb.WriteString(fmt.Sprintf("\tb.WriteString(%q)\n", text))
 }
 
 // ensure sort is used (it's used in uniqueSorted)
