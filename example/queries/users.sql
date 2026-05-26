@@ -25,6 +25,9 @@ SELECT status_history FROM app.profiles WHERE user_id = @user_id;
 -- name: GetOwner :one
 SELECT owner FROM app.profiles WHERE user_id = @user_id;
 
+-- name: GetActiveDuring :one
+SELECT active_during FROM app.profiles WHERE user_id = @user_id;
+
 -- name: SetAddress :exec
 UPDATE app.profiles SET address = @address WHERE user_id = @user_id;
 

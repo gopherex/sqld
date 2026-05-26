@@ -111,12 +111,16 @@ func parseOverrideValue(v string) (goExpr string, imports []string) {
 }
 
 // goTypeNoPointer reports whether a Go type expression should NOT be wrapped in
-// a pointer when its column is nullable: slices, maps, and json.RawMessage (all
-// of which already have a nil zero value that represents SQL NULL).
+// a pointer when its column is nullable: slices, maps, json.RawMessage, and the
+// pgtype.Range / pgtype.Multirange types (all of which already represent SQL
+// NULL internally — slices/maps via a nil zero value, the pgtype range types via
+// their Valid field).
 func goTypeNoPointer(goExpr string) bool {
 	return strings.HasPrefix(goExpr, "[]") ||
 		strings.HasPrefix(goExpr, "map[") ||
-		goExpr == "json.RawMessage"
+		goExpr == "json.RawMessage" ||
+		strings.HasPrefix(goExpr, "pgtype.Range[") ||
+		strings.HasPrefix(goExpr, "pgtype.Multirange[")
 }
 
 // resolveGoType chooses the Go type for a value, applying overrides before
@@ -303,6 +307,39 @@ func scalarGoType(pgName string) (string, []string) {
 		return "json.RawMessage", []string{"encoding/json"}
 	case "inet", "cidr", "macaddr":
 		return "string", nil
+	// --- builtin range types ---
+	//
+	// pgx ships built-in codecs for these, so no RegisterTypes entry is needed.
+	// pgtype.Range[T] carries a Valid field, so a nullable range column is
+	// represented by the value type (not a pointer): see goTypeNoPointer.
+	case "int4range":
+		return "pgtype.Range[pgtype.Int4]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "int8range":
+		return "pgtype.Range[pgtype.Int8]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "numrange":
+		return "pgtype.Range[pgtype.Numeric]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "tsrange":
+		return "pgtype.Range[pgtype.Timestamp]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "tstzrange":
+		return "pgtype.Range[pgtype.Timestamptz]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "daterange":
+		return "pgtype.Range[pgtype.Date]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	// --- builtin multirange types ---
+	//
+	// pgtype.Multirange[T] is []T where T is a pgtype.Range[...]; it also carries
+	// NULL via IsNull(), so a nullable multirange column is a value (slice) type.
+	case "int4multirange":
+		return "pgtype.Multirange[pgtype.Range[pgtype.Int4]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "int8multirange":
+		return "pgtype.Multirange[pgtype.Range[pgtype.Int8]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "nummultirange":
+		return "pgtype.Multirange[pgtype.Range[pgtype.Numeric]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "tsmultirange":
+		return "pgtype.Multirange[pgtype.Range[pgtype.Timestamp]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "tstzmultirange":
+		return "pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+	case "datemultirange":
+		return "pgtype.Multirange[pgtype.Range[pgtype.Date]]", []string{"github.com/jackc/pgx/v5/pgtype"}
 	default:
 		return "any", nil
 	}

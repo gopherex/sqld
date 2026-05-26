@@ -143,6 +143,7 @@ type AppProfiles struct {
 	PrevAddresses []AppAddress
 	StatusHistory []AppUserStatus
 	Owner         AppPerson
+	ActiveDuring  pgtype.Range[pgtype.Timestamptz]
 }
 
 type AppOrders struct {
@@ -163,34 +164,36 @@ type AppUserRoles struct {
 }
 
 type AppKitchenSink struct {
-	CInt2        *int16
-	CInt4        *int32
-	CInt8        *int64
-	CSerial      *int32
-	CNumeric     *string
-	CFloat4      *float32
-	CFloat8      *float64
-	CBool        *bool
-	CText        *string
-	CVarchar     *string
-	CChar        *string
-	CUUID        *uuid.UUID
-	CBytea       []byte
-	CJsonb       map[string]any
-	CJSON        json.RawMessage
-	CInet        *string
-	CDate        *time.Time
-	CTime        *time.Time
-	CTimestamp   *time.Time
-	CTimestamptz *time.Time
-	CInterval    *any
-	CIntArray    []int32
-	CTextArray   []string
-	CStatus      *AppUserStatus
-	CAddress     *AppAddress
-	CEmail       *string
-	CGenerated   *int32
-	CIdentity    int32
+	CInt2          *int16
+	CInt4          *int32
+	CInt8          *int64
+	CSerial        *int32
+	CNumeric       *string
+	CFloat4        *float32
+	CFloat8        *float64
+	CBool          *bool
+	CText          *string
+	CVarchar       *string
+	CChar          *string
+	CUUID          *uuid.UUID
+	CBytea         []byte
+	CJsonb         map[string]any
+	CJSON          json.RawMessage
+	CInet          *string
+	CDate          *time.Time
+	CTime          *time.Time
+	CTimestamp     *time.Time
+	CTimestamptz   *time.Time
+	CInterval      *any
+	CIntArray      []int32
+	CTextArray     []string
+	CStatus        *AppUserStatus
+	CAddress       *AppAddress
+	CEmail         *string
+	CInt4range     pgtype.Range[pgtype.Int4]
+	CNummultirange pgtype.Multirange[pgtype.Range[pgtype.Numeric]]
+	CGenerated     *int32
+	CIdentity      int32
 }
 
 type AuditLog struct {
