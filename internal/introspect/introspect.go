@@ -137,10 +137,19 @@ func Introspect(ctx context.Context, conn DBTX, schemas []string) (*irv1.Catalog
 // non-system schema present in the database is returned, with "public" first.
 func (b *builder) discoverSchemas(ctx context.Context, requested []string) ([]string, error) {
 	if len(requested) > 0 {
+		// Restrict the requested list to schemas that actually exist in the
+		// database. Returning a requested-but-absent schema would make the
+		// introspected catalog claim an empty schema exists, which then causes
+		// the diff to skip its CREATE SCHEMA (it appears unchanged) and emit
+		// objects into a schema that was never created.
+		existing, err := b.existingSchemas(ctx)
+		if err != nil {
+			return nil, err
+		}
 		seen := make(map[string]bool, len(requested))
 		var out []string
 		for _, s := range requested {
-			if s == "" || seen[s] {
+			if s == "" || seen[s] || !existing[s] {
 				continue
 			}
 			seen[s] = true
@@ -186,6 +195,31 @@ ORDER BY nspname`
 		out = append([]string{"public"}, out...)
 	}
 	return out, nil
+}
+
+// existingSchemas returns the set of non-system schema names present in the
+// database, used to filter an explicit requested list down to what truly
+// exists.
+func (b *builder) existingSchemas(ctx context.Context) (map[string]bool, error) {
+	const q = `
+SELECT nspname
+FROM pg_catalog.pg_namespace
+WHERE nspname NOT LIKE 'pg\_%'
+  AND nspname <> 'information_schema'`
+	rows, err := b.conn.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out[n] = true
+	}
+	return out, rows.Err()
 }
 
 // serverInfo returns the current database name and server version string.
