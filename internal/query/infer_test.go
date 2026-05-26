@@ -216,6 +216,122 @@ func TestInferOptionalNamedParam(t *testing.T) {
 	}
 }
 
+// TestInferParamNamesComparison: positional param beside a column ref gets the
+// column name.
+func TestInferParamNamesComparison(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TABLE users(id bigint primary key, email text not null);")
+	cat, _ := catalog.Build(stmts)
+	qs, err := ParseQueries("-- name: G :one\nSELECT id FROM users WHERE id = $1;\n", "q.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d catalog.Diagnostics
+	Infer(qs[0], cat, &d)
+	params := qs[0].GetParameters()
+	if len(params) != 1 {
+		t.Fatalf("params=%d want 1", len(params))
+	}
+	p := params[0]
+	if p.GetName() != "id" {
+		t.Errorf("param $1 Name=%q want \"id\"", p.GetName())
+	}
+	if p.GetType() == nil || p.GetType().GetPgName() != "int8" {
+		t.Errorf("param $1 Type=%v want int8", p.GetType())
+	}
+}
+
+// TestInferParamNamesUpdate: positional params in UPDATE SET get names from the
+// assigned column, and params in WHERE get names from the comparison column.
+func TestInferParamNamesUpdate(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TABLE users(id bigint primary key, status text not null);")
+	cat, _ := catalog.Build(stmts)
+	qs, err := ParseQueries("-- name: S :execrows\nUPDATE users SET status = $2 WHERE id = $1;\n", "q.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d catalog.Diagnostics
+	Infer(qs[0], cat, &d)
+	params := qs[0].GetParameters()
+	if len(params) != 2 {
+		t.Fatalf("params=%d want 2", len(params))
+	}
+	// params are ordered by position: $1 first, $2 second.
+	p1 := params[0]
+	p2 := params[1]
+	if p1.GetNumber() != 1 {
+		t.Fatalf("params[0].Number=%d want 1", p1.GetNumber())
+	}
+	if p2.GetNumber() != 2 {
+		t.Fatalf("params[1].Number=%d want 2", p2.GetNumber())
+	}
+	if p1.GetName() != "id" {
+		t.Errorf("$1 Name=%q want \"id\"", p1.GetName())
+	}
+	if p2.GetName() != "status" {
+		t.Errorf("$2 Name=%q want \"status\"", p2.GetName())
+	}
+}
+
+// TestInferParamNamesInsert: positional params in INSERT VALUES get names from
+// the corresponding column in the column list.
+func TestInferParamNamesInsert(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TABLE users(id bigint primary key, email text not null);")
+	cat, _ := catalog.Build(stmts)
+	qs, err := ParseQueries(
+		"-- name: C :one\nINSERT INTO users (id, email) VALUES ($1, $2) RETURNING id;\n",
+		"q.sql",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d catalog.Diagnostics
+	Infer(qs[0], cat, &d)
+	params := qs[0].GetParameters()
+	if len(params) != 2 {
+		t.Fatalf("params=%d want 2", len(params))
+	}
+	p1 := params[0]
+	p2 := params[1]
+	if p1.GetNumber() != 1 {
+		t.Fatalf("params[0].Number=%d want 1", p1.GetNumber())
+	}
+	if p2.GetNumber() != 2 {
+		t.Fatalf("params[1].Number=%d want 2", p2.GetNumber())
+	}
+	if p1.GetName() != "id" {
+		t.Errorf("$1 Name=%q want \"id\"", p1.GetName())
+	}
+	if p2.GetName() != "email" {
+		t.Errorf("$2 Name=%q want \"email\"", p2.GetName())
+	}
+}
+
+// TestInferParamNamesNamedNotOverwritten: named params keep their name after Infer.
+func TestInferParamNamesNamedNotOverwritten(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TABLE users(id bigint primary key, email text not null);")
+	cat, _ := catalog.Build(stmts)
+	qs, err := ParseQueries(
+		"-- name: GetByEmail :one\nSELECT id FROM users WHERE email = @email;\n",
+		"q.sql",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d catalog.Diagnostics
+	Infer(qs[0], cat, &d)
+	params := qs[0].GetParameters()
+	if len(params) != 1 {
+		t.Fatalf("params=%d want 1", len(params))
+	}
+	p := params[0]
+	if p.GetName() != "email" {
+		t.Errorf("Name=%q want \"email\" (named param must not be overwritten)", p.GetName())
+	}
+	if p.GetType() == nil || p.GetType().GetPgName() != "text" {
+		t.Errorf("Type=%v want text", p.GetType())
+	}
+}
+
 // Bug 3: resolveColumnRef cross-table fallback must be deterministic.
 // Run it many times; if non-deterministic, the type will flip between runs.
 func TestInferColumnRefFallbackDeterministic(t *testing.T) {

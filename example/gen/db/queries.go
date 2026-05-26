@@ -125,20 +125,20 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Creat
 
 const deleteUserSQL = `DELETE FROM app.users WHERE id = $1;`
 
-func (q *Queries) DeleteUser(ctx context.Context, arg1 int64) error {
-	_, err := q.db.Exec(ctx, deleteUserSQL, arg1)
+func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteUserSQL, id)
 	return err
 }
 
 const setUserStatusSQL = `UPDATE app.users SET status = $2 WHERE id = $1;`
 
 type SetUserStatusParams struct {
-	Arg1 int64
-	Arg2 any
+	ID     int64
+	Status any
 }
 
 func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (int64, error) {
-	tag, err := q.db.Exec(ctx, setUserStatusSQL, arg.Arg1, arg.Arg2)
+	tag, err := q.db.Exec(ctx, setUserStatusSQL, arg.ID, arg.Status)
 	return tag.RowsAffected(), err
 }
 
