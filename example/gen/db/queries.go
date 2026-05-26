@@ -191,6 +191,19 @@ func (q *Queries) GetActiveDuring(ctx context.Context, userID int64) (GetActiveD
 	return i, err
 }
 
+const getValidWindowSQL = `SELECT valid_window FROM app.profiles WHERE user_id = $1;`
+
+type GetValidWindowRow struct {
+	ValidWindow pgtype.Range[pgtype.Timestamptz]
+}
+
+func (q *Queries) GetValidWindow(ctx context.Context, userID int64) (GetValidWindowRow, error) {
+	row := q.db.QueryRow(ctx, getValidWindowSQL, userID)
+	var i GetValidWindowRow
+	err := row.Scan(&i.ValidWindow)
+	return i, err
+}
+
 const setAddressSQL = `UPDATE app.profiles SET address = $1 WHERE user_id = $2;`
 
 type SetAddressParams struct {

@@ -24,6 +24,11 @@ type compositeEntry struct {
 	c      *irv1.CompositeType
 }
 
+type rangeEntry struct {
+	schema string
+	r      *irv1.RangeType
+}
+
 // udtRegistry is an index of all UDTs in the catalog, keyed by bare type name
 // (the Name.Name field — not schema-qualified).  When two schemas define a type
 // with the same bare name the first one wins; that matches the PostgreSQL
@@ -32,6 +37,10 @@ type udtRegistry struct {
 	enums      map[string]enumEntry
 	domains    map[string]domainEntry
 	composites map[string]compositeEntry
+	// ranges holds custom CREATE TYPE ... AS RANGE types, keyed by bare type
+	// name. Builtin ranges (int4range, …) are NOT here — they map directly in
+	// scalarGoType and need no registration.
+	ranges map[string]rangeEntry
 }
 
 // buildUDTRegistry walks catalog schemas and builds a flat lookup table.
@@ -40,6 +49,7 @@ func buildUDTRegistry(catalog *irv1.Catalog) *udtRegistry {
 		enums:      make(map[string]enumEntry),
 		domains:    make(map[string]domainEntry),
 		composites: make(map[string]compositeEntry),
+		ranges:     make(map[string]rangeEntry),
 	}
 	for _, schema := range catalog.GetSchemas() {
 		sName := schema.GetName()
@@ -59,6 +69,12 @@ func buildUDTRegistry(catalog *irv1.Catalog) *udtRegistry {
 			name := c.GetName().GetName()
 			if _, exists := reg.composites[name]; !exists {
 				reg.composites[name] = compositeEntry{schema: sName, c: c}
+			}
+		}
+		for _, r := range schema.GetRanges() {
+			name := r.GetName().GetName()
+			if _, exists := reg.ranges[name]; !exists {
+				reg.ranges[name] = rangeEntry{schema: sName, r: r}
 			}
 		}
 	}
@@ -195,6 +211,22 @@ func goType(reg *udtRegistry, t *irv1.TypeRef, nullable bool) (goExpr string, im
 			}
 			return typeName, nil
 		}
+		// --- custom range (CREATE TYPE ... AS RANGE) ---
+		//
+		// Maps to pgtype.Range[<subtypeElem>] where <subtypeElem> is the pgtype
+		// element type for the range's subtype (e.g. timestamptz → pgtype.Timestamptz).
+		// pgtype.Range carries a Valid field, so a nullable custom range is a value
+		// type, never a pointer (see goTypeNoPointer).
+		if entry, ok := reg.ranges[pgName]; ok {
+			subPg := entry.r.GetSubtype().GetPgName()
+			elem, ok := pgtypeElement(subPg)
+			if !ok {
+				// Unknown subtype: fall back to pgtype.Range[pgtype.Text] as a
+				// best-effort (the scan may need a manual override).
+				elem = "pgtype.Text"
+			}
+			return "pgtype.Range[" + elem + "]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		}
 	}
 
 	expr, imps := scalarGoType(pgName)
@@ -278,6 +310,54 @@ func resolveGoParamType(reg *udtRegistry, ov overrides, columnID string, t *irv1
 	return goParamType(reg, t, nullable)
 }
 
+// pgtypeElement maps a PostgreSQL scalar type name to the pgtype element type
+// used as the type parameter of pgtype.Range[T] / pgtype.Multirange[pgtype.Range[T]].
+// It is the single source of truth for range subtype → pgtype element used by
+// BOTH the builtin range table (scalarGoType) and custom AS RANGE types
+// (goType). Returns ok=false for subtypes with no pgtype element mapping.
+func pgtypeElement(pgName string) (string, bool) {
+	switch pgName {
+	case "int2":
+		return "pgtype.Int2", true
+	case "int4":
+		return "pgtype.Int4", true
+	case "int8":
+		return "pgtype.Int8", true
+	case "numeric":
+		return "pgtype.Numeric", true
+	case "float4":
+		return "pgtype.Float4", true
+	case "float8":
+		return "pgtype.Float8", true
+	case "bool":
+		return "pgtype.Bool", true
+	case "text", "varchar", "bpchar":
+		return "pgtype.Text", true
+	case "timestamptz":
+		return "pgtype.Timestamptz", true
+	case "timestamp":
+		return "pgtype.Timestamp", true
+	case "date":
+		return "pgtype.Date", true
+	default:
+		return "", false
+	}
+}
+
+// rangeGoType returns the pgtype.Range[T] Go expression for a builtin range
+// whose subtype maps via pgtypeElement.
+func rangeGoType(subPg string) (string, []string) {
+	elem, _ := pgtypeElement(subPg)
+	return "pgtype.Range[" + elem + "]", []string{"github.com/jackc/pgx/v5/pgtype"}
+}
+
+// multirangeGoType returns the pgtype.Multirange[pgtype.Range[T]] Go expression
+// for a builtin multirange whose subtype maps via pgtypeElement.
+func multirangeGoType(subPg string) (string, []string) {
+	elem, _ := pgtypeElement(subPg)
+	return "pgtype.Multirange[pgtype.Range[" + elem + "]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+}
+
 // scalarGoType maps a PostgreSQL scalar type name to its Go expression.
 func scalarGoType(pgName string) (string, []string) {
 	switch pgName {
@@ -311,35 +391,37 @@ func scalarGoType(pgName string) (string, []string) {
 	//
 	// pgx ships built-in codecs for these, so no RegisterTypes entry is needed.
 	// pgtype.Range[T] carries a Valid field, so a nullable range column is
-	// represented by the value type (not a pointer): see goTypeNoPointer.
+	// represented by the value type (not a pointer): see goTypeNoPointer. The
+	// subtype → pgtype element mapping is shared with custom AS RANGE types via
+	// pgtypeElement.
 	case "int4range":
-		return "pgtype.Range[pgtype.Int4]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return rangeGoType("int4")
 	case "int8range":
-		return "pgtype.Range[pgtype.Int8]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return rangeGoType("int8")
 	case "numrange":
-		return "pgtype.Range[pgtype.Numeric]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return rangeGoType("numeric")
 	case "tsrange":
-		return "pgtype.Range[pgtype.Timestamp]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return rangeGoType("timestamp")
 	case "tstzrange":
-		return "pgtype.Range[pgtype.Timestamptz]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return rangeGoType("timestamptz")
 	case "daterange":
-		return "pgtype.Range[pgtype.Date]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return rangeGoType("date")
 	// --- builtin multirange types ---
 	//
 	// pgtype.Multirange[T] is []T where T is a pgtype.Range[...]; it also carries
 	// NULL via IsNull(), so a nullable multirange column is a value (slice) type.
 	case "int4multirange":
-		return "pgtype.Multirange[pgtype.Range[pgtype.Int4]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return multirangeGoType("int4")
 	case "int8multirange":
-		return "pgtype.Multirange[pgtype.Range[pgtype.Int8]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return multirangeGoType("int8")
 	case "nummultirange":
-		return "pgtype.Multirange[pgtype.Range[pgtype.Numeric]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return multirangeGoType("numeric")
 	case "tsmultirange":
-		return "pgtype.Multirange[pgtype.Range[pgtype.Timestamp]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return multirangeGoType("timestamp")
 	case "tstzmultirange":
-		return "pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return multirangeGoType("timestamptz")
 	case "datemultirange":
-		return "pgtype.Multirange[pgtype.Range[pgtype.Date]]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		return multirangeGoType("date")
 	default:
 		return "any", nil
 	}

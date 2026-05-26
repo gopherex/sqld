@@ -451,3 +451,95 @@ func TestGenerateUDTModels(t *testing.T) {
 		t.Errorf("domain should not produce a Go type, but found 'type Email' in:\n%s", models)
 	}
 }
+
+// TestCustomRangeType verifies that a custom CREATE TYPE ... AS RANGE type maps
+// a column to pgtype.Range[<subtypeElem>] and that RegisterTypes registers the
+// range and its array type after the enum/composite types.
+func TestCustomRangeType(t *testing.T) {
+	// Catalog: app.timerange AS RANGE (subtype = timestamptz), plus an enum and
+	// a composite so we can assert ordering (enums/composites then ranges).
+	req := &pluginv1.GenerateRequest{
+		OutDir: "gen/db",
+		Catalog: &irv1.Catalog{
+			Schemas: []*irv1.Schema{{
+				Name: "app",
+				Enums: []*irv1.EnumType{{
+					Name:   &irv1.QualifiedName{Schema: "app", Name: "user_status"},
+					Labels: []string{"active", "inactive"},
+				}},
+				Composites: []*irv1.CompositeType{{
+					Name: &irv1.QualifiedName{Schema: "app", Name: "address"},
+					Fields: []*irv1.CompositeField{
+						{Name: "street", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+					},
+				}},
+				Ranges: []*irv1.RangeType{{
+					Name:    &irv1.QualifiedName{Schema: "app", Name: "timerange"},
+					Subtype: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "timestamptz"},
+				}},
+				Tables: []*irv1.Table{{
+					Name: &irv1.QualifiedName{Schema: "app", Name: "profiles"},
+					Columns: []*irv1.Column{
+						{Name: "user_id", Type: &irv1.TypeRef{PgName: "int8"}, Nullable: false},
+						// nullable custom range → value type (Range carries Valid).
+						{Name: "valid_window", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_RANGE, PgName: "timerange"}, Nullable: true},
+					},
+				}},
+			}},
+		},
+	}
+
+	// 1. Direct goType resolution: custom range → pgtype.Range[pgtype.Timestamptz],
+	//    value type even when nullable.
+	reg := buildUDTRegistry(req.GetCatalog())
+	ref := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_RANGE, PgName: "timerange"}
+	got, imps := goType(reg, ref, true)
+	if got != "pgtype.Range[pgtype.Timestamptz]" {
+		t.Errorf("custom range goType = %q; want pgtype.Range[pgtype.Timestamptz]", got)
+	}
+	wantImp := "github.com/jackc/pgx/v5/pgtype"
+	if len(imps) != 1 || imps[0] != wantImp {
+		t.Errorf("custom range imports = %v; want [%s]", imps, wantImp)
+	}
+
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var models string
+	for _, f := range resp.GetFiles() {
+		if f.GetPath() == "models.go" {
+			models = string(f.GetContents())
+		}
+	}
+	if models == "" {
+		t.Fatal("models.go not found in response")
+	}
+
+	// 2. The table field uses the resolved Go type.
+	if !strings.Contains(normalizeSpaces(models), normalizeSpaces("ValidWindow pgtype.Range[pgtype.Timestamptz]")) {
+		t.Errorf("missing ValidWindow field in models.go:\n%s", models)
+	}
+
+	// 3. RegisterTypes lists the range and its array type, after enums/composites.
+	for _, name := range []string{`"app.timerange"`, `"app._timerange"`} {
+		if !strings.Contains(models, name) {
+			t.Errorf("RegisterTypes missing %s in models.go:\n%s", name, models)
+		}
+	}
+	// Ordering: enum (app.user_status) and composite (app.address) come before
+	// the range (app.timerange).
+	idxEnum := strings.Index(models, `"app.user_status"`)
+	idxComposite := strings.Index(models, `"app.address"`)
+	idxRange := strings.Index(models, `"app.timerange"`)
+	idxRangeArr := strings.Index(models, `"app._timerange"`)
+	if idxEnum < 0 || idxComposite < 0 || idxRange < 0 || idxRangeArr < 0 {
+		t.Fatalf("expected enum, composite, range, and range-array entries in RegisterTypes:\n%s", models)
+	}
+	if !(idxEnum < idxRange && idxComposite < idxRange) {
+		t.Errorf("range %d must come after enum %d and composite %d in RegisterTypes", idxRange, idxEnum, idxComposite)
+	}
+	if !(idxRange < idxRangeArr) {
+		t.Errorf("range element %d must come before its array %d in RegisterTypes", idxRange, idxRangeArr)
+	}
+}
