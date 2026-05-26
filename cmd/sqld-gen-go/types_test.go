@@ -142,6 +142,128 @@ func TestGoType(t *testing.T) {
 			wantExpr:    "pgtype.Multirange[pgtype.Range[pgtype.Numeric]]",
 			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
 		},
+		// --- core pgx types (registered by default; no RegisterTypes) ---
+		{
+			name:        "interval not nullable -> pgtype.Interval",
+			pgName:      "interval",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "pgtype.Interval",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "interval nullable stays value (Valid field, no pointer)",
+			pgName:      "interval",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    true,
+			wantExpr:    "pgtype.Interval",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "point -> pgtype.Point",
+			pgName:      "point",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "pgtype.Point",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "point nullable stays value (no pointer)",
+			pgName:      "point",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    true,
+			wantExpr:    "pgtype.Point",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "polygon -> pgtype.Polygon",
+			pgName:      "polygon",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "pgtype.Polygon",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "bit -> pgtype.Bits",
+			pgName:      "bit",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "pgtype.Bits",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "varbit -> pgtype.Bits",
+			pgName:      "varbit",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "pgtype.Bits",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "macaddr -> net.HardwareAddr",
+			pgName:      "macaddr",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "net.HardwareAddr",
+			wantImports: []string{"net"},
+		},
+		{
+			name:        "tid -> pgtype.TID",
+			pgName:      "tid",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "pgtype.TID",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "xid -> pgtype.Uint32",
+			pgName:      "xid",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "pgtype.Uint32",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "inet stays string",
+			pgName:      "inet",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "string",
+			wantImports: nil,
+		},
+		// --- extension types (need RegisterTypes; Go type still resolved here) ---
+		{
+			name:        "hstore -> pgtype.Hstore",
+			pgName:      "hstore",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "pgtype.Hstore",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "hstore nullable stays map (no pointer)",
+			pgName:      "hstore",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    true,
+			wantExpr:    "pgtype.Hstore",
+			wantImports: []string{"github.com/jackc/pgx/v5/pgtype"},
+		},
+		{
+			name:        "ltree -> string",
+			pgName:      "ltree",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    false,
+			wantExpr:    "string",
+			wantImports: nil,
+		},
+		{
+			name:        "ltree nullable -> *string",
+			pgName:      "ltree",
+			kind:        irv1.TypeKind_TYPE_KIND_SCALAR,
+			nullable:    true,
+			wantExpr:    "*string",
+			wantImports: nil,
+		},
 	}
 
 	for _, tc := range cases {
@@ -616,5 +738,156 @@ func TestCustomMultirangeType(t *testing.T) {
 	if !(idxRange < idxRangeArr && idxRangeArr < idxMR && idxMR < idxMRArr) {
 		t.Errorf("RegisterTypes order wrong: range=%d _range=%d multirange=%d _multirange=%d (want strictly increasing)",
 			idxRange, idxRangeArr, idxMR, idxMRArr)
+	}
+}
+
+// TestExtensionTypeDetection verifies that hstore/ltree columns map to the right
+// Go types and that RegisterTypes registers the USED extension types first (no
+// array companion), before any enum/composite.
+func TestExtensionTypeDetection(t *testing.T) {
+	req := &pluginv1.GenerateRequest{
+		OutDir: "gen/db",
+		Catalog: &irv1.Catalog{
+			Schemas: []*irv1.Schema{{
+				Name: "app",
+				Enums: []*irv1.EnumType{{
+					Name:   &irv1.QualifiedName{Schema: "app", Name: "user_status"},
+					Labels: []string{"active"},
+				}},
+				Tables: []*irv1.Table{{
+					Name: &irv1.QualifiedName{Schema: "app", Name: "kitchen_sink"},
+					Columns: []*irv1.Column{
+						{Name: "id", Type: &irv1.TypeRef{PgName: "int8"}, Nullable: false},
+						// hstore not nullable → pgtype.Hstore (value/map type).
+						{Name: "c_tags", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "hstore"}, Nullable: false},
+						// ltree nullable → *string.
+						{Name: "c_ltree", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "ltree"}, Nullable: true},
+						// interval (core, not registered) → pgtype.Interval.
+						{Name: "c_interval", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "interval"}, Nullable: false},
+					},
+				}},
+			}},
+		},
+	}
+
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var models string
+	for _, f := range resp.GetFiles() {
+		if f.GetPath() == "models.go" {
+			models = string(f.GetContents())
+		}
+	}
+	if models == "" {
+		t.Fatal("models.go not found in response")
+	}
+
+	// Field types.
+	for _, want := range []string{
+		"CTags pgtype.Hstore",
+		"CLtree *string",
+		"CInterval pgtype.Interval",
+	} {
+		if !strings.Contains(normalizeSpaces(models), normalizeSpaces(want)) {
+			t.Errorf("missing %q in models.go:\n%s", want, models)
+		}
+	}
+
+	// RegisterTypes registers used extension types (hstore, ltree) but NOT their
+	// non-existent array companions, and NOT the unused lquery.
+	for _, want := range []string{`"hstore"`, `"ltree"`} {
+		if !strings.Contains(models, want) {
+			t.Errorf("RegisterTypes missing %s in models.go:\n%s", want, models)
+		}
+	}
+	for _, notWant := range []string{`"_hstore"`, `"_ltree"`, `"lquery"`} {
+		if strings.Contains(models, notWant) {
+			t.Errorf("RegisterTypes should not contain %s in models.go:\n%s", notWant, models)
+		}
+	}
+
+	// Ordering: extension types come before the enum (app.user_status).
+	idxHstore := strings.Index(models, `"hstore"`)
+	idxLtree := strings.Index(models, `"ltree"`)
+	idxEnum := strings.Index(models, `"app.user_status"`)
+	if idxHstore < 0 || idxLtree < 0 || idxEnum < 0 {
+		t.Fatalf("expected hstore, ltree, and enum entries in RegisterTypes:\n%s", models)
+	}
+	if !(idxHstore < idxEnum && idxLtree < idxEnum) {
+		t.Errorf("extension types (hstore=%d ltree=%d) must come before enum=%d", idxHstore, idxLtree, idxEnum)
+	}
+}
+
+// TestExtensionTypeOnlyRegisterTypes verifies that an extension type alone (no
+// enums/composites/ranges) still produces a RegisterTypes function.
+func TestExtensionTypeOnlyRegisterTypes(t *testing.T) {
+	req := &pluginv1.GenerateRequest{
+		OutDir: "gen/db",
+		Catalog: &irv1.Catalog{
+			Schemas: []*irv1.Schema{{
+				Name: "public",
+				Tables: []*irv1.Table{{
+					Name: &irv1.QualifiedName{Name: "docs"},
+					Columns: []*irv1.Column{
+						{Name: "path", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "ltree"}, Nullable: false},
+					},
+				}},
+			}},
+		},
+	}
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var models string
+	for _, f := range resp.GetFiles() {
+		if f.GetPath() == "models.go" {
+			models = string(f.GetContents())
+		}
+	}
+	if !strings.Contains(models, "func RegisterTypes(") {
+		t.Errorf("expected RegisterTypes function for an extension-type-only catalog:\n%s", models)
+	}
+	if !strings.Contains(models, `"ltree"`) {
+		t.Errorf("expected ltree registration:\n%s", models)
+	}
+}
+
+// TestCollectUsedExtensionTypes verifies detection across catalog columns and
+// query columns/params, including array element types.
+func TestCollectUsedExtensionTypes(t *testing.T) {
+	catalog := &irv1.Catalog{
+		Schemas: []*irv1.Schema{{
+			Name: "public",
+			Tables: []*irv1.Table{{
+				Name: &irv1.QualifiedName{Name: "t"},
+				Columns: []*irv1.Column{
+					{Name: "tags", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "hstore"}},
+				},
+			}},
+		}},
+	}
+	queries := []*pluginv1.Query{{
+		Name: "q",
+		Columns: []*pluginv1.QueryColumn{
+			// ltree via array element
+			{Name: "paths", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_ARRAY, PgName: "_ltree",
+				Element: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "ltree"}}},
+		},
+		Parameters: []*pluginv1.QueryParameter{
+			{Number: 1, Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "lquery"}},
+		},
+	}}
+	got := collectUsedExtensionTypes(catalog, queries)
+	want := []string{"hstore", "lquery", "ltree"} // sorted
+	if len(got) != len(want) {
+		t.Fatalf("collectUsedExtensionTypes = %v; want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("collectUsedExtensionTypes[%d] = %q; want %q", i, got[i], want[i])
+		}
 	}
 }
