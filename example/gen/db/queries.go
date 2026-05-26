@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ type DBTX interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error)
+	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
 }
 
 type Queries struct {
@@ -24,6 +27,8 @@ type Queries struct {
 }
 
 func New(db DBTX) *Queries { return &Queries{db: db} }
+
+func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }
 
 type OrderDir string
 
@@ -246,6 +251,58 @@ type SetUserStatusParams struct {
 func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (int64, error) {
 	tag, err := q.db.Exec(ctx, setUserStatusSQL, arg.ID, arg.Status)
 	return tag.RowsAffected(), err
+}
+
+type BulkCreateRolesParams struct {
+	Name string
+}
+
+func (q *Queries) BulkCreateRoles(ctx context.Context, arg []BulkCreateRolesParams) (int64, error) {
+	return q.db.CopyFrom(ctx, pgx.Identifier{"app", "roles"}, []string{"name"}, pgx.CopyFromSlice(len(arg), func(i int) ([]any, error) {
+		return []any{arg[i].Name}, nil
+	}))
+}
+
+const bulkTouchUsersSQL = `UPDATE app.users SET status = $1 WHERE id = $2;`
+
+type BulkTouchUsersParams struct {
+	Status AppUserStatus
+	ID     int64
+}
+
+type BulkTouchUsersBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+func (q *Queries) BulkTouchUsers(ctx context.Context, arg []BulkTouchUsersParams) *BulkTouchUsersBatchResults {
+	batch := &pgx.Batch{}
+	for i := range arg {
+		batch.Queue(bulkTouchUsersSQL, arg[i].Status, arg[i].ID)
+	}
+	return &BulkTouchUsersBatchResults{br: q.db.SendBatch(ctx, batch), tot: len(arg)}
+}
+
+func (b *BulkTouchUsersBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for i := 0; i < b.tot; i++ {
+		if b.closed {
+			if f != nil {
+				f(i, errors.New("batch already closed"))
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(i, err)
+		}
+	}
+}
+
+func (b *BulkTouchUsersBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
 }
 
 type SearchUsersOrderBy string

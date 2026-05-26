@@ -42,3 +42,9 @@ DELETE FROM app.users WHERE id = $1;
 
 -- name: SetUserStatus :execrows
 UPDATE app.users SET status = $2 WHERE id = $1;
+
+-- name: BulkCreateRoles :copyfrom
+INSERT INTO app.roles (name) VALUES (@name);
+
+-- name: BulkTouchUsers :batchexec
+UPDATE app.users SET status = @status WHERE id = @id;
