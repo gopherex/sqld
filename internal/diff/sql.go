@@ -52,7 +52,7 @@ func renderType(t *irv1.TypeRef) string {
 		if elem != nil {
 			base = renderType(elem)
 		} else {
-			base = baseTypeName(t.GetPgName(), t.GetModifier())
+			base = baseTypeName(typeBaseName(t), t.GetModifier())
 		}
 		dims := int(t.GetArrayDimensions())
 		if dims < 1 {
@@ -60,12 +60,28 @@ func renderType(t *irv1.TypeRef) string {
 		}
 		return base + strings.Repeat("[]", dims)
 	}
-	return baseTypeName(t.GetPgName(), t.GetModifier())
+	return baseTypeName(typeBaseName(t), t.GetModifier())
 }
 
-// baseTypeName renders a scalar pg_name plus its modifier.
-func baseTypeName(pg string, mod *irv1.TypeModifier) string {
-	name := pg
+// typeBaseName returns the bare type name to render. For user-defined types
+// (enum/domain/composite/range) the introspector populates Udt with the
+// schema-qualified name; that qualified name is rendered so the emitted DDL is
+// valid regardless of search_path (the referenced type rarely lives in a
+// search-path schema). The parse path leaves Udt nil and stores the bare name
+// in PgName, so it renders unqualified exactly as before — keeping diff
+// equality between a parsed and introspected catalog intact for built-ins and
+// for user types referenced by bare name.
+func typeBaseName(t *irv1.TypeRef) string {
+	if udt := t.GetUdt(); udt != nil {
+		if n := udt.GetName(); n != nil && n.GetSchema() != "" && n.GetSchema() != "pg_catalog" {
+			return qname(n)
+		}
+	}
+	return t.GetPgName()
+}
+
+// baseTypeName renders a scalar type name plus its modifier.
+func baseTypeName(name string, mod *irv1.TypeModifier) string {
 	if m := renderModifier(mod); m != "" {
 		name += m
 	}
@@ -229,6 +245,13 @@ func renderCreateRange(r *irv1.RangeType) string {
 	}
 	if v := r.GetSubtypeDiff(); v != "" {
 		parts = append(parts, "subtype_diff = "+v)
+	}
+	// A range type created with a multirange_type_name owns an associated
+	// multirange type; it must be re-stated so the multirange (referenced by
+	// columns) exists. Qualify it into the range's own schema, mirroring how
+	// PostgreSQL creates the multirange alongside the range.
+	if v := r.GetMultirange(); v != "" {
+		parts = append(parts, "multirange_type_name = "+qualified(r.GetName().GetSchema(), v))
 	}
 	return "CREATE TYPE " + qname(r.GetName()) + " AS RANGE (" + strings.Join(parts, ", ") + ");"
 }
