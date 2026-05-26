@@ -140,3 +140,84 @@ func TestRenderCreateSequence(t *testing.T) {
 		t.Fatalf("sequence options: %q", got)
 	}
 }
+
+// firstTableConstraint returns the first non-inline (non-PK/non-NOTNULL)
+// constraint across all tables built from ddl, with its owning table.
+func firstTableConstraint(t *testing.T, ddl string) (*irv1.Table, *irv1.Constraint) {
+	t.Helper()
+	c := cat(t, ddl)
+	for _, s := range c.GetSchemas() {
+		for _, tbl := range s.GetTables() {
+			for _, con := range tbl.GetConstraints() {
+				switch con.GetType() {
+				case irv1.ConstraintType_CONSTRAINT_TYPE_PRIMARY_KEY,
+					irv1.ConstraintType_CONSTRAINT_TYPE_NOT_NULL:
+					continue
+				}
+				return tbl, con
+			}
+		}
+	}
+	t.Fatalf("no standalone constraint built from: %s", ddl)
+	return nil, nil
+}
+
+func TestRenderConstraintFK(t *testing.T) {
+	tbl, c := firstTableConstraint(t,
+		"CREATE TABLE a(id bigint primary key); "+
+			"CREATE TABLE b(id bigint, a_id bigint, CONSTRAINT fk FOREIGN KEY (a_id) REFERENCES a(id) ON DELETE CASCADE);")
+	got := renderAddConstraint(tbl, c)
+	if !strings.Contains(got, "FOREIGN KEY") || !strings.Contains(got, "REFERENCES") ||
+		!strings.Contains(got, "ON DELETE CASCADE") || !strings.Contains(got, "fk") {
+		t.Fatalf("fk: %q", got)
+	}
+}
+
+func TestRenderConstraintCheck(t *testing.T) {
+	tbl, c := firstTableConstraint(t, "CREATE TABLE t(id bigint, CONSTRAINT pos CHECK (id > 0));")
+	got := renderAddConstraint(tbl, c)
+	if !strings.Contains(got, "CHECK") || !strings.Contains(got, "> 0") {
+		t.Fatalf("check: %q", got)
+	}
+}
+
+func TestRenderCreateIndex(t *testing.T) {
+	tbl := firstTable(t, "CREATE TABLE t(id bigint, x text); CREATE INDEX idx_t_x ON t(x DESC);")
+	idx := tbl.GetIndexes()[0]
+	got := renderCreateIndex(idx, tbl)
+	if !strings.HasPrefix(got, "CREATE INDEX") || !strings.Contains(got, `"idx_t_x"`) || !strings.Contains(got, `"x" DESC`) {
+		t.Fatalf("index: %q", got)
+	}
+}
+
+func TestRenderCreateView(t *testing.T) {
+	c := cat(t, "CREATE TABLE t(id bigint); CREATE VIEW v AS SELECT id FROM t;")
+	v := c.GetSchemas()[0].GetViews()[0]
+	got := renderCreateView(v, false)
+	if !strings.HasPrefix(got, "CREATE VIEW") || !strings.Contains(got, "AS SELECT") {
+		t.Fatalf("view: %q", got)
+	}
+	if !strings.HasPrefix(renderCreateView(v, true), "CREATE OR REPLACE VIEW") {
+		t.Fatalf("or replace view: %q", renderCreateView(v, true))
+	}
+}
+
+func TestRenderCreateFunction(t *testing.T) {
+	c := cat(t, "CREATE FUNCTION add(a int, b int) RETURNS int LANGUAGE sql AS $$ SELECT a + b $$;")
+	fn := c.GetSchemas()[0].GetFunctions()[0]
+	got := renderCreateFunction(fn, false)
+	if !strings.HasPrefix(got, "CREATE FUNCTION") || !strings.Contains(got, "RETURNS int4") ||
+		!strings.Contains(got, "LANGUAGE sql") || !strings.Contains(got, "$$") {
+		t.Fatalf("function: %q", got)
+	}
+}
+
+func TestRenderCreateTrigger(t *testing.T) {
+	c := cat(t, "CREATE TABLE t(id bigint); CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f();")
+	tr := c.GetSchemas()[0].GetTriggers()[0]
+	got := renderCreateTrigger(tr)
+	if !strings.HasPrefix(got, "CREATE TRIGGER") || !strings.Contains(got, "BEFORE INSERT") ||
+		!strings.Contains(got, "FOR EACH ROW") || !strings.Contains(got, "EXECUTE FUNCTION") {
+		t.Fatalf("trigger: %q", got)
+	}
+}

@@ -5,9 +5,8 @@
 // produced by internal/parse + internal/catalog.Build) and emits PostgreSQL
 // DDL strings. This file defines the Change interface, the Plan container and
 // the concrete change types for the object kinds handled in this task
-// (schemas, types, sequences, tables, columns). Constraints, indexes, views,
-// functions and triggers are handled by a follow-up task; their dependency
-// sortKeys are reserved below.
+// (schemas, types, sequences, tables, columns, constraints, indexes, foreign
+// keys, views, materialized views, functions, procedures and triggers).
 package diff
 
 import (
@@ -27,12 +26,12 @@ const (
 	sortKeySequence   = 20
 	sortKeyTable      = 30
 	sortKeyColumn     = 40
-	sortKeyConstraint = 50 // reserved: next task
-	sortKeyIndex      = 60 // reserved: next task
-	sortKeyForeignKey = 70 // reserved: next task
-	sortKeyView       = 80 // reserved: next task
-	sortKeyFunc       = 90 // reserved: next task
-	sortKeyTrigger    = 100
+	sortKeyConstraint = 50  // PK / UNIQUE / CHECK / EXCLUSION
+	sortKeyIndex      = 60  // CREATE INDEX
+	sortKeyForeignKey = 70  // FOREIGN KEY (after all tables exist)
+	sortKeyView       = 80  // views and materialized views
+	sortKeyFunc       = 90  // functions and procedures
+	sortKeyTrigger    = 100 // triggers (depend on tables + functions)
 )
 
 // Change is a single reversible schema change.
@@ -342,3 +341,168 @@ func (c *DropDefault) DownSQL() string {
 		" SET DEFAULT " + renderExpr(c.Old) + ";"
 }
 func (c *DropDefault) sortKey() int { return sortKeyColumn }
+
+// --- constraints -------------------------------------------------------------
+
+// constraintSortKey returns the dependency bucket for a constraint: foreign
+// keys order after all tables/columns/other-constraints exist, everything else
+// (PK/UNIQUE/CHECK/EXCLUSION) at the constraint bucket.
+func constraintSortKey(c *irv1.Constraint) int {
+	if c.GetType() == irv1.ConstraintType_CONSTRAINT_TYPE_FOREIGN_KEY {
+		return sortKeyForeignKey
+	}
+	return sortKeyConstraint
+}
+
+// AddConstraint adds a table constraint (PK/UNIQUE/FK/CHECK/EXCLUSION).
+type AddConstraint struct {
+	Table      *irv1.Table
+	Constraint *irv1.Constraint
+}
+
+func (c *AddConstraint) UpSQL() string   { return renderAddConstraint(c.Table, c.Constraint) }
+func (c *AddConstraint) DownSQL() string { return renderDropConstraint(c.Table, c.Constraint) }
+func (c *AddConstraint) sortKey() int    { return constraintSortKey(c.Constraint) }
+
+// DropConstraint drops a table constraint. The inverse re-adds it.
+type DropConstraint struct {
+	Table      *irv1.Table
+	Constraint *irv1.Constraint
+}
+
+func (c *DropConstraint) UpSQL() string   { return renderDropConstraint(c.Table, c.Constraint) }
+func (c *DropConstraint) DownSQL() string { return renderAddConstraint(c.Table, c.Constraint) }
+func (c *DropConstraint) sortKey() int    { return constraintSortKey(c.Constraint) }
+
+// --- indexes -----------------------------------------------------------------
+
+// CreateIndex creates an index on a table.
+type CreateIndex struct {
+	Table  *irv1.Table
+	Index  *irv1.Index
+	Schema string
+}
+
+func (c *CreateIndex) UpSQL() string   { return renderCreateIndex(c.Index, c.Table) }
+func (c *CreateIndex) DownSQL() string { return renderDropIndex(c.Index, c.Schema) }
+func (c *CreateIndex) sortKey() int    { return sortKeyIndex }
+
+// DropIndex drops an index. The inverse re-creates it (non-lossy).
+type DropIndex struct {
+	Table  *irv1.Table
+	Index  *irv1.Index
+	Schema string
+}
+
+func (c *DropIndex) UpSQL() string   { return renderDropIndex(c.Index, c.Schema) }
+func (c *DropIndex) DownSQL() string { return renderCreateIndex(c.Index, c.Table) }
+func (c *DropIndex) sortKey() int    { return sortKeyIndex }
+
+// --- views -------------------------------------------------------------------
+
+// CreateView creates a view.
+type CreateView struct{ View *irv1.View }
+
+func (c *CreateView) UpSQL() string   { return renderCreateView(c.View, false) }
+func (c *CreateView) DownSQL() string { return renderDropView(c.View) }
+func (c *CreateView) sortKey() int    { return sortKeyView }
+
+// DropView drops a view. The inverse re-creates it from its definition.
+type DropView struct{ View *irv1.View }
+
+func (c *DropView) UpSQL() string   { return renderDropView(c.View) }
+func (c *DropView) DownSQL() string { return renderCreateView(c.View, false) }
+func (c *DropView) sortKey() int    { return sortKeyView }
+
+// ReplaceView replaces a view's definition via CREATE OR REPLACE VIEW. The
+// inverse restores the previous definition the same way.
+type ReplaceView struct {
+	From *irv1.View
+	To   *irv1.View
+}
+
+func (c *ReplaceView) UpSQL() string   { return renderCreateView(c.To, true) }
+func (c *ReplaceView) DownSQL() string { return renderCreateView(c.From, true) }
+func (c *ReplaceView) sortKey() int    { return sortKeyView }
+
+// CreateMatView creates a materialized view.
+type CreateMatView struct{ View *irv1.MaterializedView }
+
+func (c *CreateMatView) UpSQL() string   { return renderCreateMatView(c.View) }
+func (c *CreateMatView) DownSQL() string { return renderDropMatView(c.View) }
+func (c *CreateMatView) sortKey() int    { return sortKeyView }
+
+// DropMatView drops a materialized view. The inverse re-creates it (WITH NO
+// DATA on the catalog form; data is not part of the schema).
+type DropMatView struct{ View *irv1.MaterializedView }
+
+func (c *DropMatView) UpSQL() string   { return renderDropMatView(c.View) }
+func (c *DropMatView) DownSQL() string { return renderCreateMatView(c.View) }
+func (c *DropMatView) sortKey() int    { return sortKeyView }
+
+// --- functions and procedures ------------------------------------------------
+
+// CreateFunction creates a function.
+type CreateFunction struct{ Function *irv1.Function }
+
+func (c *CreateFunction) UpSQL() string   { return renderCreateFunction(c.Function, false) }
+func (c *CreateFunction) DownSQL() string { return renderDropFunction(c.Function) }
+func (c *CreateFunction) sortKey() int    { return sortKeyFunc }
+
+// DropFunction drops a function. The inverse re-creates it from its body.
+type DropFunction struct{ Function *irv1.Function }
+
+func (c *DropFunction) UpSQL() string   { return renderDropFunction(c.Function) }
+func (c *DropFunction) DownSQL() string { return renderCreateFunction(c.Function, false) }
+func (c *DropFunction) sortKey() int    { return sortKeyFunc }
+
+// ReplaceFunction replaces a function via CREATE OR REPLACE FUNCTION. The
+// inverse restores the previous definition the same way.
+type ReplaceFunction struct {
+	From *irv1.Function
+	To   *irv1.Function
+}
+
+func (c *ReplaceFunction) UpSQL() string   { return renderCreateFunction(c.To, true) }
+func (c *ReplaceFunction) DownSQL() string { return renderCreateFunction(c.From, true) }
+func (c *ReplaceFunction) sortKey() int    { return sortKeyFunc }
+
+// CreateProcedure creates a procedure.
+type CreateProcedure struct{ Procedure *irv1.Procedure }
+
+func (c *CreateProcedure) UpSQL() string   { return renderCreateProcedure(c.Procedure, false) }
+func (c *CreateProcedure) DownSQL() string { return renderDropProcedure(c.Procedure) }
+func (c *CreateProcedure) sortKey() int    { return sortKeyFunc }
+
+// DropProcedure drops a procedure. The inverse re-creates it from its body.
+type DropProcedure struct{ Procedure *irv1.Procedure }
+
+func (c *DropProcedure) UpSQL() string   { return renderDropProcedure(c.Procedure) }
+func (c *DropProcedure) DownSQL() string { return renderCreateProcedure(c.Procedure, false) }
+func (c *DropProcedure) sortKey() int    { return sortKeyFunc }
+
+// ReplaceProcedure replaces a procedure via CREATE OR REPLACE PROCEDURE.
+type ReplaceProcedure struct {
+	From *irv1.Procedure
+	To   *irv1.Procedure
+}
+
+func (c *ReplaceProcedure) UpSQL() string   { return renderCreateProcedure(c.To, true) }
+func (c *ReplaceProcedure) DownSQL() string { return renderCreateProcedure(c.From, true) }
+func (c *ReplaceProcedure) sortKey() int    { return sortKeyFunc }
+
+// --- triggers ----------------------------------------------------------------
+
+// CreateTrigger creates a trigger.
+type CreateTrigger struct{ Trigger *irv1.Trigger }
+
+func (c *CreateTrigger) UpSQL() string   { return renderCreateTrigger(c.Trigger) }
+func (c *CreateTrigger) DownSQL() string { return renderDropTrigger(c.Trigger) }
+func (c *CreateTrigger) sortKey() int    { return sortKeyTrigger }
+
+// DropTrigger drops a trigger. The inverse re-creates it from its definition.
+type DropTrigger struct{ Trigger *irv1.Trigger }
+
+func (c *DropTrigger) UpSQL() string   { return renderDropTrigger(c.Trigger) }
+func (c *DropTrigger) DownSQL() string { return renderCreateTrigger(c.Trigger) }
+func (c *DropTrigger) sortKey() int    { return sortKeyTrigger }
