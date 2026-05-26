@@ -14,6 +14,7 @@ import (
 const usage = `Usage: sqld <subcommand> [flags]
 
 Subcommands:
+  init      [dir]                                Scaffold a new sqld project (sqld.yaml + schema/queries/migrations)
   generate  -c <config.yaml>                    Run code generation
   collect   -c <config.yaml> [-format json|prototext]  Collect IR and print to stdout
 `
@@ -30,6 +31,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	rest := args[1:]
 
 	switch sub {
+	case "init":
+		return runInit(rest, stdout, stderr)
 	case "generate":
 		return runGenerate(rest, stderr)
 	case "collect":
