@@ -3,6 +3,7 @@ package source
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yaroher/sqld/pkg/config"
@@ -91,5 +92,41 @@ func TestResolveSchemaInline(t *testing.T) {
 	}
 	if len(units) != 1 || units[0].Kind != KindSchema || units[0].SQL != sql {
 		t.Fatalf("schema inline unit: %+v", units)
+	}
+}
+
+func TestSplitMigration(t *testing.T) {
+	up, down := splitMigration("-- sqld:up\nCREATE TABLE a();\n-- sqld:down\nDROP TABLE a;\n")
+	if !strings.Contains(up, "CREATE TABLE a") || strings.Contains(up, "DROP TABLE") {
+		t.Fatalf("up=%q", up)
+	}
+	if !strings.Contains(down, "DROP TABLE a") {
+		t.Fatalf("down=%q", down)
+	}
+	up2, down2 := splitMigration("CREATE TABLE b();")
+	if !strings.Contains(up2, "CREATE TABLE b") || down2 != "" {
+		t.Fatalf("no-marker: up=%q down=%q", up2, down2)
+	}
+}
+
+func TestResolveMigrationUpDown(t *testing.T) {
+	dir := t.TempDir()
+	content := "-- sqld:up\nCREATE TABLE c(id int);\n-- sqld:down\nDROP TABLE c;\n"
+	os.WriteFile(filepath.Join(dir, "0001_c.sql"), []byte(content), 0o644)
+
+	cfg := &config.Config{Migrations: []config.MigrationSource{{Dir: dir}}}
+	units, err := Resolve(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 1 {
+		t.Fatalf("want 1 unit, got %d", len(units))
+	}
+	u := units[0]
+	if !strings.Contains(u.SQL, "CREATE TABLE c") || strings.Contains(u.SQL, "DROP TABLE") {
+		t.Fatalf("SQL (up) unexpected: %q", u.SQL)
+	}
+	if !strings.Contains(u.DownSQL, "DROP TABLE c") {
+		t.Fatalf("DownSQL unexpected: %q", u.DownSQL)
 	}
 }
