@@ -605,10 +605,12 @@ annotation model). It is now implemented end-to-end through the real pipeline.
 
 **Consequences:** Typed dynamic queries — sqlc's blocking gap — work end-to-end
 (`example/queries/search.sql` → `SearchUsers`): named params, clean dynamic
-`WHERE`, typed sort enum + direction. Known gap: domain/enum params render as
-`*any` until UDT→Go typing lands (the type is correct, just opaque). v1 condition
-splitting is per-line over a top-level `WHERE` (one `$N` per condition); nested
-OR/paren-heavy WHEREs are best-effort.
+`WHERE`, typed sort enum + direction. UDTs map to Go types in `sqld-gen-go`
+(enum → a typed `string` + consts, domain → its base type, composite → a struct;
+resolved against the catalog by name) — so an enum param is `AppUserStatus`, a
+`text` domain is `string`, not `any`. v1 condition splitting is per-line over a
+top-level `WHERE` (one `$N` per condition); nested OR/paren-heavy WHEREs are
+best-effort. Composite columns are typed but not yet scanned (no pgx codec).
 
 ---
 
