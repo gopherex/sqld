@@ -769,6 +769,10 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 			// Strip trailing -- ... or /* ... */ comment.
 			condSQL = strings.TrimSpace(trailingCommentRe.ReplaceAllString(condSQL, ""))
 
+			// Strip a trailing statement terminator so a lone ";" line (or a
+			// ";" appended to the last condition) is not treated as a condition.
+			condSQL = strings.TrimSpace(strings.TrimSuffix(condSQL, ";"))
+
 			if condSQL == "" {
 				currentOff = lineEndOff + 1
 				continue
