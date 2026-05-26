@@ -323,12 +323,23 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 	}
 
 	// RegisterTypes is emitted whenever there are enums, composites, custom
-	// ranges, OR used extension types: it loads and registers each type (and its
-	// array, where applicable) so that enum-array, composite, custom-range, and
-	// extension (hstore/ltree) columns/params scan and encode. It needs context,
-	// fmt, and the pgx package. Composites additionally need the pgtype package
-	// for the CompositeIndexScanner / CompositeIndexGetter interface assertions.
-	needsRegister := len(enumDefs) > 0 || len(compositeDefs) > 0 || len(rangeDefs) > 0 || len(usedExtTypes) > 0
+	// ranges, OR hstore: it registers each type (and its array, where applicable)
+	// so that enum-array, composite, custom-range, and hstore columns/params scan
+	// and encode. It needs context, fmt, and the pgx package.
+	//
+	// hstore is special: pgx's Conn.LoadType only handles array/composite/domain/
+	// enum/range/multirange types (it treats every base type as an array and
+	// looks up a non-existent element OID), so hstore is registered explicitly
+	// via pgtype.HstoreCodec with the type's runtime OID. ltree/lquery need no
+	// registration at all — their wire form is text, so an unregistered OID scans
+	// into / encodes from a Go string via pgx's default text handling.
+	usesHstore := false
+	for _, n := range usedExtTypes {
+		if n == "hstore" {
+			usesHstore = true
+		}
+	}
+	needsRegister := len(enumDefs) > 0 || len(compositeDefs) > 0 || len(rangeDefs) > 0 || usesHstore
 	if needsRegister {
 		allImports = append(allImports,
 			"context",
@@ -336,7 +347,9 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 			"github.com/jackc/pgx/v5",
 		)
 	}
-	if len(compositeDefs) > 0 {
+	// pgtype is needed for composite interface assertions and for the hstore
+	// codec/array registration.
+	if len(compositeDefs) > 0 || usesHstore {
 		allImports = append(allImports, "github.com/jackc/pgx/v5/pgtype")
 	}
 
@@ -457,14 +470,8 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 		// range type's subtype to be registered first.
 		type regType struct {
 			pgName, arrayPgName string
-			// noArray is true for types that have no companion array to register
-			// (the extension types loaded by bare name).
-			noArray bool
 		}
 		var ordered []regType
-		for _, name := range usedExtTypes {
-			ordered = append(ordered, regType{pgName: name, noArray: true})
-		}
 		for _, e := range enumDefs {
 			ordered = append(ordered, regType{pgName: e.pgName, arrayPgName: e.arrayPgName})
 		}
@@ -535,34 +542,49 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 			}
 		}
 
-		sb.WriteString("// RegisterTypes loads and registers the database's extension (hstore/ltree),\n")
-		sb.WriteString("// enum, composite, and custom range types (and their array types) on a\n")
-		sb.WriteString("// connection so those columns/params scan and encode into their Go types.\n")
-		sb.WriteString("// Wire it into pgxpool.Config.AfterConnect (it runs per connection).\n")
+		sb.WriteString("// RegisterTypes registers the database's hstore, enum, composite, and custom\n")
+		sb.WriteString("// range types (and their array types) on a connection so those columns/params\n")
+		sb.WriteString("// scan and encode into their Go types. Wire it into pgxpool.Config.AfterConnect\n")
+		sb.WriteString("// (it runs per connection).\n")
 		sb.WriteString("//\n")
-		sb.WriteString("// The order is dependency-safe: extension types come first (no deps), each\n")
-		sb.WriteString("// enum/composite/range is registered before its array type, a composite is\n")
-		sb.WriteString("// registered after every composite it has a field of (topological order), and\n")
-		sb.WriteString("// custom ranges come last (their subtypes are already registered), because\n")
-		sb.WriteString("// pgx's Conn.LoadType resolves a derived type only once its element/field/\n")
-		sb.WriteString("// subtype types are registered.\n")
+		sb.WriteString("// The LoadType order is dependency-safe: each enum/composite/range is registered\n")
+		sb.WriteString("// before its array type, a composite after every composite it has a field of\n")
+		sb.WriteString("// (topological order), and custom ranges last (their subtypes are already\n")
+		sb.WriteString("// registered) — pgx's Conn.LoadType resolves a derived type only once its\n")
+		sb.WriteString("// element/field/subtype types are registered. hstore is registered separately\n")
+		sb.WriteString("// (LoadType cannot load a non-array base type).\n")
 		sb.WriteString("func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {\n")
-		sb.WriteString("\tfor _, name := range []string{\n")
-		for _, rt := range ordered {
-			// Element first, then its array type — the order LoadType requires.
-			// Extension types loaded by bare name have no array companion.
-			sb.WriteString(fmt.Sprintf("\t\t%q,\n", rt.pgName))
-			if !rt.noArray {
+		if usesHstore {
+			// hstore is an extension base type. pgx's Conn.LoadType only loads
+			// array/composite/domain/enum/range/multirange types — it treats every
+			// base type as an array and looks up a non-existent element OID — so
+			// register the known Hstore codec with the type's runtime OID, plus its
+			// array type for hstore[] columns.
+			sb.WriteString("\tvar hstoreOID, hstoreArrayOID uint32\n")
+			sb.WriteString("\tif err := conn.QueryRow(ctx, \"select oid, typarray from pg_type where typname = 'hstore'\").Scan(&hstoreOID, &hstoreArrayOID); err != nil {\n")
+			sb.WriteString("\t\treturn fmt.Errorf(\"look up hstore oid: %w\", err)\n")
+			sb.WriteString("\t}\n")
+			sb.WriteString("\thstoreType := &pgtype.Type{Name: \"hstore\", OID: hstoreOID, Codec: pgtype.HstoreCodec{}}\n")
+			sb.WriteString("\tconn.TypeMap().RegisterType(hstoreType)\n")
+			sb.WriteString("\tif hstoreArrayOID != 0 {\n")
+			sb.WriteString("\t\tconn.TypeMap().RegisterType(&pgtype.Type{Name: \"_hstore\", OID: hstoreArrayOID, Codec: &pgtype.ArrayCodec{ElementType: hstoreType}})\n")
+			sb.WriteString("\t}\n")
+		}
+		if len(ordered) > 0 {
+			sb.WriteString("\tfor _, name := range []string{\n")
+			for _, rt := range ordered {
+				// Element first, then its array type — the order LoadType requires.
+				sb.WriteString(fmt.Sprintf("\t\t%q,\n", rt.pgName))
 				sb.WriteString(fmt.Sprintf("\t\t%q,\n", rt.arrayPgName))
 			}
+			sb.WriteString("\t} {\n")
+			sb.WriteString("\t\tt, err := conn.LoadType(ctx, name)\n")
+			sb.WriteString("\t\tif err != nil {\n")
+			sb.WriteString("\t\t\treturn fmt.Errorf(\"load type %s: %w\", name, err)\n")
+			sb.WriteString("\t\t}\n")
+			sb.WriteString("\t\tconn.TypeMap().RegisterType(t)\n")
+			sb.WriteString("\t}\n")
 		}
-		sb.WriteString("\t} {\n")
-		sb.WriteString("\t\tt, err := conn.LoadType(ctx, name)\n")
-		sb.WriteString("\t\tif err != nil {\n")
-		sb.WriteString("\t\t\treturn fmt.Errorf(\"load type %s: %w\", name, err)\n")
-		sb.WriteString("\t\t}\n")
-		sb.WriteString("\t\tconn.TypeMap().RegisterType(t)\n")
-		sb.WriteString("\t}\n")
 		sb.WriteString("\treturn nil\n}\n\n")
 	}
 
