@@ -613,10 +613,14 @@ top-level `WHERE` (one `$N` per condition); nested OR/paren-heavy WHEREs are
 best-effort. Composites scan/encode via generated pgx methods
 (`ScanIndex`/`ScanNull`/`Index`/`IsNull` + `pgtype.CompositeIndexScanner/Getter`
 compile-assertions): composite columns → struct, composite params → encoded
-(getter), composite arrays → `[]T` (e.g. `address[]` → `[]AppAddress`). A
-generated `RegisterTypes(ctx, *pgx.Conn)` helper (wired into `pgxpool`
-`AfterConnect`) `LoadType`s each composite then its array (`app.address` then
-`app._address`) at runtime — element before array.
+(getter), composite/enum arrays → `[]T` (`address[]` → `[]AppAddress`,
+`user_status[]` → `[]AppUserStatus`), and nested composites (a composite field
+of composite/enum type → the nested Go struct/type). A generated
+`RegisterTypes(ctx, *pgx.Conn)` helper (wired into `pgxpool` `AfterConnect`)
+`LoadType`s every enum + composite plus each one's array (`app.address` /
+`app._address`) at runtime, ordered dependency-first: enums, then composites
+topologically sorted (a composite's field-composites first), element before
+array — so nested composites and arrays resolve.
 
 ---
 
