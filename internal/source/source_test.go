@@ -49,3 +49,47 @@ func TestResolveMigrationsOrdered(t *testing.T) {
 		t.Fatalf("kind: %v", units[0].Kind)
 	}
 }
+
+func TestResolveSchemaDir(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "schema.sql"), []byte("CREATE TABLE things(id bigint PRIMARY KEY);"), 0o644)
+
+	cfg := &config.Config{Schema: []config.Source{{Dir: dir}}}
+	units, err := Resolve(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 1 {
+		t.Fatalf("want 1 schema unit, got %d", len(units))
+	}
+	if units[0].Kind != KindSchema {
+		t.Fatalf("expected KindSchema, got %v", units[0].Kind)
+	}
+}
+
+func TestResolveSchemaFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "schema.sql")
+	os.WriteFile(p, []byte("CREATE TABLE widgets(id bigint PRIMARY KEY);"), 0o644)
+
+	cfg := &config.Config{Schema: []config.Source{{File: p}}}
+	units, err := Resolve(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 1 || units[0].Kind != KindSchema {
+		t.Fatalf("schema file unit: %+v", units)
+	}
+}
+
+func TestResolveSchemaInline(t *testing.T) {
+	sql := "CREATE TABLE foo(id bigint);"
+	cfg := &config.Config{Schema: []config.Source{{Inline: sql}}}
+	units, err := Resolve(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 1 || units[0].Kind != KindSchema || units[0].SQL != sql {
+		t.Fatalf("schema inline unit: %+v", units)
+	}
+}

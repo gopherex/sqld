@@ -13,6 +13,8 @@ version: "1"
 engine: postgresql
 options:
   defaultSchema: public
+schema:
+  - file: ./schema.sql
 queries:
   - dir: ./queries
 migrations:
@@ -46,6 +48,12 @@ func TestLoadBasic(t *testing.T) {
 	}
 	if cfg.Options.DefaultSchema != "public" {
 		t.Errorf("defaultSchema = %q; want %q", cfg.Options.DefaultSchema, "public")
+	}
+	if len(cfg.Schema) != 1 {
+		t.Fatalf("len(schema) = %d; want 1", len(cfg.Schema))
+	}
+	if cfg.Schema[0].File == "" {
+		t.Error("schema[0].File should be set")
 	}
 	if len(cfg.Queries) != 1 {
 		t.Fatalf("len(queries) = %d; want 1", len(cfg.Queries))
@@ -166,5 +174,53 @@ migrations:
 	}
 	if cfg.Migrations[0].Glob != "*.sql" {
 		t.Errorf("migration glob = %q; want %q", cfg.Migrations[0].Glob, "*.sql")
+	}
+}
+
+func TestLoadSchemaSource(t *testing.T) {
+	y := `
+schema:
+  - file: ./schema.sql
+migrations:
+  - dir: ./migrations
+`
+	p := writeTempConfig(t, y)
+	cfg, err := config.Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Schema) != 1 {
+		t.Fatalf("len(schema) = %d; want 1", len(cfg.Schema))
+	}
+	if cfg.Schema[0].File != "./schema.sql" {
+		t.Errorf("schema[0].File = %q; want %q", cfg.Schema[0].File, "./schema.sql")
+	}
+}
+
+func TestLoadSchemaDirGlobDefault(t *testing.T) {
+	y := `
+schema:
+  - dir: ./ddl
+`
+	p := writeTempConfig(t, y)
+	cfg, err := config.Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Schema[0].Glob != "*.sql" {
+		t.Errorf("schema dir glob = %q; want %q", cfg.Schema[0].Glob, "*.sql")
+	}
+}
+
+func TestValidateErrorSchemaTwoSources(t *testing.T) {
+	y := `
+schema:
+  - file: ./schema.sql
+    dir: ./ddl
+`
+	p := writeTempConfig(t, y)
+	_, err := config.Load(p)
+	if err == nil {
+		t.Fatal("expected error for schema source with two fields set")
 	}
 }

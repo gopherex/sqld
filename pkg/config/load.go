@@ -42,6 +42,27 @@ func (cfg *Config) Validate() error {
 		cfg.Options.DefaultSchema = "public"
 	}
 
+	// Schema sources.
+	for i := range cfg.Schema {
+		s := &cfg.Schema[i]
+		set := 0
+		if s.File != "" {
+			set++
+		}
+		if s.Dir != "" {
+			set++
+		}
+		if s.Inline != "" {
+			set++
+		}
+		if set != 1 {
+			return fmt.Errorf("schema[%d]: set exactly one of file|dir|inline", i)
+		}
+		if s.Dir != "" && s.Glob == "" {
+			s.Glob = "*.sql"
+		}
+	}
+
 	// Query sources.
 	for i := range cfg.Queries {
 		s := &cfg.Queries[i]

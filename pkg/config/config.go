@@ -9,6 +9,7 @@ const EnginePostgreSQL Engine = "postgresql"
 type Config struct {
 	Version    string            `yaml:"version"`
 	Engine     Engine            `yaml:"engine"`
+	Schema     []Source          `yaml:"schema"`
 	Queries    []Source          `yaml:"queries"`
 	Migrations []MigrationSource `yaml:"migrations"`
 	Plugins    []PluginConfig    `yaml:"plugins"`
