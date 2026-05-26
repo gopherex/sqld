@@ -2,14 +2,19 @@ package query
 
 // rewriteNamedParams replaces @ident named parameters in sql with positional
 // $N placeholders that libpg_query understands, and returns the mapping from
-// position → original name.
+// position → original name and position → optional flag.
 //
 // The lexer tracks context so that @ident inside string literals, identifiers,
 // comments, and dollar-quoted strings is left untouched.  Bare operator tokens
 // like @>, @@, @-@, @? are also left untouched because the character following
 // @ is not an identifier-start character.
-func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string) {
+//
+// A trailing ? immediately after @ident (e.g. @email?) marks the parameter as
+// optional. The ? is consumed and NOT emitted into the rewritten SQL. A name
+// is considered optional if ANY occurrence uses the ? suffix.
+func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, optional map[uint32]bool) {
 	names = make(map[uint32]string)
+	optional = make(map[uint32]bool)
 	// nameToPos maps a name seen before to its assigned $N position so that
 	// repeated occurrences of the same name get the same placeholder.
 	nameToPos := make(map[string]uint32)
@@ -88,6 +93,11 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string) 
 					j++
 				}
 				name := s[i+1 : j]
+				// Check for optional marker: ? immediately following the identifier.
+				isOptional := j < len(s) && s[j] == '?'
+				if isOptional {
+					j++ // consume the '?', do not emit it
+				}
 				// Assign or look up position.
 				pos, seen := nameToPos[name]
 				if !seen {
@@ -95,6 +105,10 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string) 
 					nextPos++
 					nameToPos[name] = pos
 					names[pos] = name
+				}
+				// A name is optional if ANY occurrence uses the ? suffix.
+				if isOptional {
+					optional[pos] = true
 				}
 				// Write $N placeholder.
 				out = appendUint(append(out, '$'), pos)
@@ -185,9 +199,9 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string) 
 	}
 
 	if len(names) == 0 {
-		return sql, names
+		return sql, names, optional
 	}
-	return string(out), names
+	return string(out), names, optional
 }
 
 // scanDollarTag checks whether the substring starting at pos in s is a

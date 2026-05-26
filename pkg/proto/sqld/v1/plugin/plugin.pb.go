@@ -618,12 +618,15 @@ func (x *Diagnostic) GetCode() string {
 
 // QueryParameter is an inferred bind parameter ($1, $2, ...).
 type QueryParameter struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Number        uint32                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"` // 1-based position
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`      // named param, when available
-	Type          *ir.TypeRef            `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
-	Nullable      bool                   `protobuf:"varint,4,opt,name=nullable,proto3" json:"nullable,omitempty"`
-	Column        *ir.ObjectRef          `protobuf:"bytes,5,opt,name=column,proto3" json:"column,omitempty"` // originating column, when inferred
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Number   uint32                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"` // 1-based position
+	Name     string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`      // named param, when available
+	Type     *ir.TypeRef            `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
+	Nullable bool                   `protobuf:"varint,4,opt,name=nullable,proto3" json:"nullable,omitempty"`
+	Column   *ir.ObjectRef          `protobuf:"bytes,5,opt,name=column,proto3" json:"column,omitempty"` // originating column, when inferred
+	// optional marks a dynamic-query parameter declared with the `@name?` suffix:
+	// the WHERE condition using it is included only when the caller supplies it.
+	Optional      bool `protobuf:"varint,6,opt,name=optional,proto3" json:"optional,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -691,6 +694,13 @@ func (x *QueryParameter) GetColumn() *ir.ObjectRef {
 		return x.Column
 	}
 	return nil
+}
+
+func (x *QueryParameter) GetOptional() bool {
+	if x != nil {
+		return x.Optional
+	}
+	return false
 }
 
 // QueryColumn is an inferred output column of a query.
@@ -1018,13 +1028,14 @@ const file_sqld_v1_plugin_plugin_proto_rawDesc = "" +
 	"\bseverity\x18\x01 \x01(\x0e2\".sqld.v1.plugin.DiagnosticSeverityR\bseverity\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12.\n" +
 	"\x06source\x18\x03 \x01(\v2\x16.sqld.v1.ir.SourceSpanR\x06source\x12\x12\n" +
-	"\x04code\x18\x04 \x01(\tR\x04code\"\xb0\x01\n" +
+	"\x04code\x18\x04 \x01(\tR\x04code\"\xcc\x01\n" +
 	"\x0eQueryParameter\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12'\n" +
 	"\x04type\x18\x03 \x01(\v2\x13.sqld.v1.ir.TypeRefR\x04type\x12\x1a\n" +
 	"\bnullable\x18\x04 \x01(\bR\bnullable\x12-\n" +
-	"\x06column\x18\x05 \x01(\v2\x15.sqld.v1.ir.ObjectRefR\x06column\"\xde\x01\n" +
+	"\x06column\x18\x05 \x01(\v2\x15.sqld.v1.ir.ObjectRefR\x06column\x12\x1a\n" +
+	"\boptional\x18\x06 \x01(\bR\boptional\"\xde\x01\n" +
 	"\vQueryColumn\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
 	"\x04type\x18\x02 \x01(\v2\x13.sqld.v1.ir.TypeRefR\x04type\x12\x1a\n" +

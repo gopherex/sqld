@@ -141,7 +141,8 @@ func ParseQueries(sql, sourceFile string) ([]*pluginv1.Query, error) {
 
 		// Rewrite @ident named params → $N before parsing, so that
 		// libpg_query only sees positional placeholders it understands.
-		rewritten, names := rewriteNamedParams(body)
+		// optional[pos] == true when the param was declared with the @name? suffix.
+		rewritten, names, optional := rewriteNamedParams(body)
 
 		stmts, err := parse.Statements(rewritten)
 		if err != nil || len(stmts) == 0 {
@@ -165,8 +166,9 @@ func ParseQueries(sql, sourceFile string) ([]*pluginv1.Query, error) {
 			for n := uint32(1); n <= maxPos; n++ {
 				if name, ok := names[n]; ok {
 					seededParams = append(seededParams, &pluginv1.QueryParameter{
-						Number: n,
-						Name:   name,
+						Number:   n,
+						Name:     name,
+						Optional: optional[n],
 					})
 				}
 			}

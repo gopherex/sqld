@@ -10,47 +10,28 @@ import (
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
 
-// TestGenerateDynamicQuery tests the new WHERE-aware dynamic builder with
-// named params, @if FLAG annotations, and @orderby LIST annotation.
+// TestGenerateDynamicQuery tests the WHERE-aware dynamic builder with named
+// params whose optionality comes from QueryParameter.Optional (the `@name?`
+// suffix), an ANY($N) slice condition, and an @orderby LIST annotation.
 func TestGenerateDynamicQuery(t *testing.T) {
-	// Query.Sql as produced by the host: $N placeholders, named parameters,
-	// trailing "-- @if" FLAG comments on optional condition lines, and a
-	// standalone "-- @orderby ..." comment line.
+	// Query.Sql as produced by the host: $N placeholders (the `?` suffix is
+	// already stripped), and a standalone "-- @orderby ..." comment line. The
+	// optional condition carries NO trailing annotation — its optionality is
+	// conveyed via Parameters[0].Optional.
 	sql := "SELECT id, email, status FROM app.users\n" +
 		"WHERE\n" +
-		"      email = $1     -- @if\n" +
-		"  AND id = ANY($2)   -- @if\n" +
-		"-- @orderby created_at, email"
+		"      email = $1\n" +
+		"  AND id = ANY($2)\n" +
+		"-- @orderby created_at, email\n" +
+		";"
 
-	// offNth finds the start/end byte offsets of the n-th occurrence (0-based)
-	// of sub in sql.
-	offNth := func(sub string, n int) (uint64, uint64) {
-		idx := 0
-		for i := 0; i <= n; i++ {
-			j := strings.Index(sql[idx:], sub)
-			if j < 0 {
-				t.Fatalf("substring %q not found (occurrence %d)", sub, n)
-			}
-			if i == n {
-				start := idx + j
-				return uint64(start), uint64(start + len(sub))
-			}
-			idx += j + len(sub)
+	// off finds the start/end byte offsets of the first occurrence of sub.
+	off := func(sub string) (uint64, uint64) {
+		j := strings.Index(sql, sub)
+		if j < 0 {
+			t.Fatalf("substring %q not found", sub)
 		}
-		panic("unreachable")
-	}
-	off := func(sub string) (uint64, uint64) { return offNth(sub, 0) }
-
-	// mkFlag creates a FLAG annotation (no args).
-	mkFlag := func(name string, s, e uint64) *irv1.AnnotationValue {
-		return &irv1.AnnotationValue{
-			Name: name,
-			Target: &irv1.AnnotationTargetRef{
-				Kind:      irv1.AnnotationTargetKind_ANNOTATION_TARGET_KIND_QUERY,
-				QueryName: "SearchUsers",
-				Source:    &irv1.SourceSpan{StartOffset: s, EndOffset: e},
-			},
-		}
+		return uint64(j), uint64(j + len(sub))
 	}
 
 	// mkList creates a LIST annotation with multiple string-value args (one per column).
@@ -73,9 +54,6 @@ func TestGenerateDynamicQuery(t *testing.T) {
 		return av
 	}
 
-	// Locate the two "-- @if" comments (one per condition line).
-	if1S, if1E := off("-- @if")
-	if2S, if2E := offNth("-- @if", 1)
 	orderbyS, orderbyE := off("-- @orderby created_at, email")
 
 	req := &pluginv1.GenerateRequest{
@@ -84,7 +62,9 @@ func TestGenerateDynamicQuery(t *testing.T) {
 			Sql:     sql,
 			Command: pluginv1.QueryCommand_QUERY_COMMAND_MANY,
 			Parameters: []*pluginv1.QueryParameter{
-				{Number: 1, Name: "email", Type: &irv1.TypeRef{PgName: "text"}},
+				// email = $1 → optional (`@email?`) → pointer field.
+				{Number: 1, Name: "email", Optional: true, Type: &irv1.TypeRef{PgName: "text"}},
+				// id = ANY($2) → slice (inherently conditional, no `?`).
 				{Number: 2, Name: "ids", Type: &irv1.TypeRef{PgName: "int8"}},
 			},
 			Columns: []*pluginv1.QueryColumn{
@@ -94,8 +74,6 @@ func TestGenerateDynamicQuery(t *testing.T) {
 			},
 		}},
 		Annotations: []*irv1.AnnotationValue{
-			mkFlag("if", if1S, if1E),
-			mkFlag("if", if2S, if2E),
 			mkList("orderby", orderbyS, orderbyE, "created_at", "email"),
 		},
 	}
@@ -129,12 +107,13 @@ func TestGenerateDynamicQuery(t *testing.T) {
 		"OrderDesc",
 		// Params struct fields (names).
 		"type SearchUsersParams struct",
-		"Email",
-		"*string",
-		"Ids",
-		"[]int64",
-		"OrderBy",
+		"Email",   // optional (@email?) → pointer field
+		"*string", // ... of element type *string
+		"Ids",     // ANY($2) slice
+		"[]int64", // ... of element type []int64
+		"OrderBy", // @orderby enum field
 		"SearchUsersOrderBy",
+		"OrderDir", // shared direction field
 		// WHERE-aware builder.
 		"var conds []string",
 		`strings.Join(conds, " AND ")`,
@@ -229,7 +208,8 @@ func TestInfoResponse(t *testing.T) {
 	if len(info.GetSupportedEngines()) == 0 {
 		t.Error("Info().SupportedEngines is empty")
 	}
-	// Verify new annotation schema: @if (FLAG) and @orderby (LIST).
+	// Verify annotation schema: only @orderby (LIST) remains. Optionality is no
+	// longer an annotation — it comes from QueryParameter.Optional (@name?).
 	schema := info.GetAnnotationSchema()
 	if schema == nil {
 		t.Fatal("AnnotationSchema is nil")
@@ -237,13 +217,6 @@ func TestInfoResponse(t *testing.T) {
 	annsByName := map[string]*pluginv1.AnnotationDef{}
 	for _, a := range schema.GetAnnotations() {
 		annsByName[a.GetName()] = a
-	}
-	ifAnn, ok := annsByName["if"]
-	if !ok {
-		t.Fatal("missing @if annotation definition")
-	}
-	if ifAnn.GetValue().GetForm() != pluginv1.AnnotationForm_ANNOTATION_FORM_FLAG {
-		t.Errorf("@if form = %v; want FLAG", ifAnn.GetValue().GetForm())
 	}
 	obAnn, ok := annsByName["orderby"]
 	if !ok {
@@ -257,10 +230,10 @@ func TestInfoResponse(t *testing.T) {
 	} else if obAnn.GetValue().GetElement().GetType() != irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT {
 		t.Errorf("@orderby element type = %v; want IDENT", obAnn.GetValue().GetElement().GetType())
 	}
-	// Old annotations (endif, slice) must NOT be present.
-	for _, badName := range []string{"endif", "slice"} {
+	// Removed annotations (if, endif, slice) must NOT be present.
+	for _, badName := range []string{"if", "endif", "slice"} {
 		if _, found := annsByName[badName]; found {
-			t.Errorf("old annotation @%s should not be present in new schema", badName)
+			t.Errorf("removed annotation @%s should not be present in new schema", badName)
 		}
 	}
 }

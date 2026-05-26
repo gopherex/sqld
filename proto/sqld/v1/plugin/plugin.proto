@@ -123,6 +123,9 @@ message QueryParameter {
   sqld.v1.ir.TypeRef type = 3;
   bool nullable = 4;
   sqld.v1.ir.ObjectRef column = 5; // originating column, when inferred
+  // optional marks a dynamic-query parameter declared with the `@name?` suffix:
+  // the WHERE condition using it is included only when the caller supplies it.
+  bool optional = 6;
 }
 
 // QueryColumn is an inferred output column of a query.
