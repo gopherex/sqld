@@ -226,6 +226,30 @@
                 "arrayDimensions": 1
               },
               "nullable": true
+            },
+            {
+              "id": "app.profiles.status_history",
+              "name": "status_history",
+              "position": 5,
+              "type": {
+                "kind": "TYPE_KIND_ARRAY",
+                "pgName": "user_status",
+                "element": {
+                  "kind": "TYPE_KIND_SCALAR",
+                  "pgName": "user_status"
+                },
+                "arrayDimensions": 1
+              },
+              "nullable": true
+            },
+            {
+              "id": "app.profiles.owner",
+              "name": "owner",
+              "position": 6,
+              "type": {
+                "kind": "TYPE_KIND_SCALAR",
+                "pgName": "person"
+              }
             }
           ],
           "constraints": [
@@ -259,6 +283,11 @@
                 "onDelete": "REFERENTIAL_ACTION_CASCADE",
                 "onUpdate": "REFERENTIAL_ACTION_NO_ACTION"
               }
+            },
+            {
+              "id": "app.profiles.constraint_2",
+              "type": "CONSTRAINT_TYPE_NOT_NULL",
+              "notNullColumn": "owner"
             }
           ]
         },
@@ -1253,6 +1282,36 @@
               "type": {
                 "kind": "TYPE_KIND_SCALAR",
                 "pgName": "text"
+              }
+            }
+          ]
+        },
+        {
+          "id": "app.person",
+          "name": {
+            "schema": "app",
+            "name": "person"
+          },
+          "fields": [
+            {
+              "name": "name",
+              "type": {
+                "kind": "TYPE_KIND_SCALAR",
+                "pgName": "text"
+              }
+            },
+            {
+              "name": "home",
+              "type": {
+                "kind": "TYPE_KIND_SCALAR",
+                "pgName": "address"
+              }
+            },
+            {
+              "name": "status",
+              "type": {
+                "kind": "TYPE_KIND_SCALAR",
+                "pgName": "user_status"
               }
             }
           ]

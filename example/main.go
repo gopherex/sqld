@@ -33,6 +33,16 @@ func main() {
 	// Composite ARRAY scan: the row field is []AppAddress.
 	_, _ = q.GetPrevAddresses(ctx, 1)
 
+	// Array-of-enum scan: the row field is []AppUserStatus.
+	hist, _ := q.GetStatusHistory(ctx, 1)
+	_ = hist.StatusHistory // []db.AppUserStatus
+
+	// Nested composite scan: the row field is AppPerson, whose Home field is an
+	// AppAddress and whose Status field is an AppUserStatus.
+	owner, _ := q.GetOwner(ctx, 1)
+	_ = owner.Owner.Home   // db.AppAddress
+	_ = owner.Owner.Status // db.AppUserStatus
+
 	// Dynamic query: only the supplied filters are applied at runtime.
 	email := "alice@example.com"
 	_, _ = q.SearchUsers(ctx, db.SearchUsersParams{

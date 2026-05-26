@@ -263,9 +263,22 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 	type enumDef struct {
 		typeName string
 		labels   []string
+		// pgName is the schema-qualified PostgreSQL type name (e.g.
+		// "app.user_status"); arrayPgName is its auto-created array type
+		// ("app._user_status"). Both are registered on a connection so that
+		// columns/params of an ENUM ARRAY ("user_status[]") scan and encode
+		// (scalar enums scan as text without registration, but an array of an
+		// unknown OID needs the array type registered, whose element must be
+		// registered first — exactly what pgx's Conn.LoadType requires).
+		pgName      string
+		arrayPgName string
 	}
 	type compositeDef struct {
 		typeName string
+		// bareName is the unqualified PostgreSQL type name (e.g. "address"),
+		// used to build the dependency graph (a field's TypeRef.PgName is the
+		// bare name, matching the registry key).
+		bareName string
 		// pgName is the schema-qualified PostgreSQL type name (e.g. "app.address"),
 		// used to load+register the composite on a pgx connection.
 		pgName string
@@ -275,7 +288,13 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 		// Conn.LoadType resolves it ("_foo" when "foo" is registered), so we
 		// register it after the element so []AppAddress columns/params work.
 		arrayPgName string
-		fields      []fieldDef
+		// depNames are the bare names of other composite types this composite
+		// directly depends on (a field whose type — or array element type —
+		// resolves to another composite). pgx's Conn.LoadType requires all field
+		// types of a composite to be registered first, so the outer composite
+		// must be registered AFTER every composite in depNames.
+		depNames []string
+		fields   []fieldDef
 	}
 
 	var enumDefs []enumDef
@@ -285,18 +304,34 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 		sName := schema.GetName()
 
 		for _, e := range schema.GetEnums() {
-			typeName := udtGoTypeName(sName, e.GetName().GetName())
-			enumDefs = append(enumDefs, enumDef{typeName: typeName, labels: e.GetLabels()})
+			bareName := e.GetName().GetName()
+			typeName := udtGoTypeName(sName, bareName)
+			pgName := bareName
+			arrayPgName := "_" + bareName
+			if sName != "" {
+				pgName = sName + "." + bareName
+				arrayPgName = sName + "._" + bareName
+			}
+			enumDefs = append(enumDefs, enumDef{
+				typeName:    typeName,
+				labels:      e.GetLabels(),
+				pgName:      pgName,
+				arrayPgName: arrayPgName,
+			})
 		}
 
 		for _, c := range schema.GetComposites() {
 			bareName := c.GetName().GetName()
 			typeName := udtGoTypeName(sName, bareName)
 			var fields []fieldDef
+			var depNames []string
 			for _, f := range c.GetFields() {
 				gt, imps := goType(reg, f.GetType(), false)
 				allImports = append(allImports, imps...)
 				fields = append(fields, fieldDef{name: pascal(f.GetName()), goType: gt})
+				if dep := compositeDepName(reg, f.GetType()); dep != "" {
+					depNames = append(depNames, dep)
+				}
 			}
 			pgName := bareName
 			arrayPgName := "_" + bareName
@@ -304,20 +339,31 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 				pgName = sName + "." + bareName
 				arrayPgName = sName + "._" + bareName
 			}
-			compositeDefs = append(compositeDefs, compositeDef{typeName: typeName, pgName: pgName, arrayPgName: arrayPgName, fields: fields})
+			compositeDefs = append(compositeDefs, compositeDef{
+				typeName:    typeName,
+				bareName:    bareName,
+				pgName:      pgName,
+				arrayPgName: arrayPgName,
+				depNames:    depNames,
+				fields:      fields,
+			})
 		}
 	}
 
-	// Composites need the pgtype package for the CompositeIndexScanner /
-	// CompositeIndexGetter interface assertions, and the RegisterTypes helper
-	// needs context, fmt, and the pgx package.
-	if len(compositeDefs) > 0 {
+	// RegisterTypes is emitted whenever there are enums or composites: it loads
+	// and registers each type (and its array) so that enum-array and composite
+	// columns/params scan and encode. It needs context, fmt, and the pgx
+	// package. Composites additionally need the pgtype package for the
+	// CompositeIndexScanner / CompositeIndexGetter interface assertions.
+	if len(enumDefs) > 0 || len(compositeDefs) > 0 {
 		allImports = append(allImports,
 			"context",
 			"fmt",
 			"github.com/jackc/pgx/v5",
-			"github.com/jackc/pgx/v5/pgtype",
 		)
+	}
+	if len(compositeDefs) > 0 {
+		allImports = append(allImports, "github.com/jackc/pgx/v5/pgtype")
 	}
 
 	// ---- Collect table struct definitions ----
@@ -414,23 +460,96 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 		sb.WriteString(fmt.Sprintf("var _ pgtype.CompositeIndexGetter = %s{}\n\n", c.typeName))
 	}
 
-	// Emit RegisterTypes: loads and registers each composite type on a
-	// connection so composite columns scan into their Go structs.
-	if len(compositeDefs) > 0 {
-		sb.WriteString("// RegisterTypes loads and registers the database's composite types (and their\n")
-		sb.WriteString("// array types) on a connection so composite columns/params scan and encode\n")
-		sb.WriteString("// into their Go structs. Wire it into pgxpool.Config.AfterConnect (it runs\n")
-		sb.WriteString("// per connection).\n")
+	// Emit RegisterTypes: loads and registers each enum and composite type (and
+	// its array) on a connection so enum-array and composite columns/params
+	// scan into their Go types.
+	if len(enumDefs) > 0 || len(compositeDefs) > 0 {
+		// Build the dependency-safe ordered list of PostgreSQL type names.
+		//
+		// 1. Enums (no deps) first, each followed by its array type.
+		// 2. Composites in topological order (a composite whose field is another
+		//    composite comes AFTER that field-composite), each followed by its
+		//    array type.
+		//
+		// pgx's Conn.LoadType requires an array type's element to be registered
+		// first, and a composite's field types to all be registered first.
+		type regType struct {
+			pgName, arrayPgName string
+		}
+		var ordered []regType
+		for _, e := range enumDefs {
+			ordered = append(ordered, regType{pgName: e.pgName, arrayPgName: e.arrayPgName})
+		}
+
+		// Topologically sort composites: dependencies (field-composites) first.
+		// Build adjacency from each composite's depNames (restricted to names
+		// that are actually composites in this catalog).
+		compByName := make(map[string]int, len(compositeDefs))
+		for i, c := range compositeDefs {
+			compByName[c.bareName] = i
+		}
+		const (
+			white = 0 // unvisited
+			gray  = 1 // on the current DFS stack (cycle marker)
+			black = 2 // fully processed
+		)
+		state := make([]int, len(compositeDefs))
+		var topo []int
+		cycle := false
+		var visit func(i int)
+		visit = func(i int) {
+			if state[i] == black {
+				return
+			}
+			if state[i] == gray {
+				cycle = true
+				return
+			}
+			state[i] = gray
+			for _, dep := range compositeDefs[i].depNames {
+				if j, ok := compByName[dep]; ok && j != i {
+					visit(j)
+				}
+			}
+			state[i] = black
+			topo = append(topo, i)
+		}
+		// Visit in declaration order for deterministic output.
+		for i := range compositeDefs {
+			visit(i)
+		}
+
+		if cycle {
+			// PostgreSQL forbids composite cycles, so this should be unreachable.
+			// Fall back to declaration order and leave a note in the source.
+			sb.WriteString("// NOTE: a cycle was detected in composite type dependencies;\n")
+			sb.WriteString("// falling back to declaration order (PostgreSQL forbids such cycles).\n")
+			topo = topo[:0]
+			for i := range compositeDefs {
+				topo = append(topo, i)
+			}
+		}
+		for _, i := range topo {
+			c := compositeDefs[i]
+			ordered = append(ordered, regType{pgName: c.pgName, arrayPgName: c.arrayPgName})
+		}
+
+		sb.WriteString("// RegisterTypes loads and registers the database's enum and composite types\n")
+		sb.WriteString("// (and their array types) on a connection so enum-array and composite\n")
+		sb.WriteString("// columns/params scan and encode into their Go types. Wire it into\n")
+		sb.WriteString("// pgxpool.Config.AfterConnect (it runs per connection).\n")
 		sb.WriteString("//\n")
-		sb.WriteString("// Each composite is registered before its array type because pgx's\n")
-		sb.WriteString("// Conn.LoadType resolves an array type (e.g. \"app._address\") only once its\n")
-		sb.WriteString("// element type (\"app.address\") is already registered on the connection.\n")
+		sb.WriteString("// The order is dependency-safe: each enum/composite is registered before its\n")
+		sb.WriteString("// array type, and a composite is registered after every composite it has a\n")
+		sb.WriteString("// field of (topological order), because pgx's Conn.LoadType resolves an array\n")
+		sb.WriteString("// type only once its element is registered and a composite only once all of\n")
+		sb.WriteString("// its field types are registered.\n")
 		sb.WriteString("func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {\n")
 		sb.WriteString("\tfor _, name := range []string{\n")
-		for _, c := range compositeDefs {
+		for _, rt := range ordered {
 			// Element first, then its array type — the order LoadType requires.
-			sb.WriteString(fmt.Sprintf("\t\t%q,\n", c.pgName))
-			sb.WriteString(fmt.Sprintf("\t\t%q,\n", c.arrayPgName))
+			sb.WriteString(fmt.Sprintf("\t\t%q,\n", rt.pgName))
+			sb.WriteString(fmt.Sprintf("\t\t%q,\n", rt.arrayPgName))
 		}
 		sb.WriteString("\t} {\n")
 		sb.WriteString("\t\tt, err := conn.LoadType(ctx, name)\n")

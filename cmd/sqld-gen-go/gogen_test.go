@@ -386,6 +386,108 @@ func TestGenerateCompositeArrayAndParam(t *testing.T) {
 	}
 }
 
+// TestRegisterTypesEnumArrayAndNestedOrder verifies that:
+//  1. array-of-enum columns resolve to []AppUserStatus (a slice of the enum Go
+//     type) and a nested composite field resolves to the inner composite/enum
+//     Go types;
+//  2. RegisterTypes lists enums (and their arrays) first, then composites in
+//     topological order — inner before outer — each followed by its array, so
+//     pgx's Conn.LoadType requirements (element-before-array, fields-before-
+//     composite) are satisfied.
+func TestRegisterTypesEnumArrayAndNestedOrder(t *testing.T) {
+	enumRef := func() *irv1.TypeRef {
+		return &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "e"}
+	}
+	innerRef := func() *irv1.TypeRef {
+		return &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "inner"}
+	}
+
+	req := &pluginv1.GenerateRequest{
+		OutDir: "gen/db",
+		Catalog: &irv1.Catalog{Schemas: []*irv1.Schema{{
+			Name:  "app",
+			Enums: []*irv1.EnumType{{Name: &irv1.QualifiedName{Schema: "app", Name: "e"}, Labels: []string{"a", "b"}}},
+			Composites: []*irv1.CompositeType{
+				// inner(x text)
+				{
+					Name: &irv1.QualifiedName{Schema: "app", Name: "inner"},
+					Fields: []*irv1.CompositeField{
+						{Name: "x", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+					},
+				},
+				// outer(i inner, e2 e) — depends on inner, so must come after it.
+				{
+					Name: &irv1.QualifiedName{Schema: "app", Name: "outer"},
+					Fields: []*irv1.CompositeField{
+						{Name: "i", Type: innerRef()},
+						{Name: "e2", Type: enumRef()},
+					},
+				},
+			},
+		}}},
+	}
+
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var models string
+	for _, f := range resp.GetFiles() {
+		if f.GetPath() == "models.go" {
+			models = string(f.GetContents())
+		}
+	}
+	if models == "" {
+		t.Fatal("no models.go generated")
+	}
+
+	// Struct field types are the composite/enum Go types.
+	norm := normalizeSpaces(models)
+	for _, want := range []string{
+		"type AppOuter struct",
+		"I AppInner", // nested composite field
+		"E2 AppE",    // enum field
+		"type AppInner struct",
+		"X string",
+	} {
+		if !strings.Contains(norm, want) {
+			t.Errorf("models.go missing %q\n---\n%s", want, models)
+		}
+	}
+
+	// RegisterTypes order: scope to the slice literal body.
+	start := strings.Index(models, "range []string{")
+	if start < 0 {
+		t.Fatalf("RegisterTypes slice literal not found:\n%s", models)
+	}
+	body := models[start:]
+	want := []string{
+		`"app.e"`, `"app._e"`,
+		`"app.inner"`, `"app._inner"`,
+		`"app.outer"`, `"app._outer"`,
+	}
+	prev := -1
+	for _, name := range want {
+		idx := strings.Index(body, name)
+		if idx < 0 {
+			t.Fatalf("RegisterTypes missing %s:\n%s", name, body)
+		}
+		if idx <= prev {
+			t.Fatalf("RegisterTypes order wrong: %s at %d not after previous %d:\n%s", name, idx, prev, body)
+		}
+		prev = idx
+	}
+
+	// inner must be registered before outer (topological order).
+	if strings.Index(body, `"app.inner"`) > strings.Index(body, `"app.outer"`) {
+		t.Errorf("RegisterTypes must list inner before outer:\n%s", body)
+	}
+
+	if _, err := format.Source([]byte(models)); err != nil {
+		t.Fatalf("models.go not valid Go: %v\n%s", err, models)
+	}
+}
+
 // TestGoParamTypeComposite verifies goParamType emits composite value types even
 // when the source column is nullable, while leaving scalars pointer-wrapped.
 func TestGoParamTypeComposite(t *testing.T) {
