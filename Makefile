@@ -7,8 +7,8 @@ build: ## Build the core binaries (sqld, sqld-gen-go, sqld-migrate)
 	go build -o bin/sqld-migrate ./cmd/sqld-migrate
 
 .PHONY: build-bob
-build-bob: ## Build the sqld-gen-bob plugin (separate ./bob module; needs go.work)
-	go build -o bin/sqld-gen-bob ./bob/cmd/sqld-gen-bob
+build-bob: ## Build the sqld-gen-bob plugin (nested module cmd/sqld-gen-bob; needs go.work)
+	go build -o bin/sqld-gen-bob ./cmd/sqld-gen-bob
 
 .PHONY: build-wasm
 build-wasm: ## Build sqld-gen-go as a wasip1 WASM plugin
@@ -26,9 +26,9 @@ example-wasm: build build-wasm ## Generate the example via the WASM plugin
 	go build ./example/...
 
 .PHONY: example-bob
-example-bob: build build-bob ## Generate the bob ORM (./bob module) + build/test it
-	./bin/sqld generate -c bob/example/sqld.yaml
-	go build ./bob/...
+example-bob: build build-bob ## Generate the bob ORM (cmd/sqld-gen-bob module) + build it
+	./bin/sqld generate -c cmd/sqld-gen-bob/example/sqld.yaml
+	go build ./cmd/sqld-gen-bob/...
 
 .PHONY: protocols
 protocols: # Generate Go + TS code from proto

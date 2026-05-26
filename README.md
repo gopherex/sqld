@@ -25,7 +25,7 @@ Install the three binaries:
 ```sh
 go install github.com/yaroher/sqld/cmd/sqld@latest
 go install github.com/yaroher/sqld/cmd/sqld-gen-go@latest
-go install github.com/yaroher/sqld/bob/cmd/sqld-gen-bob@latest  # separate ./bob module (keeps bob out of the core go.mod)
+go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest  # nested module — keeps bob out of the core go.mod
 go install github.com/yaroher/sqld/cmd/sqld-migrate@latest
 ```
 
