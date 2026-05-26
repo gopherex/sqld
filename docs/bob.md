@@ -52,7 +52,7 @@ plugins:
     options:
       package: models
       typesPackage: github.com/acme/app/gen/db   # import path of the gen-go output
-      nullMode: pointer                          # MUST match across both plugins
+      nullMode: pointer                          # tells the bridge what gen-go emits
       overrides:                                 # MUST match sqld-gen-go's overrides
         uuid: github.com/google/uuid.UUID
       # factories: true                          # opt-in; see limitations
@@ -64,7 +64,7 @@ Options:
 |---|---|
 | `package` | Go package name for the models (default `models`). |
 | `typesPackage` | import path of `sqld-gen-go`'s output package (where enum/composite Go types live). Required for schemas with UDTs. |
-| `nullMode` | `pointer` (default) or `opt`. Selects the null wrapping for nullable model/row fields; **must equal `sqld-gen-go`'s `nullMode`** for the structs to interoperate. `sqld-gen-go` accepts the same option (it defaults to `pointer`); with `opt` on **both** plugins, nullable model *and* row fields are `null.Val[T]` on both sides — full field-type parity (see Null-mode parity below). |
+| `nullMode` | `pointer` (default) or `opt`. **You do NOT need to match `sqld-gen-go`'s `nullMode`** — the auto-emitted `ToSqld()` bridge (below) converts bob's `null.Val[T]` to whatever `sqld-gen-go` produces. This option only tells the bridge what `sqld-gen-go` emits: `pointer` → `sqld-gen-go` produces `*T` for nullable scalars, so the bridge unwraps with `.Ptr()`; `opt` → `sqld-gen-go` produces `null.Val[T]`, so the bridge copies the field directly. (Nil-capable types are bare values in `sqld-gen-go` either way and are unwrapped with `.GetOrZero()`.) |
 | `overrides` | the same Go-type override table `sqld-gen-go` accepts; **must match** so both generators emit identical types for overridden columns. |
 | `models`, `whereLoadersJoins` | toggle those outputs (default on). |
 | `factories` | generate bob factories (default **off** — see limitations). |
@@ -93,22 +93,80 @@ row, _ := q.GetUser(ctx, user.ID)
 _ = row.Status == user.Status              // both db.AppUserStatus
 ```
 
+## Bridging to sqld models (`ToSqld`)
+
+bob models are not Go-convertible to `sqld-gen-go`'s flat models: bob carries
+extra ORM fields (`R` relationships, `C` columns helper) and wraps every nullable
+column in `null.Val[T]`, whereas `sqld-gen-go` emits `*T` (or `null.Val[T]` under
+`nullMode: opt`) and bare value types for nil-capable columns. So a plain cast or
+struct copy will not compile.
+
+To bridge them, **whenever `typesPackage` is set** `sqld-gen-bob` auto-emits a
+`sqld_bridge.go` with a `ToSqld()` method on every model that field-copies the
+bob model into the corresponding `sqld-gen-go` model (the full-table struct,
+e.g. `db.AppUsers`):
+
+```go
+// generated in gen/bob/models/sqld_bridge.go
+func (m AppUser) ToSqld() db.AppUsers {
+    return db.AppUsers{
+        ID:        m.ID,
+        Email:     m.Email,
+        Status:    m.Status,           // shared db.AppUserStatus — plain copy
+        ManagerID: m.ManagerID.Ptr(),  // null.Val[int64] → *int64 (pointer mode)
+        CreatedAt: m.CreatedAt,
+    }
+}
+```
+
+Because the leaf types are shared (qualified into `typesPackage`), the copy is
+trivial; the only adjustment is unwrapping bob's `null.Val[T]`:
+
+- a wrapped scalar/enum/composite → `.Ptr()` in the default `pointer` mode (a
+  direct copy under `opt`, since both sides are `null.Val[T]`);
+- a nil-capable column (slice, map, `json.RawMessage`, `pgtype.*` struct/range,
+  `[]Composite`) — which bob still wraps in `null.Val[T]` but `sqld-gen-go` emits
+  as the bare value type — → `.GetOrZero()`.
+
+The repository pattern: use bob for writes, relationship loading, and dynamic
+filtering, then return the flat `db.*` model to your callers:
+
+```go
+func (r *UserRepo) Get(ctx context.Context, id int64) (db.AppUsers, error) {
+    u, err := models.AppUsers.Query(
+        models.SelectWhere.AppUsers.ID.EQ(id),
+    ).One(ctx, r.exec)              // bob fetches + can eager-load u.R.*
+    if err != nil {
+        return db.AppUsers{}, err
+    }
+    return u.ToSqld(), nil          // hand back the flat sqld model
+}
+```
+
+The direction is bob → sqld only (`ToSqld`); there is no reverse method.
+
 ## Limitations (v1)
 
 - **Factories are opt-in.** bob's factories need a randomization expression for
   every column type; bob cannot synthesize one for the externally-owned shared
   types (composites, `uuid.UUID`, `pgtype.*`). Enable `factories: true` only for
   schemas whose column types all have a known random expression.
-- **Null-mode parity (`opt`).** The shared *non-null* leaf types are identical
-  across both generators in every mode. For nullable fields, set `nullMode: opt`
-  on **both** plugins: `sqld-gen-go` then emits `null.Val[T]` for nullable model
-  *and* row fields, exactly matching bob's nullable model field — closing the
-  field-type gap. (In the default `pointer` mode `sqld-gen-go` emits `*T` while
-  bob's nullable model field is still `null.Val[T]`, so the wrappers differ.) The
-  param side is **unaffected** by `nullMode`: `sqld-gen-go` query params keep `*T`
-  for nullable scalars and value types for composites — params are sqld-internal
-  and not consumed by bob. Nil-capable types (slices, `json.RawMessage`,
-  `pgtype.*` struct/range types, `[]Composite`) are never wrapped in either mode.
+- **Null-mode no longer needs to match.** The shared *non-null* leaf types are
+  identical across both generators in every mode. For *nullable* fields the
+  wrappers differ — `sqld-gen-bob` always emits `null.Val[T]` on model fields,
+  while `sqld-gen-go` emits `*T` (default `pointer`) or `null.Val[T]` (`opt`) —
+  **but you no longer have to align them**: the auto-emitted `ToSqld()` bridge
+  (see above) converts bob's `null.Val[T]` to whatever `sqld-gen-go` produces, so
+  you can leave `sqld-gen-go` in its default `pointer` mode and let the bridge do
+  the unwrapping. The `nullMode` option here just tells the bridge which form
+  `sqld-gen-go` emits. Setting `nullMode: opt` on **both** plugins still gives
+  field-type parity if you want the struct fields themselves to line up (e.g. for
+  a direct copy of an individual field), but it is no longer required for interop.
+  The param side is **unaffected** by `nullMode`: `sqld-gen-go` query params keep
+  `*T` for nullable scalars and value types for composites — params are
+  sqld-internal and not consumed by bob. Nil-capable types (slices,
+  `json.RawMessage`, `pgtype.*` struct/range types, `[]Composite`) are never
+  wrapped on the `sqld-gen-go` side in either mode.
   Note: under `opt`, a nullable *composite* result column scans via a small glue
   (`null.FromPtr`) because pgx cannot carry a non-null composite through
   `null.Val`'s `sql.Scanner` path — this is handled transparently by the
