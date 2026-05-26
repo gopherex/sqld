@@ -27,15 +27,11 @@ func Info() *pluginv1.GetInfoResponse {
 			CommentStyles: []string{"--", "/* */"},
 			Annotations: []*pluginv1.AnnotationDef{
 				{
-					// @if — FLAG, trailing on a WHERE condition line → that condition is optional.
-					Name: "if",
-					Value: &pluginv1.AnnotationValueSpec{
-						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_FLAG,
-					},
-				},
-				{
 					// @orderby col1,col2 — LIST of column idents → runtime ORDER BY restricted
 					// to those columns, as a typed enum + direction.
+					//
+					// Optionality of a WHERE condition is NOT an annotation: it comes from
+					// QueryParameter.Optional, set by the host for params written as `@name?`.
 					Name: "orderby",
 					Value: &pluginv1.AnnotationValueSpec{
 						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_LIST,
@@ -325,16 +321,13 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 		}
 	}
 
-	// Determine if any query is dynamic (has @if or @orderby annotations).
+	// Determine if any query is dynamic. A query is dynamic when it has an
+	// @orderby annotation, OR any parameter is Optional (declared `@name?`),
+	// OR any WHERE condition uses ANY($N) (slice).
 	hasDynamic := false
 	for _, q := range queries {
-		for _, a := range annotByQuery[q.GetName()] {
-			if a.GetName() == "if" || a.GetName() == "orderby" {
-				hasDynamic = true
-				break
-			}
-		}
-		if hasDynamic {
+		if isDynamicQuery(q, annotByQuery[q.GetName()]) {
+			hasDynamic = true
 			break
 		}
 	}
@@ -360,14 +353,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 
 	for _, q := range queries {
 		qAnns := annotByQuery[q.GetName()]
-		// A query is dynamic if it has any @if or @orderby annotation.
-		isDynamic := false
-		for _, a := range qAnns {
-			if a.GetName() == "if" || a.GetName() == "orderby" {
-				isDynamic = true
-				break
-			}
-		}
+		isDynamic := isDynamicQuery(q, qAnns)
 
 		qCols := q.GetColumns()
 		var cols []qField
@@ -629,9 +615,13 @@ var trailingCommentRe = regexp.MustCompile(`(?:--[^\n]*|/\*.*?\*/)$`)
 type conditionInfo struct {
 	// condSQL is the cleaned condition SQL (without leading AND/OR and trailing comment).
 	condSQL string
-	// isOptional is true if an @if annotation's offset lands on this line.
+	// isOptional is true if the condition's $N parameter has Optional==true
+	// (i.e. it was declared `@name?`). Optional conditions become pointer
+	// fields, included only when the caller supplies a non-nil value.
 	isOptional bool
-	// isSlice is true if the condition contains ANY($N).
+	// isSlice is true if the condition contains ANY($N). Slice conditions are
+	// inherently optional (included only when the slice is non-empty); no `?`
+	// is required.
 	isSlice bool
 	// paramNum is the $N (first) found in the condition (0 if none).
 	paramNum uint32
@@ -639,6 +629,24 @@ type conditionInfo struct {
 	fieldName string
 	// goType is the Go element type (for slices) or base type (for optionals/required).
 	goType string
+}
+
+// isDynamicQuery reports whether a query must use the WHERE-aware dynamic
+// builder. That is the case when it has an @orderby annotation, OR any
+// parameter is Optional (declared `@name?`), OR any WHERE condition uses
+// ANY($N) (a slice parameter, which is inherently conditional).
+func isDynamicQuery(q *pluginv1.Query, anns []*irv1.AnnotationValue) bool {
+	for _, a := range anns {
+		if a.GetName() == "orderby" {
+			return true
+		}
+	}
+	for _, p := range q.GetParameters() {
+		if p.GetOptional() {
+			return true
+		}
+	}
+	return anyParamRe.MatchString(q.GetSql())
 }
 
 // writeDynamicQueryCode generates a WHERE-aware dynamic query method.
@@ -652,14 +660,11 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 		paramByNum[p.GetNumber()] = p
 	}
 
-	// Collect @if and @orderby annotations.
-	var ifAnns []*irv1.AnnotationValue
+	// Collect @orderby annotations. Optionality is no longer an annotation; it
+	// comes from QueryParameter.Optional (set by the host for `@name?` params).
 	var orderbyAnns []*irv1.AnnotationValue
 	for _, a := range anns {
-		switch a.GetName() {
-		case "if":
-			ifAnns = append(ifAnns, a)
-		case "orderby":
+		if a.GetName() == "orderby" {
 			orderbyAnns = append(orderbyAnns, a)
 		}
 	}
@@ -710,24 +715,19 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 	}
 
 	// ----- Step 2: Split whereBody into per-line conditions -----
-	// Build a map: for each @if annotation, record its start offset.
-	type ifOff struct {
-		start uint64
-		end   uint64
-	}
-	var ifOffsets []ifOff
-	for _, a := range ifAnns {
-		src := a.GetTarget().GetSource()
-		ifOffsets = append(ifOffsets, ifOff{src.GetStartOffset(), src.GetEndOffset()})
-	}
-
+	//
+	// Safety note: the base SQL was already validated by the host (Collect);
+	// an invalid base fails generation upstream. By construction, this builder
+	// only ever drops whole AND-condition lines, which keeps the remaining SQL
+	// valid — so no runtime re-parsing is needed here. Each condition's
+	// optionality is read from its $N parameter (Optional/ANY); a condition
+	// with no resolvable $N is emitted as REQUIRED static text and never panics.
+	//
 	// Parse conditions line-by-line.
 	var conditions []conditionInfo
 	if whereBody != "" && loc != nil {
-		// Absolute byte offset of the start of whereBody in sql.
-		// After WHERE keyword end = loc[1].
-		// We already filtered out orderby lines; but we need the correct offsets.
-		// Recompute line offsets against the original sql to detect @if.
+		// Recompute line offsets against the original sql so that we can skip
+		// @orderby comment lines accurately.
 		whereEnd := loc[1] // absolute offset of char after WHERE
 		currentOff := uint64(whereEnd)
 		rawLines := strings.Split(sql[whereEnd:], "\n")
@@ -778,16 +778,8 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 				continue
 			}
 
-			// Check if an @if annotation falls on this line.
-			isOptional := false
-			for _, iof := range ifOffsets {
-				if iof.start >= lineStartOff && iof.start <= lineEndOff {
-					isOptional = true
-					break
-				}
-			}
-
-			// Detect slice: condition contains ANY($N).
+			// Detect slice: condition contains ANY($N). Slices are inherently
+			// conditional (included only when non-empty) regardless of `?`.
 			isSlice := anyParamRe.MatchString(condSQL)
 
 			// Find first $N in the condition.
@@ -796,9 +788,14 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 				fmt.Sscanf(m[1], "%d", &paramNum)
 			}
 
-			// Determine field name and Go type from parameter.
+			// Determine field name, Go type, and optionality from the parameter.
+			// Optionality comes from QueryParameter.Optional (the `@name?` suffix),
+			// NOT from any annotation. A condition with no resolvable $N is treated
+			// as required static text.
 			var fieldName, goTypeStr string
+			var isOptional bool
 			if p, ok := paramByNum[paramNum]; ok {
+				isOptional = p.GetOptional()
 				pName := p.GetName()
 				if pName == "" {
 					pName = fmt.Sprintf("arg%d", paramNum)
