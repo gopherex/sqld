@@ -145,6 +145,77 @@ func TestInferNamedParam(t *testing.T) {
 	}
 }
 
+// TestInferOptionalNamedParam verifies that @name? sets Optional=true on the
+// resulting QueryParameter while plain @name leaves Optional==false, and that
+// both params are fully typed after Infer.
+func TestInferOptionalNamedParam(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TABLE users(id bigint primary key, email text not null);")
+	cat, _ := catalog.Build(stmts)
+	qs, err := ParseQueries(
+		"-- name: S :many\nSELECT id FROM users WHERE email = @email? AND id = @id;\n",
+		"q.sql",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 1 {
+		t.Fatalf("queries=%d", len(qs))
+	}
+	q := qs[0]
+
+	// Rewritten SQL must contain $1 and $2, no @ and no ?.
+	if !strings.Contains(q.GetSql(), "$1") || !strings.Contains(q.GetSql(), "$2") {
+		t.Errorf("Sql=%q does not contain $1/$2", q.GetSql())
+	}
+	if strings.Contains(q.GetSql(), "@") {
+		t.Errorf("Sql=%q still contains @", q.GetSql())
+	}
+	if strings.Contains(q.GetSql(), "?") {
+		t.Errorf("Sql=%q still contains ?", q.GetSql())
+	}
+
+	var d catalog.Diagnostics
+	Infer(q, cat, &d)
+
+	params := q.GetParameters()
+	if len(params) != 2 {
+		t.Fatalf("params=%d want 2", len(params))
+	}
+
+	// Locate email and id params (order may be by position: $1=email, $2=id).
+	var emailParam, idParam *pluginv1.QueryParameter
+	for _, p := range params {
+		switch p.GetName() {
+		case "email":
+			emailParam = p
+		case "id":
+			idParam = p
+		}
+	}
+	if emailParam == nil {
+		t.Fatal("email param not found")
+	}
+	if idParam == nil {
+		t.Fatal("id param not found")
+	}
+
+	// email must be Optional, id must not.
+	if !emailParam.GetOptional() {
+		t.Errorf("email param Optional=false, want true")
+	}
+	if idParam.GetOptional() {
+		t.Errorf("id param Optional=true, want false")
+	}
+
+	// Both must have types resolved.
+	if emailParam.GetType() == nil || emailParam.GetType().GetPgName() != "text" {
+		t.Errorf("email type=%v want text", emailParam.GetType())
+	}
+	if idParam.GetType() == nil || idParam.GetType().GetPgName() != "int8" {
+		t.Errorf("id type=%v want int8", idParam.GetType())
+	}
+}
+
 // Bug 3: resolveColumnRef cross-table fallback must be deterministic.
 // Run it many times; if non-deterministic, the type will flip between runs.
 func TestInferColumnRefFallbackDeterministic(t *testing.T) {
