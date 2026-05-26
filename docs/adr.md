@@ -38,6 +38,7 @@ The companion design doc with full rationale and examples lives at
 - [ADR-0026 — Statement-level losslessness: MERGE + RawStatement](#adr-0026)
 - [ADR-0027 — Core engine implemented; plugin transport is stdio-framed protobuf](#adr-0027)
 - [ADR-0028 — Dynamic queries implemented (named params, smart WHERE, typed @orderby)](#adr-0028)
+- [ADR-0029 — sqld-gen-go Go type mapping (scalars, UDTs, json, range, overrides)](#adr-0029)
 - [Semantics reference](#semantics-reference)
 
 ---
@@ -621,6 +622,48 @@ of composite/enum type → the nested Go struct/type). A generated
 `app._address`) at runtime, ordered dependency-first: enums, then composites
 topologically sorted (a composite's field-composites first), element before
 array — so nested composites and arrays resolve.
+
+---
+
+<a id="adr-0029"></a>
+## ADR-0029 — sqld-gen-go Go type mapping (scalars, UDTs, json, range, overrides)
+
+**Status:** accepted (implemented)
+
+**Context:** How `sqld-gen-go` maps PostgreSQL types (from the IR `TypeRef` +
+catalog) to Go, with pgx v5 as the runtime.
+
+**Decision / outcome:**
+- **Scalars:** int2/4/8 → int16/32/64; serial variants → same; text/varchar/
+  bpchar/char/name/citext → string; numeric/money → string; bool; float4/8;
+  timestamp(tz)/date/time(tz) → `time.Time`; uuid → string; bytea → `[]byte`;
+  inet/cidr/macaddr → string; unknown → `any`.
+- **json/jsonb → `json.RawMessage`** (was `[]byte`).
+- **Arrays** → `[]elem` (recursing through the resolver, incl. UDT/array-of-enum
+  `[]AppUserStatus`, array-of-composite `[]AppAddress`).
+- **UDTs** (resolved against the catalog by `PgName`, schema-prefixed Go names):
+  enum → a typed `string` + consts; domain → its base type; composite → a struct
+  with generated pgx `ScanIndex`/`ScanNull`/`Index`/`IsNull` (compile-asserted
+  against `pgtype.CompositeIndexScanner/Getter`). Composite scan/encode/arrays/
+  nesting work via a generated `RegisterTypes(ctx, *pgx.Conn)` that `LoadType`s
+  enums + composites + their arrays in dependency-first (topological) order;
+  wire it into `pgxpool.AfterConnect`.
+- **range / multirange** (builtin) → `pgtype.Range[T]` / `pgtype.Multirange[...]`
+  (e.g. `int4range` → `pgtype.Range[pgtype.Int4]`). Custom `CREATE TYPE AS RANGE`
+  deferred.
+- **Nullability:** nullable → pointer `*T`, EXCEPT `[]byte`, slices, maps,
+  `json.RawMessage`, and `pgtype.Range`/`Multirange` (which carry NULL via a
+  `Valid` field) — those stay value types.
+- **Overrides** (plugin option `overrides`, NOT global config — Go type paths are
+  Go-specific): key = a column id (`schema.table.col`) or a pg type name; value =
+  `importpath.Type` (imported, referenced `pkg.Type`) or a bare Go type. Precedence:
+  column id > type name > default mapping. Lets a column/type map to any Go type
+  (`uuid` → `github.com/google/uuid.UUID`, a jsonb column → a domain struct, etc.).
+
+**Consequences:** Strongly-typed generated models/queries for the full type
+surface; `example/` exercises enum/domain/composite (+ arrays, nested, params),
+json, overrides (`uuid.UUID`, `map[string]any`), and range/multirange. Custom
+range collection and `hstore`/other extension types remain future work.
 
 ---
 
