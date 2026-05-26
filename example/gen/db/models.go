@@ -58,12 +58,18 @@ func (a AppAddress) IsNull() bool { return false }
 var _ pgtype.CompositeIndexScanner = (*AppAddress)(nil)
 var _ pgtype.CompositeIndexGetter = AppAddress{}
 
-// RegisterTypes loads and registers the database's composite types on a
-// connection so composite columns scan into their Go structs. Wire it into
-// pgxpool.Config.AfterConnect (it runs per connection).
+// RegisterTypes loads and registers the database's composite types (and their
+// array types) on a connection so composite columns/params scan and encode
+// into their Go structs. Wire it into pgxpool.Config.AfterConnect (it runs
+// per connection).
+//
+// Each composite is registered before its array type because pgx's
+// Conn.LoadType resolves an array type (e.g. "app._address") only once its
+// element type ("app.address") is already registered on the connection.
 func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	for _, name := range []string{
 		"app.address",
+		"app._address",
 	} {
 		t, err := conn.LoadType(ctx, name)
 		if err != nil {
@@ -83,9 +89,10 @@ type AppUsers struct {
 }
 
 type AppProfiles struct {
-	UserID  int64
-	Bio     *string
-	Address *AppAddress
+	UserID        int64
+	Bio           *string
+	Address       *AppAddress
+	PrevAddresses []AppAddress
 }
 
 type AppOrders struct {

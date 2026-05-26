@@ -119,6 +119,37 @@ func goType(reg *udtRegistry, t *irv1.TypeRef, nullable bool) (goExpr string, im
 	return expr, imps
 }
 
+// isCompositeType reports whether t resolves (through the registry) to a
+// composite type. Domains are followed transparently to their base type.
+func isCompositeType(reg *udtRegistry, t *irv1.TypeRef) bool {
+	if reg == nil || t == nil {
+		return false
+	}
+	if t.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
+		return false
+	}
+	pgName := t.GetPgName()
+	if _, ok := reg.composites[pgName]; ok {
+		return true
+	}
+	if entry, ok := reg.domains[pgName]; ok {
+		return isCompositeType(reg, entry.d.GetBaseType())
+	}
+	return false
+}
+
+// goParamType maps a query parameter's TypeRef to a Go type. It matches goType
+// except that a composite parameter is always emitted as a value type (never a
+// pointer): the generated composite codec reports IsNull()==false, so a NULL
+// composite cannot be encoded and a pointer field would be meaningless. The
+// caller passes the composite by value (e.g. SetAddressParams{Address: AppAddress{...}}).
+func goParamType(reg *udtRegistry, t *irv1.TypeRef, nullable bool) (goExpr string, imports []string) {
+	if isCompositeType(reg, t) {
+		return goType(reg, t, false)
+	}
+	return goType(reg, t, nullable)
+}
+
 // scalarGoType maps a PostgreSQL scalar type name to its Go expression.
 func scalarGoType(pgName string) (string, []string) {
 	switch pgName {

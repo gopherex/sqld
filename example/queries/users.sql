@@ -16,6 +16,12 @@ INSERT INTO app.orders (user_id, total) VALUES ($1, $2) RETURNING id, placed_at;
 -- name: GetProfile :one
 SELECT user_id, bio, address FROM app.profiles WHERE user_id = @user_id;
 
+-- name: GetPrevAddresses :one
+SELECT prev_addresses FROM app.profiles WHERE user_id = @user_id;
+
+-- name: SetAddress :exec
+UPDATE app.profiles SET address = @address WHERE user_id = @user_id;
+
 -- name: DeleteUser :exec
 DELETE FROM app.users WHERE id = $1;
 

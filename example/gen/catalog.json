@@ -211,6 +211,21 @@
                 "pgName": "address"
               },
               "nullable": true
+            },
+            {
+              "id": "app.profiles.prev_addresses",
+              "name": "prev_addresses",
+              "position": 4,
+              "type": {
+                "kind": "TYPE_KIND_ARRAY",
+                "pgName": "address",
+                "element": {
+                  "kind": "TYPE_KIND_SCALAR",
+                  "pgName": "address"
+                },
+                "arrayDimensions": 1
+              },
+              "nullable": true
             }
           ],
           "constraints": [

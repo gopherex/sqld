@@ -652,12 +652,18 @@ func inferUpdateSetParamNames(upd *irv1.UpdateStmt, paramMap map[uint32]*pluginv
 			continue
 		}
 		p, ok := paramMap[pos]
-		if !ok || p.GetName() != "" {
-			continue // skip if already named
+		if !ok {
+			continue
 		}
 		colName := cols[0]
-		p.Name = colName
-		// Also assign type/nullable from the catalog column when not yet set.
+		// Assign the name from the SET column only when the param is not already
+		// named (named params like @address arrive pre-named via rewriteNamedParams).
+		if p.GetName() == "" {
+			p.Name = colName
+		}
+		// Assign type/nullable from the catalog column when not yet set. This runs
+		// even for already-named params so that composite/UDT SET targets (e.g.
+		// `SET address = @address`) get the column's composite TypeRef.
 		if p.GetType() == nil && tbl != nil {
 			col := catIdx.lookupColumn(tbl, colName)
 			if col != nil {

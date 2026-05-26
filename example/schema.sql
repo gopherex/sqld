@@ -19,9 +19,10 @@ CREATE TABLE app.users (
 );
 
 CREATE TABLE app.profiles (
-  user_id bigint PRIMARY KEY REFERENCES app.users(id) ON DELETE CASCADE,
-  bio     text,
-  address app.address
+  user_id        bigint PRIMARY KEY REFERENCES app.users(id) ON DELETE CASCADE,
+  bio            text,
+  address        app.address,
+  prev_addresses app.address[]
 );
 
 CREATE TABLE app.orders (

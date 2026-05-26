@@ -28,6 +28,11 @@ func main() {
 	_, _ = q.ListActiveUsers(ctx)
 	_, _ = q.GetProfile(ctx, 1)
 
+	// Composite parameter (encode): pass an app.address value.
+	_ = q.SetAddress(ctx, db.SetAddressParams{Address: db.AppAddress{Street: "x"}, UserID: 1})
+	// Composite ARRAY scan: the row field is []AppAddress.
+	_, _ = q.GetPrevAddresses(ctx, 1)
+
 	// Dynamic query: only the supplied filters are applied at runtime.
 	email := "alice@example.com"
 	_, _ = q.SearchUsers(ctx, db.SearchUsersParams{
