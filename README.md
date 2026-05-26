@@ -20,19 +20,26 @@ sqld is an open alternative to **sqlc + Atlas**. sqlc lacks dynamic queries; Atl
 
 ## Install
 
-Install the three binaries:
+Install the three core binaries:
 
 ```sh
 go install github.com/yaroher/sqld/cmd/sqld@latest
 go install github.com/yaroher/sqld/cmd/sqld-gen-go@latest
-go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest  # nested module — keeps bob out of the core go.mod
 go install github.com/yaroher/sqld/cmd/sqld-migrate@latest
+```
+
+The bob ORM generator is **optional** — it lives in a nested module so its
+dependency stays out of the core `go.mod`. Install it only if you want the ORM:
+
+```sh
+go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest
 ```
 
 Or build from source into `bin/`:
 
 ```sh
-make build
+make build       # the three core binaries
+make build-bob   # adds bin/sqld-gen-bob
 ```
 
 ---
