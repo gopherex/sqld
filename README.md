@@ -14,6 +14,7 @@ sqld is an open alternative to **sqlc + Atlas**. sqlc lacks dynamic queries; Atl
 - **Open migrator with schema-diff generation** — `sqld-migrate generate <name>` diffs your declarative `schema.sql` against the current migration history via ephemeral Postgres (testcontainers or `--dev-url`) and writes the new migration with up + down DDL. Fully open; nothing is behind a paywall.
 - **`embed.FS` auto-apply** — embed migrations in your binary and call `migrate.Migrate(ctx, pool, migrationsFS)` to apply pending migrations on startup.
 - **Plugin architecture** — code generators implement a `Generator` gRPC service contract; the host invokes them over stdio (binary/command) or as WASM modules (wazero). Plugins depend only on the public proto contract and can be written in any language.
+- **ORM ⊕ sqlc via bob** — `sqld-gen-bob` feeds the same IR into [stephenafamo/bob](https://github.com/stephenafamo/bob) to generate a full Go ORM (models, relationships, eager loading, typed where/loaders/joins) that **shares one canonical Go type per column** with the `sqld-gen-go` query code and runs on one `*pgxpool.Pool`. See [docs/bob.md](docs/bob.md).
 
 ---
 
@@ -24,6 +25,7 @@ Install the three binaries:
 ```sh
 go install github.com/yaroher/sqld/cmd/sqld@latest
 go install github.com/yaroher/sqld/cmd/sqld-gen-go@latest
+go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest
 go install github.com/yaroher/sqld/cmd/sqld-migrate@latest
 ```
 

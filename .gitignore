@@ -37,3 +37,4 @@ bin
 /sqld
 /sqld-gen-go
 /sqld-migrate
+/sqld-gen-bob

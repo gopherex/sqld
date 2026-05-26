@@ -140,98 +140,9 @@ func sanitizeIdent(s string) string {
 }
 
 // ---- name helpers ----
-
-// initialisms that should be fully uppercased in Go identifiers.
-var initialisms = map[string]string{
-	"id":   "ID",
-	"url":  "URL",
-	"api":  "API",
-	"sql":  "SQL",
-	"http": "HTTP",
-	"json": "JSON",
-	"uuid": "UUID",
-	"ip":   "IP",
-	"xml":  "XML",
-}
-
-// pascal converts a snake_case name to PascalCase applying Go initialisms.
-func pascal(s string) string {
-	parts := splitWords(s)
-	var b strings.Builder
-	for _, p := range parts {
-		lower := strings.ToLower(p)
-		if up, ok := initialisms[lower]; ok {
-			b.WriteString(up)
-		} else {
-			b.WriteString(capitalize(p))
-		}
-	}
-	return b.String()
-}
-
-// lowerCamel converts to lowerCamelCase.
-func lowerCamel(s string) string {
-	parts := splitWords(s)
-	var b strings.Builder
-	for i, p := range parts {
-		lower := strings.ToLower(p)
-		if i == 0 {
-			b.WriteString(lower)
-		} else {
-			if up, ok := initialisms[lower]; ok {
-				b.WriteString(up)
-			} else {
-				b.WriteString(capitalize(p))
-			}
-		}
-	}
-	return b.String()
-}
-
-// splitWords splits on underscore boundaries and camelCase transitions.
-// "get_user" → ["get","user"], "GetUser" → ["Get","User"], "getUserID" → ["get","User","ID"]
-func splitWords(s string) []string {
-	// first split on underscores
-	underParts := strings.Split(s, "_")
-	var out []string
-	for _, p := range underParts {
-		if p == "" {
-			continue
-		}
-		// Then split camelCase
-		out = append(out, splitCamel(p)...)
-	}
-	if len(out) == 0 {
-		return []string{s}
-	}
-	return out
-}
-
-// splitCamel splits a camelCase or PascalCase string into words.
-// "GetUser" → ["Get","User"], "getUserID" → ["get","User","ID"]
-func splitCamel(s string) []string {
-	if s == "" {
-		return nil
-	}
-	runes := []rune(s)
-	var words []string
-	start := 0
-	for i := 1; i < len(runes); i++ {
-		if unicode.IsUpper(runes[i]) {
-			// Check if previous char is lowercase (transition Lo→Up) or
-			// next char is lowercase and current run is uppercase (acronym end)
-			if unicode.IsLower(runes[i-1]) {
-				words = append(words, string(runes[start:i]))
-				start = i
-			} else if i+1 < len(runes) && unicode.IsLower(runes[i+1]) && i-start > 1 {
-				words = append(words, string(runes[start:i]))
-				start = i
-			}
-		}
-	}
-	words = append(words, string(runes[start:]))
-	return words
-}
+//
+// pascal / lowerCamel and their split helpers now live in pkg/gotypes; this
+// file uses the thin shims in types.go (pascal, lowerCamel).
 
 // compositeReceiver derives a short method-receiver identifier from a Go type
 // name (e.g. "AppAddress" → "a"). It uses the first letter, lowercased, and
@@ -243,14 +154,6 @@ func compositeReceiver(typeName string) string {
 		}
 	}
 	return "c"
-}
-
-func capitalize(s string) string {
-	if s == "" {
-		return s
-	}
-	r := []rune(s)
-	return string(unicode.ToUpper(r[0])) + strings.ToLower(string(r[1:]))
 }
 
 // uniqueSorted deduplicates and sorts a string slice.

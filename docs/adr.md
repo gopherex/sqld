@@ -40,6 +40,7 @@ The companion design doc with full rationale and examples lives at
 - [ADR-0028 — Dynamic queries implemented (named params, smart WHERE, typed @orderby)](#adr-0028)
 - [ADR-0029 — sqld-gen-go Go type mapping (scalars, UDTs, json, range, overrides)](#adr-0029)
 - [ADR-0030 — sqld-migrate: open migrator + schema-diff via dev Postgres](#adr-0030)
+- [ADR-0031 — ORM ⊕ sqlc symbiosis via bob (sqld-gen-bob + pkg/gotypes)](#adr-0031--orm--sqlc-symbiosis-via-bob-sqld-gen-bob--pkggotypes)
 - [Semantics reference](#semantics-reference)
 
 ---
@@ -721,6 +722,49 @@ etc.). Spec: `docs/superpowers/specs/2026-05-26-sqld-migrate-design.md`.
 against real Postgres (integration tests gated on Docker; the diff engine is
 Docker-free and golden-tested). Out of scope for now: grants/RLS/partitioning
 diff, multi-dialect, online/zero-downtime orchestration. Docs: `docs/migrations.md`.
+
+---
+
+## ADR-0031 — ORM ⊕ sqlc symbiosis via bob (`sqld-gen-bob` + `pkg/gotypes`)
+
+**Status:** accepted (implemented, v1)
+
+**Context:** sqld-gen-go gives sqlc-style typed queries but no ORM
+(relationships, eager loading, factories). stephenafamo/bob (open) has a mature
+PG ORM + a code-generation framework whose driver returns plain schema metadata.
+Spec: `docs/superpowers/specs/2026-05-26-sqld-gen-bob-design.md`. Two PoCs
+(compile + runtime, merged on master) proved bob can be forced to emit
+sqld-controlled Go types and runs natively on `*pgxpool.Pool`.
+
+**Decision / outcome:**
+- **`pkg/gotypes`** (new public package): the canonical pg→Go type mapper —
+  `goType`/`resolveGoType`/`UDTName`/registry/`Pascal` — moved out of
+  `cmd/sqld-gen-go` so BOTH generators share one mapping. `Mapper` is null-mode
+  aware (`Pointer` = historical `*T`, `Opt` = `null.Val[T]`) and has an optional
+  UDT package qualifier (`SetUDTPackage`) so enum/composite names can be emitted
+  as `db.AppUserStatus` for a different package. sqld-gen-go consumes it via thin
+  shims; output is byte-identical (golden-locked).
+- **`cmd/sqld-gen-bob`**: a binary plugin (no wasm — bob's generator is too
+  heavy) that implements bob's `drivers.Interface` over the IR `Catalog`. Each
+  `Column.Type` is resolved through `pkg/gotypes` (so bob emits sqld-gen-go's
+  types); enum/composite types are qualified into the `typesPackage` option and
+  `DBInfo.Enums` is left empty so bob emits **no** competing enum types. bob
+  writes its multi-package output directly into the plugin `out` dir (its import
+  paths are rooted there) and the plugin returns an empty file list.
+- **Null mode + overrides are shared options** — `nullMode` (`pointer`|`opt`) and
+  `overrides` must match between the two plugins so their structs interoperate.
+- **Runtime:** both generators' code runs on ONE `*pgxpool.Pool`; bob is wrapped
+  via `bobpgx.NewPool`. sqld-gen-go's `RegisterTypes` (custom-type codecs) is
+  registered once in `pgxpool.Config.AfterConnect` and inherited by both halves.
+
+**Consequences:** A `users.status` column is `db.AppUserStatus` in the bob model,
+the sqld-gen-go model, and the sqld query row — values flow between bob's ORM and
+sqld's queries without conversion (compile-level test in `example/`). Scope v1:
+models, relationships, where/loaders/joins/counts. Out of scope / limitations:
+factories are opt-in (bob needs a random expression per type, unavailable for
+externally-owned composites/`pgtype.*`); bob's query-folder codegen is unused
+(sqld owns queries); full nullable-wrapper alignment between `*T` and `null.Val`
+is ongoing (`opt` null mode for sqld-gen-go is a later phase). Docs: `docs/bob.md`.
 
 ---
 
