@@ -120,6 +120,150 @@ func TestGoType(t *testing.T) {
 	}
 }
 
+// TestGoTypeJSON verifies json/jsonb map to json.RawMessage (with the
+// encoding/json import) and that nullable does NOT wrap it in a pointer
+// (json.RawMessage is a []byte; nil means SQL NULL).
+func TestGoTypeJSON(t *testing.T) {
+	for _, pg := range []string{"json", "jsonb"} {
+		for _, nullable := range []bool{false, true} {
+			ref := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: pg}
+			expr, imps := goType(nil, ref, nullable)
+			if expr != "json.RawMessage" {
+				t.Errorf("goType(%q, nullable=%v) = %q; want json.RawMessage", pg, nullable, expr)
+			}
+			if len(imps) != 1 || imps[0] != "encoding/json" {
+				t.Errorf("goType(%q) imports = %v; want [encoding/json]", pg, imps)
+			}
+		}
+	}
+}
+
+// TestResolveGoType verifies the override resolver: column-id override,
+// type-name override, bare override (no import), import-path override, nullable
+// pointer rules, and column-id-beats-type-name precedence.
+func TestResolveGoType(t *testing.T) {
+	ov := overrides{
+		"app.kitchen_sink.c_jsonb": "map[string]any",
+		"uuid":                     "github.com/google/uuid.UUID",
+		"app.t.c_uuid":             "string", // column-id override beats the uuid type-name override
+	}
+
+	cases := []struct {
+		name        string
+		columnID    string
+		pgName      string
+		nullable    bool
+		wantExpr    string
+		wantImports []string
+	}{
+		{
+			name:        "column-id bare map override, no import",
+			columnID:    "app.kitchen_sink.c_jsonb",
+			pgName:      "jsonb",
+			nullable:    false,
+			wantExpr:    "map[string]any",
+			wantImports: nil,
+		},
+		{
+			name:        "column-id map override nullable stays map (no pointer)",
+			columnID:    "app.kitchen_sink.c_jsonb",
+			pgName:      "jsonb",
+			nullable:    true,
+			wantExpr:    "map[string]any",
+			wantImports: nil,
+		},
+		{
+			name:        "type-name override with import path",
+			columnID:    "",
+			pgName:      "uuid",
+			nullable:    false,
+			wantExpr:    "uuid.UUID",
+			wantImports: []string{"github.com/google/uuid"},
+		},
+		{
+			name:        "type-name override nullable -> pointer",
+			columnID:    "app.kitchen_sink.c_uuid",
+			pgName:      "uuid",
+			nullable:    true,
+			wantExpr:    "*uuid.UUID",
+			wantImports: []string{"github.com/google/uuid"},
+		},
+		{
+			name:        "column-id beats type-name override",
+			columnID:    "app.t.c_uuid",
+			pgName:      "uuid",
+			nullable:    false,
+			wantExpr:    "string",
+			wantImports: nil,
+		},
+		{
+			name:        "no override falls back to default mapping",
+			columnID:    "app.other.c_text",
+			pgName:      "text",
+			nullable:    false,
+			wantExpr:    "string",
+			wantImports: nil,
+		},
+		{
+			name:        "no override jsonb default -> json.RawMessage",
+			columnID:    "app.other.c_jsonb",
+			pgName:      "jsonb",
+			nullable:    false,
+			wantExpr:    "json.RawMessage",
+			wantImports: []string{"encoding/json"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: tc.pgName}
+			gotExpr, gotImports := resolveGoType(nil, ov, tc.columnID, ref, tc.nullable)
+			if gotExpr != tc.wantExpr {
+				t.Errorf("resolveGoType expr = %q; want %q", gotExpr, tc.wantExpr)
+			}
+			if len(gotImports) != len(tc.wantImports) {
+				t.Fatalf("resolveGoType imports = %v; want %v", gotImports, tc.wantImports)
+			}
+			for i := range tc.wantImports {
+				if gotImports[i] != tc.wantImports[i] {
+					t.Errorf("resolveGoType import[%d] = %q; want %q", i, gotImports[i], tc.wantImports[i])
+				}
+			}
+		})
+	}
+}
+
+// TestParseOverrideValue verifies the value→(type,import) parsing rules.
+func TestParseOverrideValue(t *testing.T) {
+	cases := []struct {
+		in          string
+		wantExpr    string
+		wantImports []string
+	}{
+		{"map[string]any", "map[string]any", nil},
+		{"string", "string", nil},
+		{"json.RawMessage", "json.RawMessage", []string{"encoding/json"}},
+		{"github.com/google/uuid.UUID", "uuid.UUID", []string{"github.com/google/uuid"}},
+		{"github.com/shopspring/decimal.Decimal", "decimal.Decimal", []string{"github.com/shopspring/decimal"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			expr, imps := parseOverrideValue(tc.in)
+			if expr != tc.wantExpr {
+				t.Errorf("parseOverrideValue(%q) expr = %q; want %q", tc.in, expr, tc.wantExpr)
+			}
+			if len(imps) != len(tc.wantImports) {
+				t.Fatalf("parseOverrideValue(%q) imports = %v; want %v", tc.in, imps, tc.wantImports)
+			}
+			for i := range tc.wantImports {
+				if imps[i] != tc.wantImports[i] {
+					t.Errorf("parseOverrideValue(%q) import[%d] = %q; want %q", tc.in, i, imps[i], tc.wantImports[i])
+				}
+			}
+		})
+	}
+}
+
 // TestGoTypeUDT verifies enum, domain, and composite resolution through
 // a small in-memory catalog.
 func TestGoTypeUDT(t *testing.T) {

@@ -4,7 +4,9 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"time"
@@ -172,10 +174,10 @@ type AppKitchenSink struct {
 	CText        *string
 	CVarchar     *string
 	CChar        *string
-	CUUID        *string
+	CUUID        *uuid.UUID
 	CBytea       []byte
-	CJsonb       []byte
-	CJSON        []byte
+	CJsonb       map[string]any
+	CJSON        json.RawMessage
 	CInet        *string
 	CDate        *time.Time
 	CTime        *time.Time
