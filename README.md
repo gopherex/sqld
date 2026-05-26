@@ -229,17 +229,31 @@ The host feeds the plugin a `Catalog` (full schema IR) plus typed `Query` object
 
 Both transports use an identical wire format: `stdin = [1-byte method tag] [proto-encoded request]`, `stdout = [proto-encoded response]`. A plugin compiled for one transport works on the other without modification.
 
-Configure a plugin in `sqld.yaml`:
+Configure a plugin in `sqld.yaml` with **exactly one** of `binary`, `command`,
+or `wasm` (plus `out`):
 
 ```yaml
 plugins:
   - name: my-gen
-    binary: ./bin/my-gen   # native binary transport
-    # wasm: ./bin/my-gen.wasm  # WASM/wazero transport
+    command: sqld-gen-my    # resolved via $PATH (e.g. after `go install …@latest`)
+    # binary: ./bin/my-gen  # explicit path instead (see resolution below)
+    # wasm:   ./bin/my-gen.wasm  # WASM/wazero transport
     out: gen/
-    options:               # opaque bytes, decoded by the plugin
+    options:                # opaque bytes, decoded by the plugin
       package: mypackage
 ```
+
+### How the plugin is located
+
+| field | resolution |
+|-------|------------|
+| `command` | a bare program name looked up on **`$PATH`** (Go's `os/exec` `LookPath`). Use this for plugins installed via `go install` (e.g. `sqld-gen-go`, `sqld-gen-bob`). |
+| `binary` | a **filesystem path**, used as-is — absolute, or **relative to the current working directory** of the `sqld` process (NOT the `sqld.yaml` location). `./bin/my-gen` only resolves when you run `sqld` from that directory. |
+| `wasm` | a filesystem path to a `.wasm` module (same cwd-relative rule), run via wazero. |
+
+`command` is the portable choice (install once, no path juggling); `binary` is
+handy for a locally-built plugin during development. The example configs use
+`binary: ./bin/…` because they run from the repo root after `make build`.
 
 The built-in `sqld-gen-go` is itself a plugin and dogfoods this contract. It can be built as a native binary (`make build`) **or** as a WASM module (`make build-wasm`):
 

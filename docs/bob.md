@@ -41,10 +41,14 @@ to the host — unlike `sqld-gen-go`, which returns file contents.
 Run both plugins from one `sqld.yaml`. `sqld-gen-go` owns the leaf types;
 `sqld-gen-bob` points at that package via `typesPackage`:
 
+Use `command:` to resolve each plugin from `$PATH` (after `go install`), or
+`binary:` for an explicit (cwd-relative or absolute) path — see "How the plugin
+is located" in the main README.
+
 ```yaml
 plugins:
   - name: go
-    binary: ./bin/sqld-gen-go
+    command: sqld-gen-go        # from $PATH; or  binary: ./bin/sqld-gen-go
     out: gen/db
     options:
       package: db
@@ -52,7 +56,7 @@ plugins:
         uuid: github.com/google/uuid.UUID
 
   - name: bob
-    binary: ./bin/sqld-gen-bob
+    command: sqld-gen-bob       # go install github.com/yaroher/sqld/bob/cmd/sqld-gen-bob@latest
     out: gen/bob
     options:
       package: models
