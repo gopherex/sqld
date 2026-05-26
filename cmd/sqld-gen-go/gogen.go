@@ -269,7 +269,13 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 		// pgName is the schema-qualified PostgreSQL type name (e.g. "app.address"),
 		// used to load+register the composite on a pgx connection.
 		pgName string
-		fields []fieldDef
+		// arrayPgName is the schema-qualified name of the composite's auto-created
+		// array type (e.g. "app._address"). PostgreSQL creates one array type per
+		// base type, named with a leading underscore in the same schema. pgx's
+		// Conn.LoadType resolves it ("_foo" when "foo" is registered), so we
+		// register it after the element so []AppAddress columns/params work.
+		arrayPgName string
+		fields      []fieldDef
 	}
 
 	var enumDefs []enumDef
@@ -293,10 +299,12 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 				fields = append(fields, fieldDef{name: pascal(f.GetName()), goType: gt})
 			}
 			pgName := bareName
+			arrayPgName := "_" + bareName
 			if sName != "" {
 				pgName = sName + "." + bareName
+				arrayPgName = sName + "._" + bareName
 			}
-			compositeDefs = append(compositeDefs, compositeDef{typeName: typeName, pgName: pgName, fields: fields})
+			compositeDefs = append(compositeDefs, compositeDef{typeName: typeName, pgName: pgName, arrayPgName: arrayPgName, fields: fields})
 		}
 	}
 
@@ -409,13 +417,20 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 	// Emit RegisterTypes: loads and registers each composite type on a
 	// connection so composite columns scan into their Go structs.
 	if len(compositeDefs) > 0 {
-		sb.WriteString("// RegisterTypes loads and registers the database's composite types on a\n")
-		sb.WriteString("// connection so composite columns scan into their Go structs. Wire it into\n")
-		sb.WriteString("// pgxpool.Config.AfterConnect (it runs per connection).\n")
+		sb.WriteString("// RegisterTypes loads and registers the database's composite types (and their\n")
+		sb.WriteString("// array types) on a connection so composite columns/params scan and encode\n")
+		sb.WriteString("// into their Go structs. Wire it into pgxpool.Config.AfterConnect (it runs\n")
+		sb.WriteString("// per connection).\n")
+		sb.WriteString("//\n")
+		sb.WriteString("// Each composite is registered before its array type because pgx's\n")
+		sb.WriteString("// Conn.LoadType resolves an array type (e.g. \"app._address\") only once its\n")
+		sb.WriteString("// element type (\"app.address\") is already registered on the connection.\n")
 		sb.WriteString("func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {\n")
 		sb.WriteString("\tfor _, name := range []string{\n")
 		for _, c := range compositeDefs {
+			// Element first, then its array type — the order LoadType requires.
 			sb.WriteString(fmt.Sprintf("\t\t%q,\n", c.pgName))
+			sb.WriteString(fmt.Sprintf("\t\t%q,\n", c.arrayPgName))
 		}
 		sb.WriteString("\t} {\n")
 		sb.WriteString("\t\tt, err := conn.LoadType(ctx, name)\n")
@@ -533,7 +548,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 					pName = fmt.Sprintf("arg%d", p.GetNumber())
 				}
 			}
-			gt, imps := goType(reg, p.GetType(), p.GetNullable())
+			gt, imps := goParamType(reg, p.GetType(), p.GetNullable())
 			allImports = append(allImports, imps...)
 			params = append(params, qParam{goName: lowerCamel(pName), goType: gt})
 		}
@@ -963,7 +978,7 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 						goTypeStr = gt
 					}
 				} else {
-					gt, _ := goType(reg, p.GetType(), false)
+					gt, _ := goParamType(reg, p.GetType(), false)
 					goTypeStr = gt
 				}
 			} else {

@@ -249,6 +249,167 @@ func TestGenerateCompositeScanning(t *testing.T) {
 	}
 }
 
+// TestGenerateCompositeArrayAndParam verifies the three composite features:
+//  1. an array-of-composite column resolves to []AppAddress (scan target),
+//  2. a composite query parameter resolves to the AppAddress value type (not
+//     any, not a pointer) so it encodes via the generated CompositeIndexGetter,
+//  3. RegisterTypes registers both the composite element ("app.address") AND
+//     its array type ("app._address"), element first, so pgx's LoadType can
+//     resolve the array.
+func TestGenerateCompositeArrayAndParam(t *testing.T) {
+	addrComposite := &irv1.CompositeType{
+		Name: &irv1.QualifiedName{Schema: "app", Name: "address"},
+		Fields: []*irv1.CompositeField{
+			{Name: "street", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+			{Name: "city", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+			{Name: "zip", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+		},
+	}
+	// Array-of-composite TypeRef: ARRAY kind whose element resolves to the
+	// composite via its bare pgName ("address").
+	addrArrayRef := &irv1.TypeRef{
+		Kind:   irv1.TypeKind_TYPE_KIND_ARRAY,
+		PgName: "address",
+		Element: &irv1.TypeRef{
+			Kind:   irv1.TypeKind_TYPE_KIND_SCALAR,
+			PgName: "address",
+		},
+	}
+	addrRef := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "address"}
+
+	req := &pluginv1.GenerateRequest{
+		OutDir: "gen/db",
+		Catalog: &irv1.Catalog{Schemas: []*irv1.Schema{{
+			Name:       "app",
+			Composites: []*irv1.CompositeType{addrComposite},
+			Tables: []*irv1.Table{{
+				Name: &irv1.QualifiedName{Schema: "app", Name: "profiles"},
+				Columns: []*irv1.Column{
+					{Name: "user_id", Type: &irv1.TypeRef{PgName: "int8"}, Nullable: false},
+					// nullable composite column → *AppAddress (scan)
+					{Name: "address", Type: addrRef, Nullable: true},
+					// nullable array-of-composite column → []AppAddress (scan)
+					{Name: "prev_addresses", Type: addrArrayRef, Nullable: true},
+				},
+			}},
+		}}},
+		Queries: []*pluginv1.Query{
+			{
+				Name:    "GetPrevAddresses",
+				Sql:     "SELECT prev_addresses FROM app.profiles WHERE user_id = $1",
+				Command: pluginv1.QueryCommand_QUERY_COMMAND_ONE,
+				Parameters: []*pluginv1.QueryParameter{
+					{Number: 1, Name: "user_id", Type: &irv1.TypeRef{PgName: "int8"}},
+				},
+				Columns: []*pluginv1.QueryColumn{
+					{Name: "prev_addresses", Type: addrArrayRef, Nullable: true},
+				},
+			},
+			{
+				Name:    "SetAddress",
+				Sql:     "UPDATE app.profiles SET address = $1 WHERE user_id = $2",
+				Command: pluginv1.QueryCommand_QUERY_COMMAND_EXEC,
+				Parameters: []*pluginv1.QueryParameter{
+					// composite param: nullable column, but param must be the
+					// AppAddress VALUE type.
+					{Number: 1, Name: "address", Type: addrRef, Nullable: true},
+					{Number: 2, Name: "user_id", Type: &irv1.TypeRef{PgName: "int8"}},
+				},
+			},
+		},
+	}
+
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, f := range resp.GetFiles() {
+		files[f.GetPath()] = string(f.GetContents())
+	}
+
+	models := files["models.go"]
+	queries := files["queries.go"]
+	if models == "" {
+		t.Fatal("no models.go generated")
+	}
+	if queries == "" {
+		t.Fatal("no queries.go generated")
+	}
+
+	// Part 2: RegisterTypes registers the element AND the array, element first.
+	if !strings.Contains(models, `"app.address"`) {
+		t.Errorf("RegisterTypes missing composite element \"app.address\":\n%s", models)
+	}
+	if !strings.Contains(models, `"app._address"`) {
+		t.Errorf("RegisterTypes missing composite array \"app._address\":\n%s", models)
+	}
+	// Ordering check on the slice literal only (the doc comment also mentions
+	// both names, so scope the search to the body after `range []string{`).
+	if start := strings.Index(models, "range []string{"); start >= 0 {
+		body := models[start:]
+		elemIdx := strings.Index(body, `"app.address"`)
+		arrIdx := strings.Index(body, `"app._address"`)
+		if elemIdx == -1 || arrIdx == -1 || elemIdx > arrIdx {
+			t.Errorf("RegisterTypes must list element before array (elem=%d array=%d):\n%s", elemIdx, arrIdx, body)
+		}
+	} else {
+		t.Errorf("RegisterTypes slice literal not found:\n%s", models)
+	}
+	// The array-of-composite table column also resolves to []AppAddress.
+	if !strings.Contains(normalizeSpaces(models), "PrevAddresses []AppAddress") {
+		t.Errorf("array-of-composite column should be []AppAddress in models.go:\n%s", models)
+	}
+
+	// Part 1: array-of-composite scan row field is []AppAddress.
+	if !strings.Contains(normalizeSpaces(queries), "PrevAddresses []AppAddress") {
+		t.Errorf("GetPrevAddressesRow.PrevAddresses should be []AppAddress:\n%s", queries)
+	}
+
+	// Part 3: composite param is the AppAddress VALUE type (not any, not pointer).
+	if !strings.Contains(normalizeSpaces(queries), "Address AppAddress") {
+		t.Errorf("SetAddressParams.Address should be the AppAddress value type:\n%s", queries)
+	}
+	if strings.Contains(normalizeSpaces(queries), "Address *AppAddress") {
+		t.Errorf("composite param must not be a pointer:\n%s", queries)
+	}
+	if strings.Contains(normalizeSpaces(queries), "Address any") {
+		t.Errorf("composite param must not be 'any':\n%s", queries)
+	}
+
+	// Both generated files must be valid Go.
+	if _, err := format.Source([]byte(models)); err != nil {
+		t.Fatalf("models.go not valid Go: %v\n%s", err, models)
+	}
+	if _, err := format.Source([]byte(queries)); err != nil {
+		t.Fatalf("queries.go not valid Go: %v\n%s", err, queries)
+	}
+}
+
+// TestGoParamTypeComposite verifies goParamType emits composite value types even
+// when the source column is nullable, while leaving scalars pointer-wrapped.
+func TestGoParamTypeComposite(t *testing.T) {
+	catalog := &irv1.Catalog{Schemas: []*irv1.Schema{{
+		Name: "app",
+		Composites: []*irv1.CompositeType{{
+			Name: &irv1.QualifiedName{Schema: "app", Name: "address"},
+			Fields: []*irv1.CompositeField{
+				{Name: "street", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+			},
+		}},
+	}}}
+	reg := buildUDTRegistry(catalog)
+
+	// Composite param, nullable column → value type (no pointer).
+	if got, _ := goParamType(reg, &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_COMPOSITE, PgName: "address"}, true); got != "AppAddress" {
+		t.Errorf("goParamType(composite, nullable=true) = %q; want AppAddress", got)
+	}
+	// Scalar param still honours nullability (pointer).
+	if got, _ := goParamType(reg, &irv1.TypeRef{PgName: "int8"}, true); got != "*int64" {
+		t.Errorf("goParamType(int8, nullable=true) = %q; want *int64", got)
+	}
+}
+
 func TestInfoResponse(t *testing.T) {
 	info := Info()
 	if info.GetName() != "go" {

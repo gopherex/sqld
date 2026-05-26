@@ -138,6 +138,31 @@ func (q *Queries) GetProfile(ctx context.Context, userID int64) (GetProfileRow, 
 	return i, err
 }
 
+const getPrevAddressesSQL = `SELECT prev_addresses FROM app.profiles WHERE user_id = $1;`
+
+type GetPrevAddressesRow struct {
+	PrevAddresses []AppAddress
+}
+
+func (q *Queries) GetPrevAddresses(ctx context.Context, userID int64) (GetPrevAddressesRow, error) {
+	row := q.db.QueryRow(ctx, getPrevAddressesSQL, userID)
+	var i GetPrevAddressesRow
+	err := row.Scan(&i.PrevAddresses)
+	return i, err
+}
+
+const setAddressSQL = `UPDATE app.profiles SET address = $1 WHERE user_id = $2;`
+
+type SetAddressParams struct {
+	Address AppAddress
+	UserID  int64
+}
+
+func (q *Queries) SetAddress(ctx context.Context, arg SetAddressParams) error {
+	_, err := q.db.Exec(ctx, setAddressSQL, arg.Address, arg.UserID)
+	return err
+}
+
 const deleteUserSQL = `DELETE FROM app.users WHERE id = $1;`
 
 func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
