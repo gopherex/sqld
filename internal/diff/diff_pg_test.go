@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/yaroher/sqld/internal/devdb"
+	"github.com/yaroher/sqld/pkg/devdb"
 )
 
 // TestDiffChangedCheckDownReversesUp is a pure (DB-free) regression for C2:

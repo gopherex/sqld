@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yaroher/sqld/internal/devdb"
+	"github.com/yaroher/sqld/pkg/devdb"
 )
 
 // TestGenerateDevURLIsolation (I1) exercises `generate --dev-url <DSN>`, where

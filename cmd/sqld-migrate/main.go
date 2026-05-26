@@ -16,13 +16,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/yaroher/sqld/internal/devdb"
 	"github.com/yaroher/sqld/internal/diff"
 	"github.com/yaroher/sqld/internal/introspect"
 	"github.com/yaroher/sqld/internal/lint"
 	"github.com/yaroher/sqld/internal/parse"
 	"github.com/yaroher/sqld/internal/source"
 	"github.com/yaroher/sqld/pkg/config"
+	"github.com/yaroher/sqld/pkg/devdb"
 	"github.com/yaroher/sqld/pkg/migrate"
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )

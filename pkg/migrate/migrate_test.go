@@ -6,7 +6,7 @@ import (
 	"testing/fstest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/yaroher/sqld/internal/devdb"
+	"github.com/yaroher/sqld/pkg/devdb"
 )
 
 func newDB(t *testing.T) (*pgxpool.Pool, func()) {

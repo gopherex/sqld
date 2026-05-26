@@ -1,4 +1,4 @@
-package main
+package example
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yaroher/sqld/example/gen/db"
-	"github.com/yaroher/sqld/internal/devdb"
+	"github.com/yaroher/sqld/pkg/devdb"
 )
 
 // TestOptModeCompositeScanGlue exercises the exact runtime pattern sqld-gen-go's
