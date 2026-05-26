@@ -1,9 +1,10 @@
 
 
 .PHONY: build
-build: ## Build the sqld, sqld-gen-go, and sqld-migrate binaries
+build: ## Build the sqld, sqld-gen-go, sqld-gen-bob, and sqld-migrate binaries
 	go build -o bin/sqld ./cmd/sqld
 	go build -o bin/sqld-gen-go ./cmd/sqld-gen-go
+	go build -o bin/sqld-gen-bob ./cmd/sqld-gen-bob
 	go build -o bin/sqld-migrate ./cmd/sqld-migrate
 
 .PHONY: build-wasm

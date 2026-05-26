@@ -59,14 +59,14 @@ func TestGoTypeUDTPackage(t *testing.T) {
 			}},
 		}},
 	}
-	m := NewMapper(cat, nil, Pointer).SetUDTPackage("db", `"example.com/app/db"`)
+	m := NewMapper(cat, nil, Pointer).SetUDTPackage("db", "example.com/app/db")
 
 	enumRef := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "user_status"}
 	expr, imps := m.GoType("", enumRef, false)
 	if expr != "db.AppUserStatus" {
 		t.Errorf("enum expr = %q; want db.AppUserStatus", expr)
 	}
-	if !importsEqual(imps, []string{`"example.com/app/db"`}) {
+	if !importsEqual(imps, []string{"example.com/app/db"}) {
 		t.Errorf("enum imports = %v; want the db import", imps)
 	}
 
@@ -76,7 +76,7 @@ func TestGoTypeUDTPackage(t *testing.T) {
 	if expr != "[]db.AppUserStatus" {
 		t.Errorf("array-of-enum expr = %q; want []db.AppUserStatus", expr)
 	}
-	if !importsEqual(imps, []string{`"example.com/app/db"`}) {
+	if !importsEqual(imps, []string{"example.com/app/db"}) {
 		t.Errorf("array-of-enum imports = %v", imps)
 	}
 

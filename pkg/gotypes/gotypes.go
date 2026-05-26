@@ -55,12 +55,12 @@ func (m *Mapper) Registry() *Registry {
 }
 
 // SetUDTPackage makes the Mapper qualify enum/composite Go type names with the
-// given package alias and add importSpec (a quoted import path, optionally
-// aliased, as Go source) to their imports. With an empty alias the Mapper
+// given package alias and add importPath (a raw, unquoted import path — the same
+// form scalarGoType returns) to their imports. With an empty alias the Mapper
 // emits unqualified UDT names (the default). Returns the Mapper for chaining.
-func (m *Mapper) SetUDTPackage(alias, importSpec string) *Mapper {
+func (m *Mapper) SetUDTPackage(alias, importPath string) *Mapper {
 	m.udtPkg = alias
-	m.udtImport = importSpec
+	m.udtImport = importPath
 	return m
 }
 

@@ -17,3 +17,13 @@ plugins:
       overrides:
         "app.kitchen_sink.c_jsonb": map[string]any
         uuid: github.com/google/uuid.UUID
+  - name: bob
+    binary: ./bin/sqld-gen-bob
+    out: example/gen/bob
+    options:
+      package: models
+      typesPackage: github.com/yaroher/sqld/example/gen/db
+      nullMode: pointer
+      overrides:
+        "app.kitchen_sink.c_jsonb": map[string]any
+        uuid: github.com/google/uuid.UUID
