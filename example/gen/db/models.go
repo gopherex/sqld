@@ -6,10 +6,24 @@ import (
 	"time"
 )
 
+type AppUserStatus string
+
+const (
+	AppUserStatusActive   AppUserStatus = "active"
+	AppUserStatusInactive AppUserStatus = "inactive"
+	AppUserStatusBanned   AppUserStatus = "banned"
+)
+
+type AppAddress struct {
+	Street string
+	City   string
+	Zip    string
+}
+
 type AppUsers struct {
 	ID        int64
-	Email     any
-	Status    any
+	Email     string
+	Status    AppUserStatus
 	ManagerID *int64
 	CreatedAt time.Time
 }
@@ -17,7 +31,7 @@ type AppUsers struct {
 type AppProfiles struct {
 	UserID  int64
 	Bio     *string
-	Address *any
+	Address *AppAddress
 }
 
 type AppOrders struct {
@@ -61,9 +75,9 @@ type AppKitchenSink struct {
 	CInterval    *any
 	CIntArray    []int32
 	CTextArray   []string
-	CStatus      *any
-	CAddress     *any
-	CEmail       *any
+	CStatus      *AppUserStatus
+	CAddress     *AppAddress
+	CEmail       *string
 	CGenerated   *int32
 	CIdentity    int32
 }

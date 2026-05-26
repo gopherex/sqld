@@ -49,11 +49,14 @@ func Info() *pluginv1.GetInfoResponse {
 func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error) {
 	pkg := resolvePackage(req.GetOptions(), req.GetOutDir())
 
+	// Build a UDT registry so goType can resolve enums / domains / composites.
+	reg := buildUDTRegistry(req.GetCatalog())
+
 	var diagnostics []*pluginv1.Diagnostic
 	var files []*pluginv1.GeneratedFile
 
 	// models.go
-	modelsBytes, diags := generateModels(pkg, req.GetCatalog())
+	modelsBytes, diags := generateModels(pkg, req.GetCatalog(), reg)
 	diagnostics = append(diagnostics, diags...)
 	files = append(files, &pluginv1.GeneratedFile{
 		Path:     "models.go",
@@ -62,7 +65,7 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 
 	// queries.go — only when there are queries
 	if qs := req.GetQueries(); len(qs) > 0 {
-		qBytes, qDiags := generateQueries(pkg, qs, req.GetAnnotations())
+		qBytes, qDiags := generateQueries(pkg, qs, req.GetAnnotations(), reg)
 		diagnostics = append(diagnostics, qDiags...)
 		files = append(files, &pluginv1.GeneratedFile{
 			Path:     "queries.go",
@@ -231,7 +234,7 @@ func uniqueSorted(ss []string) []string {
 
 // ---- models.go generation ----
 
-func generateModels(pkg string, catalog *irv1.Catalog) ([]byte, []*pluginv1.Diagnostic) {
+func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte, []*pluginv1.Diagnostic) {
 	type fieldDef struct {
 		name   string
 		goType string
@@ -241,8 +244,44 @@ func generateModels(pkg string, catalog *irv1.Catalog) ([]byte, []*pluginv1.Diag
 		fields []fieldDef
 	}
 
-	var structs []structDef
 	var allImports []string
+
+	// ---- Collect UDT type definitions (enums + composites) ----
+	// We emit them in schema order, preserving declaration order within each schema.
+	type enumDef struct {
+		typeName string
+		labels   []string
+	}
+	type compositeDef struct {
+		typeName string
+		fields   []fieldDef
+	}
+
+	var enumDefs []enumDef
+	var compositeDefs []compositeDef
+
+	for _, schema := range catalog.GetSchemas() {
+		sName := schema.GetName()
+
+		for _, e := range schema.GetEnums() {
+			typeName := udtGoTypeName(sName, e.GetName().GetName())
+			enumDefs = append(enumDefs, enumDef{typeName: typeName, labels: e.GetLabels()})
+		}
+
+		for _, c := range schema.GetComposites() {
+			typeName := udtGoTypeName(sName, c.GetName().GetName())
+			var fields []fieldDef
+			for _, f := range c.GetFields() {
+				gt, imps := goType(reg, f.GetType(), false)
+				allImports = append(allImports, imps...)
+				fields = append(fields, fieldDef{name: pascal(f.GetName()), goType: gt})
+			}
+			compositeDefs = append(compositeDefs, compositeDef{typeName: typeName, fields: fields})
+		}
+	}
+
+	// ---- Collect table struct definitions ----
+	var structs []structDef
 
 	for _, schema := range catalog.GetSchemas() {
 		schemaName := schema.GetName()
@@ -257,7 +296,7 @@ func generateModels(pkg string, catalog *irv1.Catalog) ([]byte, []*pluginv1.Diag
 
 			var fields []fieldDef
 			for _, col := range table.GetColumns() {
-				gt, imps := goType(col.GetType(), col.GetNullable())
+				gt, imps := goType(reg, col.GetType(), col.GetNullable())
 				allImports = append(allImports, imps...)
 				fields = append(fields, fieldDef{name: pascal(col.GetName()), goType: gt})
 			}
@@ -277,6 +316,29 @@ func generateModels(pkg string, catalog *irv1.Catalog) ([]byte, []*pluginv1.Diag
 		sb.WriteString(")\n\n")
 	}
 
+	// Emit enum types + const blocks.
+	for _, e := range enumDefs {
+		sb.WriteString(fmt.Sprintf("type %s string\n\n", e.typeName))
+		if len(e.labels) > 0 {
+			sb.WriteString("const (\n")
+			for _, lbl := range e.labels {
+				constName := e.typeName + pascal(lbl)
+				sb.WriteString(fmt.Sprintf("\t%s %s = %q\n", constName, e.typeName, lbl))
+			}
+			sb.WriteString(")\n\n")
+		}
+	}
+
+	// Emit composite struct types.
+	for _, c := range compositeDefs {
+		sb.WriteString(fmt.Sprintf("type %s struct {\n", c.typeName))
+		for _, f := range c.fields {
+			sb.WriteString(fmt.Sprintf("\t%s %s\n", f.name, f.goType))
+		}
+		sb.WriteString("}\n\n")
+	}
+
+	// Emit table structs.
 	for _, s := range structs {
 		sb.WriteString(fmt.Sprintf("type %s struct {\n", s.name))
 		for _, f := range s.fields {
@@ -311,7 +373,7 @@ type qInfo struct {
 	paramStructName string
 }
 
-func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.AnnotationValue) ([]byte, []*pluginv1.Diagnostic) {
+func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.AnnotationValue, reg *udtRegistry) ([]byte, []*pluginv1.Diagnostic) {
 	// Index annotations by query name.
 	annotByQuery := make(map[string][]*irv1.AnnotationValue)
 	for _, a := range annotations {
@@ -358,7 +420,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 		qCols := q.GetColumns()
 		var cols []qField
 		for _, c := range qCols {
-			gt, imps := goType(c.GetType(), c.GetNullable())
+			gt, imps := goType(reg, c.GetType(), c.GetNullable())
 			allImports = append(allImports, imps...)
 			cols = append(cols, qField{name: pascal(c.GetName()), goType: gt})
 		}
@@ -382,7 +444,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 					pName = fmt.Sprintf("arg%d", p.GetNumber())
 				}
 			}
-			gt, imps := goType(p.GetType(), p.GetNullable())
+			gt, imps := goType(reg, p.GetType(), p.GetNullable())
 			allImports = append(allImports, imps...)
 			params = append(params, qParam{goName: lowerCamel(pName), goType: gt})
 		}
@@ -461,7 +523,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 	}
 
 	for _, de := range dynamicEntries {
-		writeDynamicQueryCode(&sb, de.q, de.anns, de.cols)
+		writeDynamicQueryCode(&sb, de.q, de.anns, de.cols, reg)
 	}
 
 	return formatSource(sb.String(), "queries.go")
@@ -650,7 +712,7 @@ func isDynamicQuery(q *pluginv1.Query, anns []*irv1.AnnotationValue) bool {
 }
 
 // writeDynamicQueryCode generates a WHERE-aware dynamic query method.
-func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.AnnotationValue, cols []qField) {
+func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.AnnotationValue, cols []qField, reg *udtRegistry) {
 	sql := q.GetSql()
 	methodName := pascal(q.GetName())
 
@@ -805,14 +867,14 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 					// Slice: determine element type.
 					tr := p.GetType()
 					if tr != nil && tr.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
-						gt, _ := goType(tr.GetElement(), false)
+						gt, _ := goType(reg, tr.GetElement(), false)
 						goTypeStr = gt
 					} else {
-						gt, _ := goType(tr, false)
+						gt, _ := goType(reg, tr, false)
 						goTypeStr = gt
 					}
 				} else {
-					gt, _ := goType(p.GetType(), false)
+					gt, _ := goType(reg, p.GetType(), false)
 					goTypeStr = gt
 				}
 			} else {

@@ -21,7 +21,7 @@ func main() {
 	_, _ = q.ListActiveUsers(ctx)
 
 	// Dynamic query: only the supplied filters are applied at runtime.
-	var email any = "alice@example.com"
+	email := "alice@example.com"
 	_, _ = q.SearchUsers(ctx, db.SearchUsersParams{
 		Email:    &email,
 		Ids:      []int64{1, 2},
