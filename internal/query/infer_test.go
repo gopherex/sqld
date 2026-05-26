@@ -6,6 +6,7 @@ import (
 
 	"github.com/yaroher/sqld/internal/catalog"
 	"github.com/yaroher/sqld/internal/parse"
+	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 	"google.golang.org/protobuf/proto"
 )
@@ -366,5 +367,161 @@ func TestInferColumnRefFallbackDeterministic(t *testing.T) {
 		} else if id != firstID {
 			t.Fatalf("non-deterministic: got source_column.id=%q on run %d, want %q", id, i, firstID)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Deeper expression-type inference
+// ---------------------------------------------------------------------------
+
+func col0Type(t *testing.T, ddl, query string) *irv1.TypeRef {
+	t.Helper()
+	stmts, _ := parse.Statements(ddl)
+	cat, _ := catalog.Build(stmts)
+	qs, _ := ParseQueries(query, "q.sql")
+	var d catalog.Diagnostics
+	Infer(qs[0], cat, &d)
+	if len(qs[0].GetColumns()) == 0 {
+		t.Fatal("no columns")
+	}
+	return qs[0].GetColumns()[0].GetType()
+}
+
+func col0(t *testing.T, ddl, query string) *pluginv1.QueryColumn {
+	t.Helper()
+	stmts, _ := parse.Statements(ddl)
+	cat, _ := catalog.Build(stmts)
+	qs, _ := ParseQueries(query, "q.sql")
+	var d catalog.Diagnostics
+	Infer(qs[0], cat, &d)
+	if len(qs[0].GetColumns()) == 0 {
+		t.Fatal("no columns")
+	}
+	return qs[0].GetColumns()[0]
+}
+
+func TestInferCount(t *testing.T) {
+	ty := col0Type(t, "CREATE TABLE u(id bigint);", "-- name: C :one\nSELECT count(*) FROM u;")
+	if ty.GetPgName() != "int8" {
+		t.Fatalf("count → %v", ty)
+	}
+}
+
+func TestInferCast(t *testing.T) {
+	ty := col0Type(t, "CREATE TABLE u(id bigint);", "-- name: C :one\nSELECT id::text FROM u;")
+	if ty.GetPgName() != "text" {
+		t.Fatalf("cast → %v", ty)
+	}
+}
+
+func TestInferMax(t *testing.T) {
+	ty := col0Type(t, "CREATE TABLE u(id bigint, created timestamptz);", "-- name: C :one\nSELECT max(created) FROM u;")
+	if ty.GetPgName() != "timestamptz" {
+		t.Fatalf("max → %v", ty)
+	}
+}
+
+func TestInferLiteralAndLower(t *testing.T) {
+	ty := col0Type(t, "CREATE TABLE u(id bigint, name text);", "-- name: C :one\nSELECT lower(name) FROM u;")
+	if ty.GetPgName() != "text" {
+		t.Fatalf("lower → %v", ty)
+	}
+}
+
+func TestInferSum(t *testing.T) {
+	// sum(int4) → int8
+	ty := col0Type(t, "CREATE TABLE u(ii integer);", "-- name: C :one\nSELECT sum(ii) FROM u;")
+	if ty.GetPgName() != "int8" {
+		t.Fatalf("sum(int4) → %v", ty)
+	}
+	// sum(bigint) → numeric
+	ty = col0Type(t, "CREATE TABLE u(id bigint);", "-- name: C :one\nSELECT sum(id) FROM u;")
+	if ty.GetPgName() != "numeric" {
+		t.Fatalf("sum(int8) → %v", ty)
+	}
+	// sum(float8) → float8
+	ty = col0Type(t, "CREATE TABLE u(f double precision);", "-- name: C :one\nSELECT sum(f) FROM u;")
+	if ty.GetPgName() != "float8" {
+		t.Fatalf("sum(float8) → %v", ty)
+	}
+}
+
+func TestInferAvg(t *testing.T) {
+	ty := col0Type(t, "CREATE TABLE u(id bigint);", "-- name: C :one\nSELECT avg(id) FROM u;")
+	if ty.GetPgName() != "numeric" {
+		t.Fatalf("avg → %v", ty)
+	}
+}
+
+func TestInferIntLiteral(t *testing.T) {
+	ty := col0Type(t, "CREATE TABLE u(id bigint);", "-- name: C :one\nSELECT 42 AS n FROM u;")
+	if ty.GetPgName() != "int4" {
+		t.Fatalf("int literal → %v", ty)
+	}
+}
+
+func TestInferComparisonIsBool(t *testing.T) {
+	c := col0(t, "CREATE TABLE u(id bigint);", "-- name: C :one\nSELECT id = 1 AS eq FROM u;")
+	if c.GetType().GetPgName() != "bool" {
+		t.Fatalf("comparison → %v", c.GetType())
+	}
+	if c.GetNullable() {
+		t.Fatalf("comparison should be non-null")
+	}
+}
+
+func TestInferArithmetic(t *testing.T) {
+	// int8 + int literal → int8 (widest)
+	ty := col0Type(t, "CREATE TABLE u(id bigint);", "-- name: C :one\nSELECT id + 1 AS s FROM u;")
+	if ty.GetPgName() != "int8" {
+		t.Fatalf("arithmetic → %v", ty)
+	}
+}
+
+func TestInferNowAndLength(t *testing.T) {
+	ty := col0Type(t, "CREATE TABLE u(name text);", "-- name: C :one\nSELECT now() AS t FROM u;")
+	if ty.GetPgName() != "timestamptz" {
+		t.Fatalf("now → %v", ty)
+	}
+	ty = col0Type(t, "CREATE TABLE u(name text);", "-- name: C :one\nSELECT length(name) AS l FROM u;")
+	if ty.GetPgName() != "int4" {
+		t.Fatalf("length → %v", ty)
+	}
+}
+
+func TestInferArrayAgg(t *testing.T) {
+	c := col0(t, "CREATE TABLE u(name text);", "-- name: C :one\nSELECT array_agg(name) AS names FROM u;")
+	ty := c.GetType()
+	if ty.GetKind() != irv1.TypeKind_TYPE_KIND_ARRAY || ty.GetElement().GetPgName() != "text" {
+		t.Fatalf("array_agg → %v", ty)
+	}
+}
+
+func TestInferCoalesce(t *testing.T) {
+	ty := col0Type(t, "CREATE TABLE u(name text);", "-- name: C :one\nSELECT coalesce(name, 'x') AS n FROM u;")
+	if ty.GetPgName() != "text" {
+		t.Fatalf("coalesce → %v", ty)
+	}
+}
+
+func TestInferUnknownFuncStaysNil(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TABLE u(id bigint);")
+	cat, _ := catalog.Build(stmts)
+	qs, _ := ParseQueries("-- name: C :one\nSELECT some_unknown_fn(id) FROM u;", "q.sql")
+	var d catalog.Diagnostics
+	Infer(qs[0], cat, &d)
+	if len(qs[0].GetColumns()) == 0 {
+		t.Fatal("no columns")
+	}
+	if qs[0].GetColumns()[0].GetType() != nil {
+		t.Fatalf("unknown func should stay nil, got %v", qs[0].GetColumns()[0].GetType())
+	}
+}
+
+func TestInferDefaultColumnName(t *testing.T) {
+	// Function call with no alias → column name is the function name.
+	c := col0(t, "CREATE TABLE u(id bigint);", "-- name: C :one\nSELECT count(*) FROM u;")
+	if c.GetName() != "count" {
+		t.Fatalf("default name → %q", c.GetName())
 	}
 }
