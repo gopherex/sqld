@@ -580,21 +580,21 @@ annotation model). It is now implemented end-to-end through the real pipeline.
   `@ident` → `$N` before parsing via a SQL-aware lexer that skips comments,
   string literals, dollar-quotes, and `@`-operators (`@>`, `@@`); the name↔
   position map is kept and each `QueryParameter` carries its `Name`.
-- **Directive grammar** (comments in a named query's WHERE clause):
-  `-- @if` trailing a condition line marks that condition OPTIONAL; a condition
-  using `= ANY(@p)` is auto-detected as a SLICE; `-- @orderby col1, col2`
-  declares an allowlist for a runtime `ORDER BY`. No `@endif`/`@slice` keywords.
-  The base SQL (comments ignored by libpg_query) stays valid, so column/param
-  inference works and the result shape is fixed.
+- **Optionality on the parameter** (no `@if` directive). A param written
+  `@name?` is OPTIONAL: the host's `?`-aware lexer strips the suffix and sets
+  `QueryParameter.optional = true`. A condition using `= ANY(@p)` is a SLICE
+  (included when non-empty). `-- @orderby col1, col2` (the one remaining
+  directive) declares the allowlist for a runtime `ORDER BY`. The base SQL
+  (comments ignored by libpg_query) stays valid, so inference works and the
+  result shape is fixed.
 - **Host parses, plugin interprets** (per ADR-0016/0020): `sqld-gen-go` declares
-  the directives in its `AnnotationSchema` (`GetInfo`): `if` (FLAG), `orderby`
-  (LIST of idents). The host's `Annotate` scans `--` and `/* */` comments,
-  records byte offsets within each query's `Sql`, and binds every
-  `AnnotationValue` to its query (`Target.QueryName`). The plugin locates the
-  WHERE clause, splits it into per-line conditions, matches `@if` by offset→line,
-  reads each condition's `$N` → `QueryParameter` (name + type), and emits a
-  builder.
-- **Generated Go**: a `<Name>Params` struct — optional condition → `*T` pointer,
+  only `orderby` (LIST of idents) in its `AnnotationSchema`. The plugin marks a
+  WHERE condition optional from its `$N` param's `optional` flag (not a comment),
+  detects slices from `ANY($N)`, and emits a builder. Validity is guaranteed at
+  generation: the base (all conditions) is parsed by libpg_query in `Collect`
+  (invalid → generation fails), and removing whole top-level AND conditions keeps
+  the SQL valid by construction — no runtime parsing needed.
+- **Generated Go**: a `<Name>Params` struct — `@name?` → `*T` pointer,
   `ANY(@p)` → `[]T` slice, `@orderby` → a typed enum `<Name>OrderBy` (+ a shared
   `OrderDir` ASC/DESC). The method assembles parameterized SQL with a
   `strings.Builder`, collecting included conditions into `conds` and emitting
