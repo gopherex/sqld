@@ -46,6 +46,10 @@ func main() {
 	// Builtin range scan: the row field is pgtype.Range[pgtype.Timestamptz].
 	_, _ = q.GetActiveDuring(ctx, 1)
 
+	// Custom range scan (CREATE TYPE app.timerange AS RANGE (subtype = timestamptz)):
+	// the row field is pgtype.Range[pgtype.Timestamptz], registered by RegisterTypes.
+	_, _ = q.GetValidWindow(ctx, 1)
+
 	// Dynamic query: only the supplied filters are applied at runtime.
 	email := "alice@example.com"
 	_, _ = q.SearchUsers(ctx, db.SearchUsersParams{

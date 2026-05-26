@@ -100,16 +100,16 @@ func (a AppPerson) IsNull() bool { return false }
 var _ pgtype.CompositeIndexScanner = (*AppPerson)(nil)
 var _ pgtype.CompositeIndexGetter = AppPerson{}
 
-// RegisterTypes loads and registers the database's enum and composite types
-// (and their array types) on a connection so enum-array and composite
-// columns/params scan and encode into their Go types. Wire it into
-// pgxpool.Config.AfterConnect (it runs per connection).
+// RegisterTypes loads and registers the database's enum, composite, and
+// custom range types (and their array types) on a connection so enum-array,
+// composite, and custom-range columns/params scan and encode into their Go
+// types. Wire it into pgxpool.Config.AfterConnect (it runs per connection).
 //
-// The order is dependency-safe: each enum/composite is registered before its
-// array type, and a composite is registered after every composite it has a
-// field of (topological order), because pgx's Conn.LoadType resolves an array
-// type only once its element is registered and a composite only once all of
-// its field types are registered.
+// The order is dependency-safe: each enum/composite/range is registered before
+// its array type, a composite is registered after every composite it has a
+// field of (topological order), and custom ranges come last (their subtypes
+// are already registered), because pgx's Conn.LoadType resolves a derived type
+// only once its element/field/subtype types are registered.
 func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	for _, name := range []string{
 		"app.user_status",
@@ -118,6 +118,8 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 		"app._address",
 		"app.person",
 		"app._person",
+		"app.timerange",
+		"app._timerange",
 	} {
 		t, err := conn.LoadType(ctx, name)
 		if err != nil {
@@ -144,6 +146,7 @@ type AppProfiles struct {
 	StatusHistory []AppUserStatus
 	Owner         AppPerson
 	ActiveDuring  pgtype.Range[pgtype.Timestamptz]
+	ValidWindow   pgtype.Range[pgtype.Timestamptz]
 }
 
 type AppOrders struct {

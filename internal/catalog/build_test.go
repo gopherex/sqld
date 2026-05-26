@@ -221,3 +221,45 @@ func TestBuildFullIR(t *testing.T) {
 	}
 	_ = fmt.Sprintf // suppress unused import error in case fmt is only used here
 }
+
+// ---------------------------------------------------------------------------
+// TestBuildCreateRange
+// ---------------------------------------------------------------------------
+
+func TestBuildCreateRange(t *testing.T) {
+	sql := `CREATE SCHEMA app; CREATE TYPE app.timerange AS RANGE (subtype = timestamptz);`
+	stmts, err := parse.Statements(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, diag := Build(stmts)
+	for _, d := range diag.Items {
+		t.Logf("diagnostic [%s]: %s", d.Severity, d.Message)
+	}
+
+	var app *irv1.Schema
+	for _, s := range cat.GetSchemas() {
+		if s.GetName() == "app" {
+			app = s
+		}
+	}
+	if app == nil {
+		t.Fatalf("no app schema; got %v", schemaNames(cat))
+	}
+	if len(app.GetRanges()) != 1 {
+		t.Fatalf("ranges=%d, want 1", len(app.GetRanges()))
+	}
+	rt := app.GetRanges()[0]
+	if rt.GetId() != "app.timerange" {
+		t.Fatalf("range id=%q, want %q", rt.GetId(), "app.timerange")
+	}
+	if rt.GetName().GetName() != "timerange" {
+		t.Fatalf("range name=%q", rt.GetName().GetName())
+	}
+	if rt.GetName().GetSchema() != "app" {
+		t.Fatalf("range schema=%q", rt.GetName().GetSchema())
+	}
+	if rt.GetSubtype().GetPgName() != "timestamptz" {
+		t.Fatalf("range subtype=%v", rt.GetSubtype())
+	}
+}

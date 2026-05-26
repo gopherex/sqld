@@ -315,8 +315,19 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 		fields   []fieldDef
 	}
 
+	// rangeDef is a custom CREATE TYPE ... AS RANGE type that needs registering.
+	// Like enums/composites, the element type (pgName) is registered before its
+	// array type (arrayPgName). pgx's Conn.LoadType resolves a range type once
+	// its subtype is registered; builtin subtypes (timestamptz, …) are already
+	// registered in pgx's default map, so the range loads directly.
+	type rangeDef struct {
+		pgName      string
+		arrayPgName string
+	}
+
 	var enumDefs []enumDef
 	var compositeDefs []compositeDef
+	var rangeDefs []rangeDef
 
 	for _, schema := range catalog.GetSchemas() {
 		sName := schema.GetName()
@@ -368,6 +379,20 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 				fields:      fields,
 			})
 		}
+
+		for _, r := range schema.GetRanges() {
+			bareName := r.GetName().GetName()
+			pgName := bareName
+			arrayPgName := "_" + bareName
+			if sName != "" {
+				pgName = sName + "." + bareName
+				arrayPgName = sName + "._" + bareName
+			}
+			rangeDefs = append(rangeDefs, rangeDef{
+				pgName:      pgName,
+				arrayPgName: arrayPgName,
+			})
+		}
 	}
 
 	// RegisterTypes is emitted whenever there are enums or composites: it loads
@@ -375,7 +400,7 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 	// columns/params scan and encode. It needs context, fmt, and the pgx
 	// package. Composites additionally need the pgtype package for the
 	// CompositeIndexScanner / CompositeIndexGetter interface assertions.
-	if len(enumDefs) > 0 || len(compositeDefs) > 0 {
+	if len(enumDefs) > 0 || len(compositeDefs) > 0 || len(rangeDefs) > 0 {
 		allImports = append(allImports,
 			"context",
 			"fmt",
@@ -483,16 +508,21 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 	// Emit RegisterTypes: loads and registers each enum and composite type (and
 	// its array) on a connection so enum-array and composite columns/params
 	// scan into their Go types.
-	if len(enumDefs) > 0 || len(compositeDefs) > 0 {
+	if len(enumDefs) > 0 || len(compositeDefs) > 0 || len(rangeDefs) > 0 {
 		// Build the dependency-safe ordered list of PostgreSQL type names.
 		//
 		// 1. Enums (no deps) first, each followed by its array type.
 		// 2. Composites in topological order (a composite whose field is another
 		//    composite comes AFTER that field-composite), each followed by its
 		//    array type.
+		// 3. Custom ranges last, each followed by its array type. A range's
+		//    subtype must be registered first; builtin subtypes (timestamptz, …)
+		//    are already in pgx's default map, so ranges come after composites
+		//    with no further ordering needed.
 		//
 		// pgx's Conn.LoadType requires an array type's element to be registered
-		// first, and a composite's field types to all be registered first.
+		// first, a composite's field types to all be registered first, and a
+		// range type's subtype to be registered first.
 		type regType struct {
 			pgName, arrayPgName string
 		}
@@ -554,16 +584,22 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 			ordered = append(ordered, regType{pgName: c.pgName, arrayPgName: c.arrayPgName})
 		}
 
-		sb.WriteString("// RegisterTypes loads and registers the database's enum and composite types\n")
-		sb.WriteString("// (and their array types) on a connection so enum-array and composite\n")
-		sb.WriteString("// columns/params scan and encode into their Go types. Wire it into\n")
-		sb.WriteString("// pgxpool.Config.AfterConnect (it runs per connection).\n")
+		// Custom ranges last (subtypes already registered — builtin or via the
+		// pgx default map), each followed by its array type.
+		for _, r := range rangeDefs {
+			ordered = append(ordered, regType{pgName: r.pgName, arrayPgName: r.arrayPgName})
+		}
+
+		sb.WriteString("// RegisterTypes loads and registers the database's enum, composite, and\n")
+		sb.WriteString("// custom range types (and their array types) on a connection so enum-array,\n")
+		sb.WriteString("// composite, and custom-range columns/params scan and encode into their Go\n")
+		sb.WriteString("// types. Wire it into pgxpool.Config.AfterConnect (it runs per connection).\n")
 		sb.WriteString("//\n")
-		sb.WriteString("// The order is dependency-safe: each enum/composite is registered before its\n")
-		sb.WriteString("// array type, and a composite is registered after every composite it has a\n")
-		sb.WriteString("// field of (topological order), because pgx's Conn.LoadType resolves an array\n")
-		sb.WriteString("// type only once its element is registered and a composite only once all of\n")
-		sb.WriteString("// its field types are registered.\n")
+		sb.WriteString("// The order is dependency-safe: each enum/composite/range is registered before\n")
+		sb.WriteString("// its array type, a composite is registered after every composite it has a\n")
+		sb.WriteString("// field of (topological order), and custom ranges come last (their subtypes\n")
+		sb.WriteString("// are already registered), because pgx's Conn.LoadType resolves a derived type\n")
+		sb.WriteString("// only once its element/field/subtype types are registered.\n")
 		sb.WriteString("func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {\n")
 		sb.WriteString("\tfor _, name := range []string{\n")
 		for _, rt := range ordered {

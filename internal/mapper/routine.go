@@ -473,6 +473,74 @@ func triggerEventsFromInt32(events int32) []irv1.TriggerEvent {
 }
 
 // ---------------------------------------------------------------------------
+// MapCreateRange
+// ---------------------------------------------------------------------------
+
+// MapCreateRange converts a pg.CreateRangeStmt to an IR RangeType.
+// Returns nil for nil input.
+//
+// Verified accessor paths (empirically confirmed):
+//
+//	CreateRangeStmt.GetTypeName()  []*Node  — String_ nodes: [schema, name] or [name]
+//	CreateRangeStmt.GetParams()    []*Node  — DefElem nodes; all args are TypeName nodes.
+//	  "subtype"            → arg.GetTypeName()  → MapType(tn)
+//	  "subtype_opclass"   → arg.GetTypeName()  → extractPgName(tn)  (e.g. "timestamptz_ops")
+//	  "collation"         → arg.GetTypeName()  → extractPgName(tn)
+//	  "canonical"         → arg.GetTypeName()  → extractPgName(tn)  (function name)
+//	  "subtype_diff"      → arg.GetTypeName()  → extractPgName(tn)  (function name)
+//	  "multirange_type_name" → arg.GetTypeName() → extractPgName(tn) (simple name) or
+//	                           schema-qualified via typeNodeListToQualifiedName + join
+func MapCreateRange(rs *pg.CreateRangeStmt) *irv1.RangeType {
+	if rs == nil {
+		return nil
+	}
+
+	rt := &irv1.RangeType{}
+
+	// Name — type_name is a list of String_ nodes: [schema, name] or [name]
+	rt.Name = typeNodeListToQualifiedName(rs.GetTypeName())
+
+	// Params — each node is a DefElem; all args carry a TypeName.
+	for _, pNode := range rs.GetParams() {
+		de := pNode.GetDefElem()
+		if de == nil {
+			continue
+		}
+		arg := de.GetArg()
+		if arg == nil {
+			continue
+		}
+		tn := arg.GetTypeName()
+		if tn == nil {
+			continue
+		}
+		switch de.GetDefname() {
+		case "subtype":
+			rt.Subtype = MapType(tn)
+		case "subtype_opclass":
+			rt.SubtypeOpclass = extractPgName(tn)
+		case "collation":
+			rt.Collation = extractPgName(tn)
+		case "canonical":
+			rt.Canonical = extractPgName(tn)
+		case "subtype_diff":
+			rt.SubtypeDiff = extractPgName(tn)
+		case "multirange_type_name":
+			// May be schema-qualified: build "schema.name" or just "name".
+			qn := typeNodeListToQualifiedName(tn.GetNames())
+			if qn.GetSchema() != "" {
+				rt.Multirange = qn.GetSchema() + "." + qn.GetName()
+			} else {
+				rt.Multirange = qn.GetName()
+			}
+		}
+		// Unknown defnames are silently skipped (best-effort, no panic).
+	}
+
+	return rt
+}
+
+// ---------------------------------------------------------------------------
 // MapMaterializedView
 // ---------------------------------------------------------------------------
 
