@@ -87,6 +87,41 @@ func TestGoTypeUDTPackage(t *testing.T) {
 	}
 }
 
+func TestIsNullWrapped(t *testing.T) {
+	m := NewMapper2(nil, nil, Pointer)
+	cases := []struct {
+		name     string
+		pg       string
+		nullable bool
+		want     bool
+	}{
+		{"int8 nullable is wrapped", "int8", true, true},
+		{"text nullable is wrapped", "text", true, true},
+		{"jsonb nullable is nil-capable (unwrapped)", "jsonb", true, false},
+		{"bytea nullable is nil-capable (unwrapped)", "bytea", true, false},
+		{"interval nullable is nil-capable (unwrapped)", "interval", true, false},
+		{"int8 non-null is unwrapped", "int8", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := m.IsNullWrapped("", scalarRef(tc.pg), tc.nullable); got != tc.want {
+				t.Errorf("IsNullWrapped(%q, nullable=%v) = %v; want %v", tc.pg, tc.nullable, got, tc.want)
+			}
+		})
+	}
+
+	// An override to a nil-capable Go type is reported unwrapped.
+	mo := NewMapper2(nil, Overrides{"jsonb": "map[string]any"}, Pointer)
+	if mo.IsNullWrapped("", scalarRef("jsonb"), true) {
+		t.Errorf("override map[string]any should be reported unwrapped")
+	}
+	// An override to a value Go type is reported wrapped.
+	mu := NewMapper2(nil, Overrides{"uuid": "github.com/google/uuid.UUID"}, Pointer)
+	if !mu.IsNullWrapped("", scalarRef("uuid"), true) {
+		t.Errorf("override uuid.UUID should be reported wrapped")
+	}
+}
+
 func TestGoTypeOptMode(t *testing.T) {
 	m := NewMapper2(nil, nil, Opt)
 	cases := []struct {

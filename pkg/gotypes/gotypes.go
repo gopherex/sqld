@@ -92,6 +92,46 @@ func (m *Mapper) wrapNull(expr string, imps []string, nullable bool) (string, []
 	}
 }
 
+// IsNullWrapped reports whether a nullable column maps to a WRAPPED Go field
+// (a pointer *T in sqld-gen-go's default Pointer mode, or null.Val[T] in Opt
+// mode) rather than to a nil-capable value type (slices, maps, json.RawMessage,
+// the pgtype struct/range/multirange types) that already carries SQL NULL in its
+// own zero value. A non-nullable column is never wrapped.
+//
+// It is the single source of truth for the ToSqld bridge: a wrapped field needs
+// a null-unwrapping conversion (".Ptr()" in pointer mode; a direct copy in opt
+// mode, since both sides are null.Val), whereas a nil-capable value field is
+// converted from bob's null.Val[T] via ".GetOrZero()".
+//
+// Overrides are honoured exactly as GoType resolves them, so an override that
+// yields a nil-capable Go type (e.g. "map[string]any") is reported unwrapped.
+func (m *Mapper) IsNullWrapped(columnID string, t *irv1.TypeRef, nullable bool) bool {
+	if !nullable {
+		return false
+	}
+	expr, _ := m.resolveBaseExpr(columnID, t)
+	return !goTypeNoPointer(expr)
+}
+
+// resolveBaseExpr returns the non-null base Go type expression for a column,
+// applying overrides the same way GoType does (column id, then pg type name,
+// then the default mapping). It never wraps for nullability.
+func (m *Mapper) resolveBaseExpr(columnID string, t *irv1.TypeRef) (string, []string) {
+	if m.ov != nil {
+		if columnID != "" {
+			if v, ok := m.ov[columnID]; ok {
+				return parseOverrideValue(v)
+			}
+		}
+		if t != nil {
+			if v, ok := m.ov[t.GetPgName()]; ok {
+				return parseOverrideValue(v)
+			}
+		}
+	}
+	return m.goType(t, false)
+}
+
 // GoType chooses the Go type for a value, applying overrides before falling back
 // to the default mapping. Precedence:
 //  1. an override keyed by the (non-empty) columnID;
