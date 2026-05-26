@@ -610,7 +610,11 @@ annotation model). It is now implemented end-to-end through the real pipeline.
 resolved against the catalog by name) — so an enum param is `AppUserStatus`, a
 `text` domain is `string`, not `any`. v1 condition splitting is per-line over a
 top-level `WHERE` (one `$N` per condition); nested OR/paren-heavy WHEREs are
-best-effort. Composite columns are typed but not yet scanned (no pgx codec).
+best-effort. Composite columns scan into their Go struct via generated pgx
+methods (`ScanIndex`/`ScanNull`/`Index`/`IsNull` + `pgtype.CompositeIndexScanner/
+Getter` compile-assertions) and a `RegisterTypes(ctx, *pgx.Conn)` helper wired
+into `pgxpool` `AfterConnect` (the composite OID is loaded at runtime via
+`conn.LoadType`).
 
 ---
 

@@ -210,6 +210,18 @@ func splitCamel(s string) []string {
 	return words
 }
 
+// compositeReceiver derives a short method-receiver identifier from a Go type
+// name (e.g. "AppAddress" → "a"). It uses the first letter, lowercased, and
+// falls back to "c" if the type name has no usable leading letter.
+func compositeReceiver(typeName string) string {
+	for _, r := range typeName {
+		if unicode.IsLetter(r) {
+			return string(unicode.ToLower(r))
+		}
+	}
+	return "c"
+}
+
 func capitalize(s string) string {
 	if s == "" {
 		return s
@@ -254,7 +266,10 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 	}
 	type compositeDef struct {
 		typeName string
-		fields   []fieldDef
+		// pgName is the schema-qualified PostgreSQL type name (e.g. "app.address"),
+		// used to load+register the composite on a pgx connection.
+		pgName string
+		fields []fieldDef
 	}
 
 	var enumDefs []enumDef
@@ -269,15 +284,32 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 		}
 
 		for _, c := range schema.GetComposites() {
-			typeName := udtGoTypeName(sName, c.GetName().GetName())
+			bareName := c.GetName().GetName()
+			typeName := udtGoTypeName(sName, bareName)
 			var fields []fieldDef
 			for _, f := range c.GetFields() {
 				gt, imps := goType(reg, f.GetType(), false)
 				allImports = append(allImports, imps...)
 				fields = append(fields, fieldDef{name: pascal(f.GetName()), goType: gt})
 			}
-			compositeDefs = append(compositeDefs, compositeDef{typeName: typeName, fields: fields})
+			pgName := bareName
+			if sName != "" {
+				pgName = sName + "." + bareName
+			}
+			compositeDefs = append(compositeDefs, compositeDef{typeName: typeName, pgName: pgName, fields: fields})
 		}
+	}
+
+	// Composites need the pgtype package for the CompositeIndexScanner /
+	// CompositeIndexGetter interface assertions, and the RegisterTypes helper
+	// needs context, fmt, and the pgx package.
+	if len(compositeDefs) > 0 {
+		allImports = append(allImports,
+			"context",
+			"fmt",
+			"github.com/jackc/pgx/v5",
+			"github.com/jackc/pgx/v5/pgtype",
+		)
 	}
 
 	// ---- Collect table struct definitions ----
@@ -329,13 +361,70 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 		}
 	}
 
-	// Emit composite struct types.
+	// Emit composite struct types together with the pgx codec methods.
+	//
+	// pgx decodes a PostgreSQL composite field-by-field via two interfaces
+	// (pgtype.CompositeIndexScanner for decoding, pgtype.CompositeIndexGetter
+	// for encoding). We implement both on every generated composite and assert
+	// satisfaction at compile time. The receiver is a pointer for the scanner
+	// (it mutates fields) and a value for the getter (read-only).
 	for _, c := range compositeDefs {
+		recv := compositeReceiver(c.typeName)
+
 		sb.WriteString(fmt.Sprintf("type %s struct {\n", c.typeName))
 		for _, f := range c.fields {
 			sb.WriteString(fmt.Sprintf("\t%s %s\n", f.name, f.goType))
 		}
 		sb.WriteString("}\n\n")
+
+		// ScanIndex returns a pointer usable as a scan target for field i.
+		sb.WriteString(fmt.Sprintf("func (%s *%s) ScanIndex(i int) any {\n", recv, c.typeName))
+		sb.WriteString("\tswitch i {\n")
+		for i, f := range c.fields {
+			sb.WriteString(fmt.Sprintf("\tcase %d:\n\t\treturn &%s.%s\n", i, recv, f.name))
+		}
+		sb.WriteString("\t}\n\treturn nil\n}\n\n")
+
+		// ScanNull sets the value to SQL NULL by zeroing the struct.
+		sb.WriteString(fmt.Sprintf("func (%s *%s) ScanNull() error {\n", recv, c.typeName))
+		sb.WriteString(fmt.Sprintf("\t*%s = %s{}\n\treturn nil\n}\n\n", recv, c.typeName))
+
+		// Index returns the value of field i for encoding.
+		sb.WriteString(fmt.Sprintf("func (%s %s) Index(i int) any {\n", recv, c.typeName))
+		sb.WriteString("\tswitch i {\n")
+		for i, f := range c.fields {
+			sb.WriteString(fmt.Sprintf("\tcase %d:\n\t\treturn %s.%s\n", i, recv, f.name))
+		}
+		sb.WriteString("\t}\n\treturn nil\n}\n\n")
+
+		// IsNull always reports false: a value-type composite is never NULL.
+		sb.WriteString(fmt.Sprintf("func (%s %s) IsNull() bool { return false }\n\n", recv, c.typeName))
+
+		// Compile-time assertions: these fail the build if the generated methods
+		// do not satisfy pgx's real composite interfaces.
+		sb.WriteString(fmt.Sprintf("var _ pgtype.CompositeIndexScanner = (*%s)(nil)\n", c.typeName))
+		sb.WriteString(fmt.Sprintf("var _ pgtype.CompositeIndexGetter = %s{}\n\n", c.typeName))
+	}
+
+	// Emit RegisterTypes: loads and registers each composite type on a
+	// connection so composite columns scan into their Go structs.
+	if len(compositeDefs) > 0 {
+		sb.WriteString("// RegisterTypes loads and registers the database's composite types on a\n")
+		sb.WriteString("// connection so composite columns scan into their Go structs. Wire it into\n")
+		sb.WriteString("// pgxpool.Config.AfterConnect (it runs per connection).\n")
+		sb.WriteString("func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {\n")
+		sb.WriteString("\tfor _, name := range []string{\n")
+		for _, c := range compositeDefs {
+			sb.WriteString(fmt.Sprintf("\t\t%q,\n", c.pgName))
+		}
+		sb.WriteString("\t} {\n")
+		sb.WriteString("\t\tt, err := conn.LoadType(ctx, name)\n")
+		sb.WriteString("\t\tif err != nil {\n")
+		sb.WriteString("\t\t\treturn fmt.Errorf(\"load type %s: %w\", name, err)\n")
+		sb.WriteString("\t\t}\n")
+		sb.WriteString("\t\tconn.TypeMap().RegisterType(t)\n")
+		sb.WriteString("\t}\n")
+		sb.WriteString("\treturn nil\n}\n\n")
 	}
 
 	// Emit table structs.

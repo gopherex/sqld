@@ -197,6 +197,58 @@ func TestGenerateModelsAndQueries(t *testing.T) {
 	}
 }
 
+func TestGenerateCompositeScanning(t *testing.T) {
+	req := &pluginv1.GenerateRequest{
+		OutDir: "gen/db",
+		Catalog: &irv1.Catalog{Schemas: []*irv1.Schema{{
+			Name: "app",
+			Composites: []*irv1.CompositeType{{
+				Name: &irv1.QualifiedName{Schema: "app", Name: "address"},
+				Fields: []*irv1.CompositeField{
+					{Name: "street", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+					{Name: "city", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+					{Name: "zip", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+				},
+			}},
+		}}},
+	}
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var models string
+	for _, f := range resp.GetFiles() {
+		if f.GetPath() == "models.go" {
+			models = string(f.GetContents())
+		}
+	}
+	if models == "" {
+		t.Fatal("no models.go generated")
+	}
+
+	wants := []string{
+		"func (a *AppAddress) ScanIndex(i int) any",
+		"func (a *AppAddress) ScanNull() error",
+		"func (a AppAddress) Index(i int) any",
+		"func (a AppAddress) IsNull() bool",
+		"var _ pgtype.CompositeIndexScanner = (*AppAddress)(nil)",
+		"var _ pgtype.CompositeIndexGetter = AppAddress{}",
+		"func RegisterTypes(ctx context.Context, conn *pgx.Conn) error",
+		`"app.address"`,
+		`"github.com/jackc/pgx/v5/pgtype"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(models, w) {
+			t.Errorf("models.go missing %q\n---\n%s", w, models)
+		}
+	}
+
+	// Generated code must be valid Go.
+	if _, err := format.Source([]byte(models)); err != nil {
+		t.Fatalf("composite models.go not valid Go: %v\n%s", err, models)
+	}
+}
+
 func TestInfoResponse(t *testing.T) {
 	info := Info()
 	if info.GetName() != "go" {

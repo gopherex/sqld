@@ -3,6 +3,10 @@
 package db
 
 import (
+	"context"
+	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"time"
 )
 
@@ -18,6 +22,56 @@ type AppAddress struct {
 	Street string
 	City   string
 	Zip    string
+}
+
+func (a *AppAddress) ScanIndex(i int) any {
+	switch i {
+	case 0:
+		return &a.Street
+	case 1:
+		return &a.City
+	case 2:
+		return &a.Zip
+	}
+	return nil
+}
+
+func (a *AppAddress) ScanNull() error {
+	*a = AppAddress{}
+	return nil
+}
+
+func (a AppAddress) Index(i int) any {
+	switch i {
+	case 0:
+		return a.Street
+	case 1:
+		return a.City
+	case 2:
+		return a.Zip
+	}
+	return nil
+}
+
+func (a AppAddress) IsNull() bool { return false }
+
+var _ pgtype.CompositeIndexScanner = (*AppAddress)(nil)
+var _ pgtype.CompositeIndexGetter = AppAddress{}
+
+// RegisterTypes loads and registers the database's composite types on a
+// connection so composite columns scan into their Go structs. Wire it into
+// pgxpool.Config.AfterConnect (it runs per connection).
+func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
+	for _, name := range []string{
+		"app.address",
+	} {
+		t, err := conn.LoadType(ctx, name)
+		if err != nil {
+			return fmt.Errorf("load type %s: %w", name, err)
+		}
+		conn.TypeMap().RegisterType(t)
+	}
+	return nil
 }
 
 type AppUsers struct {
