@@ -148,6 +148,10 @@ func (b *builder) dispatch(stmt parse.Stmt) {
 	case node.GetCompositeTypeStmt() != nil:
 		b.handleCompositeType(node.GetCompositeTypeStmt())
 
+	// CREATE TYPE ... AS RANGE
+	case node.GetCreateRangeStmt() != nil:
+		b.handleCreateRange(node.GetCreateRangeStmt())
+
 	// CREATE FUNCTION / CREATE PROCEDURE
 	case node.GetCreateFunctionStmt() != nil:
 		b.handleCreateFunction(node.GetCreateFunctionStmt())
@@ -338,6 +342,24 @@ func (b *builder) handleCompositeType(cs *pg.CompositeTypeStmt) {
 	}
 	ss := b.getOrCreateSchema(schemaName)
 	ss.schema.Composites = append(ss.schema.Composites, ct)
+}
+
+// ---------------------------------------------------------------------------
+// CREATE TYPE ... AS RANGE
+// ---------------------------------------------------------------------------
+
+func (b *builder) handleCreateRange(rs *pg.CreateRangeStmt) {
+	rt := mapper.MapCreateRange(rs)
+	if rt == nil {
+		b.diag.Add("warning", "MapCreateRange returned nil")
+		return
+	}
+	schemaName := resolveSchema(rt.GetName())
+	if rt.Name != nil {
+		rt.Name.Schema = schemaName
+	}
+	ss := b.getOrCreateSchema(schemaName)
+	ss.schema.Ranges = append(ss.schema.Ranges, rt)
 }
 
 // ---------------------------------------------------------------------------
@@ -674,6 +696,12 @@ func (b *builder) assignIDs() {
 		for _, ct := range ss.schema.Composites {
 			if ct.Id == "" && ct.GetName() != nil {
 				ct.Id = schemaName + "." + ct.GetName().GetName()
+			}
+		}
+
+		for _, rt := range ss.schema.Ranges {
+			if rt.Id == "" && rt.GetName() != nil {
+				rt.Id = schemaName + "." + rt.GetName().GetName()
 			}
 		}
 

@@ -322,3 +322,74 @@ func TestMapMaterializedView_Nil(t *testing.T) {
 		t.Error("expected nil for nil CreateTableAsStmt")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestMapCreateRange
+// ---------------------------------------------------------------------------
+
+func TestMapCreateRange(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TYPE app.timerange AS RANGE (subtype = timestamptz);")
+	r := MapCreateRange(stmts[0].Node.GetCreateRangeStmt())
+	if r == nil {
+		t.Fatal("MapCreateRange returned nil")
+	}
+	if r.GetName().GetName() != "timerange" || r.GetName().GetSchema() != "app" {
+		t.Fatalf("name=%v", r.GetName())
+	}
+	if r.GetSubtype().GetPgName() != "timestamptz" {
+		t.Fatalf("subtype=%v", r.GetSubtype())
+	}
+}
+
+func TestMapCreateRange_AllParams(t *testing.T) {
+	sql := `CREATE TYPE app.timerange AS RANGE (
+		subtype = timestamptz,
+		subtype_opclass = timestamptz_ops,
+		canonical = mycanon,
+		subtype_diff = mydiff,
+		multirange_type_name = app.timemultirange
+	);`
+	stmts, _ := parse.Statements(sql)
+	r := MapCreateRange(stmts[0].Node.GetCreateRangeStmt())
+	if r == nil {
+		t.Fatal("MapCreateRange returned nil")
+	}
+	if r.GetSubtype().GetPgName() != "timestamptz" {
+		t.Fatalf("subtype=%v", r.GetSubtype())
+	}
+	if r.GetSubtypeOpclass() != "timestamptz_ops" {
+		t.Fatalf("subtype_opclass=%q", r.GetSubtypeOpclass())
+	}
+	if r.GetCanonical() != "mycanon" {
+		t.Fatalf("canonical=%q", r.GetCanonical())
+	}
+	if r.GetSubtypeDiff() != "mydiff" {
+		t.Fatalf("subtype_diff=%q", r.GetSubtypeDiff())
+	}
+	if r.GetMultirange() != "app.timemultirange" {
+		t.Fatalf("multirange=%q", r.GetMultirange())
+	}
+}
+
+func TestMapCreateRange_NoSchema(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TYPE myrange AS RANGE (subtype = int4);")
+	r := MapCreateRange(stmts[0].Node.GetCreateRangeStmt())
+	if r == nil {
+		t.Fatal("MapCreateRange returned nil")
+	}
+	if r.GetName().GetName() != "myrange" {
+		t.Fatalf("name=%q", r.GetName().GetName())
+	}
+	if r.GetName().GetSchema() != "" {
+		t.Fatalf("schema should be empty, got %q", r.GetName().GetSchema())
+	}
+	if r.GetSubtype().GetPgName() != "int4" {
+		t.Fatalf("subtype=%v", r.GetSubtype())
+	}
+}
+
+func TestMapCreateRange_Nil(t *testing.T) {
+	if MapCreateRange(nil) != nil {
+		t.Error("expected nil for nil CreateRangeStmt")
+	}
+}
