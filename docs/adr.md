@@ -39,6 +39,7 @@ The companion design doc with full rationale and examples lives at
 - [ADR-0027 — Core engine implemented; plugin transport is stdio-framed protobuf](#adr-0027)
 - [ADR-0028 — Dynamic queries implemented (named params, smart WHERE, typed @orderby)](#adr-0028)
 - [ADR-0029 — sqld-gen-go Go type mapping (scalars, UDTs, json, range, overrides)](#adr-0029)
+- [ADR-0030 — sqld-migrate: open migrator + schema-diff via dev Postgres](#adr-0030)
 - [Semantics reference](#semantics-reference)
 
 ---
@@ -679,6 +680,47 @@ catalog) to Go, with pgx v5 as the runtime.
 surface; `example/` exercises enum/domain/composite (+ arrays, nested, params),
 json, overrides (`uuid.UUID`, `map[string]any`), and range/multirange. Custom
 range collection and `hstore`/other extension types remain future work.
+
+---
+
+<a id="adr-0030"></a>
+## ADR-0030 — sqld-migrate: open migrator + schema-diff via dev Postgres
+
+**Status:** accepted (implemented)
+
+**Context:** A fully-open migration tool (Atlas paywalls `migrate diff`, lint,
+etc.). Spec: `docs/superpowers/specs/2026-05-26-sqld-migrate-design.md`.
+
+**Decision / outcome:**
+- **`pkg/migrate`** (importable): `Migration` model + `Load(dir)`; `Migrator`
+  over a pgx `DBTX` with `Up`/`Down`/`To`/`Status`/`Applied`/`Pending`. Each
+  migration runs in its own transaction under a session advisory lock; a
+  `sqld_migrations(version,name,checksum,applied_at)` table tracks state;
+  checksum mismatch on an applied migration → **drift**.
+- **Migration file format**: `<version>_<name>.sql` with `-- sqld:up` /
+  `-- sqld:down` section markers (no marker → all up). `internal/source` parses
+  them; `Unit.DownSQL` added.
+- **`internal/introspect`**: builds an `*irv1.Catalog` from a live Postgres via
+  `pg_catalog` — the SAME IR as the parser produces, so the diff engine compares
+  parsed vs introspected uniformly.
+- **`internal/diff`** (DB-free, golden-tested): `Diff(from,to *irv1.Catalog)
+  (*Plan,error)` → ordered `Change`s with `UpSQL`/`DownSQL`; covers schemas,
+  types (enum/domain/composite/range), sequences, tables, columns, constraints
+  (PK/FK/unique/check/exclusion), indexes, views, matviews, functions,
+  procedures, triggers; dependency-ordered (schema→type→table→column→
+  constraint→index→fk→view→func→trigger), drops reversed for `down`.
+- **`internal/devdb`**: ephemeral Postgres via **testcontainers-go** (or an
+  existing one via `--dev-url`).
+- **`cmd/sqld-migrate`**: `up`/`down`/`status`/`apply`/`hash`/`validate`, and
+  **`generate <name>`** — realize `schema.sql` and the applied-migration state in
+  two fresh dev Postgres instances, introspect both, `Diff`, and write
+  `migrations/<ts>_<name>.sql` (up + down). Letting Postgres realize/normalize
+  the schema means the diff supports everything PG supports.
+
+**Consequences:** Declarative-first migrations, fully open, verified end-to-end
+against real Postgres (integration tests gated on Docker; the diff engine is
+Docker-free and golden-tested). Out of scope for now: grants/RLS/partitioning
+diff, multi-dialect, online/zero-downtime orchestration. Docs: `docs/migrations.md`.
 
 ---
 

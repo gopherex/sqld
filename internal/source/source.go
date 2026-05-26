@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/yaroher/sqld/pkg/config"
 )
@@ -22,6 +23,7 @@ const (
 type Unit struct {
 	Path    string
 	SQL     string
+	DownSQL string // migrations only; empty when no -- sqld:down section
 	Kind    Kind
 	Version string // migrations only
 }
@@ -141,8 +143,51 @@ func resolveMigration(m config.MigrationSource) ([]Unit, error) {
 	}
 	for i := range us {
 		us[i].Version = trimExt(filepath.Base(us[i].Path))
+		up, down := splitMigration(us[i].SQL)
+		us[i].SQL = up
+		us[i].DownSQL = down
 	}
 	return us, nil
+}
+
+// splitMigration splits a migration file's SQL into up and down sections.
+// Lines matching "-- sqld:up" (case-insensitive, trimmed) begin the up section;
+// lines matching "-- sqld:down" begin the down section. Text before any marker
+// is treated as up. The marker lines themselves are excluded from the output.
+// Both returned strings are trimmed of leading/trailing whitespace.
+func splitMigration(sql string) (up, down string) {
+	const markerUp = "-- sqld:up"
+	const markerDown = "-- sqld:down"
+
+	type section int
+	const (
+		sectionUp   section = iota
+		sectionDown section = iota
+	)
+
+	var upLines, downLines []string
+	current := sectionUp
+
+	for _, line := range strings.Split(sql, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		switch lower {
+		case markerUp:
+			current = sectionUp
+		case markerDown:
+			current = sectionDown
+		default:
+			if current == sectionUp {
+				upLines = append(upLines, line)
+			} else {
+				downLines = append(downLines, line)
+			}
+		}
+	}
+
+	up = strings.TrimSpace(strings.Join(upLines, "\n"))
+	down = strings.TrimSpace(strings.Join(downLines, "\n"))
+	return up, down
 }
 
 func trimExt(name string) string {
