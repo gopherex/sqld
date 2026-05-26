@@ -813,6 +813,15 @@ func resolveTarget(expr *irv1.Expr, alias string, aliasMap map[string]*irv1.Tabl
 
 		col := resolveColumnRef(cr, aliasMap, catIdx)
 		if col == nil {
+			// The ColumnRef didn't resolve against the catalog. Fall back to
+			// best-effort expression-type inference before giving up.
+			if ty := inferExprType(expr, columnResolver(aliasMap, catIdx)); ty != nil {
+				return []*pluginv1.QueryColumn{{
+					Name:     displayName,
+					Type:     ty,
+					Nullable: true,
+				}}
+			}
 			d.Add("info", fmt.Sprintf("column %q unresolved in query %s", colName, qName))
 			return []*pluginv1.QueryColumn{{Name: displayName}}
 		}
@@ -855,25 +864,343 @@ func resolveTarget(expr *irv1.Expr, alias string, aliasMap map[string]*irv1.Tabl
 		return cols
 	}
 
-	// Literal
-	if lit := expr.GetLiteral(); lit != nil {
-		colName := alias
-		if colName == "" {
-			colName = "column"
-		}
-		return []*pluginv1.QueryColumn{{
-			Name: colName,
-			Type: lit.GetType(),
-		}}
-	}
-
-	// Other (function call, cast, operator, etc.) – return a column with alias or "column".
+	// Any other expression (cast, literal, function call, operator, …):
+	// run best-effort type inference.
+	resolve := columnResolver(aliasMap, catIdx)
+	ty := inferExprType(expr, resolve)
 	colName := alias
 	if colName == "" {
-		colName = "column"
+		colName = defaultColumnName(expr)
 	}
-	d.Add("info", fmt.Sprintf("column expression type unresolved in query %s", qName))
-	return []*pluginv1.QueryColumn{{Name: colName}}
+	if ty == nil {
+		d.Add("info", fmt.Sprintf("column expression type unresolved in query %s", qName))
+		return []*pluginv1.QueryColumn{{Name: colName}}
+	}
+	return []*pluginv1.QueryColumn{{
+		Name:     colName,
+		Type:     ty,
+		Nullable: exprNullable(expr),
+	}}
+}
+
+// columnResolver adapts the alias map / catalog index into the
+// (qualifier, col) → *irv1.Column signature used by inferExprType.
+func columnResolver(aliasMap map[string]*irv1.Table, catIdx catalogIndex) func(qualifier, col string) *irv1.Column {
+	return func(qualifier, col string) *irv1.Column {
+		return resolveColumnRef(&irv1.ColumnRef{Qualifier: qualifier, Column: col}, aliasMap, catIdx)
+	}
+}
+
+// defaultColumnName picks a sensible name for an unaliased non-column target:
+// the (lowercased, last) function name for a function call, else "column".
+func defaultColumnName(expr *irv1.Expr) string {
+	if fc := expr.GetFunctionCall(); fc != nil {
+		if name := funcName(fc); name != "" {
+			return name
+		}
+	}
+	return "column"
+}
+
+// exprNullable returns a best-effort nullability for a non-column target.
+// Comparison/logical operators and count(*) are NOT NULL; aggregates and
+// everything else default to nullable=true.
+func exprNullable(expr *irv1.Expr) bool {
+	if op := expr.GetOperator(); op != nil {
+		if isBoolOperator(op.GetSymbol()) {
+			return false
+		}
+		return true
+	}
+	if fc := expr.GetFunctionCall(); fc != nil {
+		switch funcName(fc) {
+		case "count":
+			return false
+		}
+		return true
+	}
+	// Casts and literals: conservatively nullable=false for literals,
+	// nullable for casts of unknown source.
+	if expr.GetLiteral() != nil {
+		// A non-null literal cannot be NULL.
+		return expr.GetLiteral().GetNullValue()
+	}
+	return true
+}
+
+// ---------------------------------------------------------------------------
+// Expression type inference
+// ---------------------------------------------------------------------------
+
+// scalarType builds a SCALAR TypeRef for a built-in PG type name.
+func scalarType(pgName string) *irv1.TypeRef {
+	return &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: pgName}
+}
+
+// funcName returns the lowercased, last-component name of a function call,
+// e.g. "pg_catalog.count" → "count".
+func funcName(fc *irv1.FunctionCall) string {
+	if fc == nil {
+		return ""
+	}
+	return strings.ToLower(fc.GetName().GetName())
+}
+
+// isBoolOperator reports whether the operator symbol yields a boolean result.
+func isBoolOperator(sym string) bool {
+	switch strings.ToUpper(strings.TrimSpace(sym)) {
+	case "=", "<", ">", "<=", ">=", "<>", "!=",
+		"AND", "OR", "NOT",
+		"IS NULL", "IS NOT NULL", "IS TRUE", "IS FALSE",
+		"IS DISTINCT FROM", "IS NOT DISTINCT FROM",
+		"LIKE", "NOT LIKE", "ILIKE", "NOT ILIKE",
+		"SIMILAR TO", "NOT SIMILAR TO",
+		"IN", "NOT IN", "BETWEEN", "NOT BETWEEN", "EXISTS",
+		"@>", "<@", "&&", "?", "?|", "?&", "~", "~*", "!~", "!~*", "@@":
+		return true
+	}
+	return false
+}
+
+// isArithmeticOperator reports whether the operator symbol is arithmetic.
+func isArithmeticOperator(sym string) bool {
+	switch strings.TrimSpace(sym) {
+	case "+", "-", "*", "/", "%", "^":
+		return true
+	}
+	return false
+}
+
+// numericRank orders numeric-ish PG types from narrowest to widest so that
+// arithmetic over two operands picks the wider type. Non-numeric types rank 0.
+func numericRank(pgName string) int {
+	switch pgName {
+	case "int2":
+		return 1
+	case "int4":
+		return 2
+	case "int8":
+		return 3
+	case "numeric":
+		return 4
+	case "float4":
+		return 5
+	case "float8":
+		return 6
+	}
+	return 0
+}
+
+// inferExprType performs best-effort type inference for a SELECT/RETURNING
+// target expression that is not a bare, catalog-resolvable column. It returns
+// the inferred TypeRef, or nil when the type cannot be determined (the caller
+// then leaves QueryColumn.Type nil, preserving the legacy `any` behavior).
+//
+// `resolve` maps a (qualifier, column) pair to its catalog *irv1.Column and may
+// be nil. inferExprType never panics.
+func inferExprType(e *irv1.Expr, resolve func(qualifier, col string) *irv1.Column) *irv1.TypeRef {
+	if e == nil {
+		return nil
+	}
+
+	switch {
+	// ---------------------------------------------------------------- //
+	// Cast — highest confidence: the target type is explicit.
+	// ---------------------------------------------------------------- //
+	case e.GetCast() != nil:
+		return e.GetCast().GetTargetType()
+
+	// ---------------------------------------------------------------- //
+	// Literal — derive from the value kind.
+	// ---------------------------------------------------------------- //
+	case e.GetLiteral() != nil:
+		lit := e.GetLiteral()
+		if lit.GetType() != nil {
+			return lit.GetType()
+		}
+		switch lit.GetValue().(type) {
+		case *irv1.Literal_IntValue:
+			return scalarType("int4")
+		case *irv1.Literal_FloatValue, *irv1.Literal_NumericValue:
+			return scalarType("numeric")
+		case *irv1.Literal_StringValue:
+			return scalarType("text")
+		case *irv1.Literal_BoolValue:
+			return scalarType("bool")
+		case *irv1.Literal_ByteaValue:
+			return scalarType("bytea")
+		case *irv1.Literal_NullValue:
+			return nil
+		}
+		return nil
+
+	// ---------------------------------------------------------------- //
+	// ColumnRef — resolve against the catalog if a resolver is provided.
+	// ---------------------------------------------------------------- //
+	case e.GetColumnRef() != nil:
+		if resolve == nil {
+			return nil
+		}
+		cr := e.GetColumnRef()
+		if col := resolve(cr.GetQualifier(), cr.GetColumn()); col != nil {
+			return col.GetType()
+		}
+		return nil
+
+	// ---------------------------------------------------------------- //
+	// FunctionCall — map by (lowercased, last-part) function name.
+	// ---------------------------------------------------------------- //
+	case e.GetFunctionCall() != nil:
+		return inferFunctionType(e.GetFunctionCall(), resolve)
+
+	// ---------------------------------------------------------------- //
+	// OperatorExpr — boolean for comparisons/logical; recurse for arithmetic.
+	// ---------------------------------------------------------------- //
+	case e.GetOperator() != nil:
+		op := e.GetOperator()
+		sym := op.GetSymbol()
+		if isBoolOperator(sym) {
+			return scalarType("bool")
+		}
+		if isArithmeticOperator(sym) {
+			return inferArithmeticType(op, resolve)
+		}
+		return nil
+	}
+
+	return nil
+}
+
+// inferFunctionType maps a function call to its result type.
+func inferFunctionType(fc *irv1.FunctionCall, resolve func(qualifier, col string) *irv1.Column) *irv1.TypeRef {
+	name := funcName(fc)
+	args := fc.GetArguments()
+
+	// arg0Type resolves the type of the first argument, if present.
+	arg0Type := func() *irv1.TypeRef {
+		if len(args) == 0 {
+			return nil
+		}
+		return inferExprType(args[0], resolve)
+	}
+
+	switch name {
+	// --- Aggregates ---------------------------------------------------- //
+	case "count":
+		return scalarType("int8")
+	case "sum":
+		t := arg0Type()
+		switch typePgName(t) {
+		case "int2", "int4":
+			return scalarType("int8")
+		case "int8", "numeric":
+			return scalarType("numeric")
+		case "float4":
+			return scalarType("float4")
+		case "float8":
+			return scalarType("float8")
+		}
+		return scalarType("numeric")
+	case "avg":
+		switch typePgName(arg0Type()) {
+		case "float4", "float8":
+			return scalarType("float8")
+		}
+		return scalarType("numeric")
+	case "min", "max":
+		// min/max return the argument's own type.
+		return arg0Type()
+	case "bool_and", "bool_or":
+		return scalarType("bool")
+	case "string_agg":
+		return scalarType("text")
+	case "array_agg":
+		elem := arg0Type()
+		if elem == nil {
+			return nil
+		}
+		return &irv1.TypeRef{
+			Kind:            irv1.TypeKind_TYPE_KIND_ARRAY,
+			PgName:          elem.GetPgName(),
+			ArrayDimensions: 1,
+			Element:         elem,
+		}
+	case "jsonb_agg":
+		return scalarType("jsonb")
+	case "json_agg":
+		return scalarType("json")
+
+	// --- Common scalar functions → text ------------------------------- //
+	case "lower", "upper", "trim", "ltrim", "rtrim", "btrim",
+		"concat", "concat_ws", "md5", "to_char", "substr", "substring",
+		"replace", "initcap", "repeat", "reverse", "left", "right":
+		return scalarType("text")
+
+	// --- Length / position → int4 -------------------------------------- //
+	case "length", "char_length", "character_length",
+		"octet_length", "bit_length", "position", "strpos",
+		"cardinality", "array_length":
+		return scalarType("int4")
+
+	// --- Date/time ----------------------------------------------------- //
+	case "now", "current_timestamp", "clock_timestamp",
+		"statement_timestamp", "transaction_timestamp":
+		return scalarType("timestamptz")
+	case "current_date":
+		return scalarType("date")
+	case "current_time", "localtime":
+		return scalarType("time")
+	case "localtimestamp":
+		return scalarType("timestamp")
+
+	// --- Pass-through over first argument ------------------------------ //
+	case "coalesce", "nullif", "greatest", "least",
+		"abs", "ceil", "ceiling", "floor", "round", "trunc", "sign", "mod":
+		return arg0Type()
+
+	// --- Misc ---------------------------------------------------------- //
+	case "gen_random_uuid", "uuid_generate_v4":
+		return scalarType("uuid")
+	}
+
+	// Unknown function → nil (stays `any`).
+	return nil
+}
+
+// inferArithmeticType recurses into an arithmetic operator's operands and
+// returns the wider numeric-ish operand type. Falls back to int4 when both
+// operands are integers but their exact width is unknown.
+func inferArithmeticType(op *irv1.OperatorExpr, resolve func(qualifier, col string) *irv1.Column) *irv1.TypeRef {
+	var best *irv1.TypeRef
+	bestRank := 0
+	known := false
+	for _, operand := range op.GetOperands() {
+		t := inferExprType(operand, resolve)
+		if t == nil {
+			continue
+		}
+		known = true
+		if r := numericRank(t.GetPgName()); r > bestRank {
+			bestRank = r
+			best = t
+		}
+	}
+	if best != nil {
+		return best
+	}
+	if known {
+		// Operands resolved but none are numeric-ish; default to int4.
+		return scalarType("int4")
+	}
+	return nil
+}
+
+// typePgName safely returns a TypeRef's PgName ("" when nil).
+func typePgName(t *irv1.TypeRef) string {
+	if t == nil {
+		return ""
+	}
+	return t.GetPgName()
 }
 
 // expandTableColumns produces one QueryColumn per column in tbl.
