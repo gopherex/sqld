@@ -30,6 +30,13 @@ type Mapper struct {
 	reg  *Registry
 	ov   Overrides
 	null NullMode
+	// udtPkg, when non-empty, qualifies enum/composite Go type names with this
+	// package alias (e.g. "db" → "db.AppUserStatus") and adds udtImport to the
+	// returned imports. Used by sqld-gen-bob, where the canonical UDT Go types
+	// live in a separate package (sqld-gen-go's output) rather than locally.
+	// Empty (the default) preserves sqld-gen-go's same-package behaviour.
+	udtPkg    string
+	udtImport string
 }
 
 // NewMapper builds a registry from cat and returns a Mapper.
@@ -45,6 +52,24 @@ func NewMapper2(reg *Registry, ov Overrides, null NullMode) *Mapper {
 // Registry returns the Mapper's UDT registry.
 func (m *Mapper) Registry() *Registry {
 	return m.reg
+}
+
+// SetUDTPackage makes the Mapper qualify enum/composite Go type names with the
+// given package alias and add importSpec (a quoted import path, optionally
+// aliased, as Go source) to their imports. With an empty alias the Mapper
+// emits unqualified UDT names (the default). Returns the Mapper for chaining.
+func (m *Mapper) SetUDTPackage(alias, importSpec string) *Mapper {
+	m.udtPkg = alias
+	m.udtImport = importSpec
+	return m
+}
+
+// qualifyUDT applies the configured UDT package alias to a bare UDT type name.
+func (m *Mapper) qualifyUDT(name string) (string, []string) {
+	if m.udtPkg == "" {
+		return name, nil
+	}
+	return m.udtPkg + "." + name, []string{m.udtImport}
 }
 
 // UDTName returns the Go identifier for a UDT given its schema and bare name.
@@ -143,8 +168,8 @@ func (m *Mapper) goType(t *irv1.TypeRef, nullable bool) (goExpr string, imports 
 	if m.reg != nil {
 		// --- enum ---
 		if entry, ok := m.reg.enums[pgName]; ok {
-			typeName := UDTName(entry.schema, pgName)
-			return m.wrapNull(typeName, nil, nullable)
+			name, imps := m.qualifyUDT(UDTName(entry.schema, pgName))
+			return m.wrapNull(name, imps, nullable)
 		}
 		// --- domain: transparent — recurse on base type ---
 		if entry, ok := m.reg.domains[pgName]; ok {
@@ -152,8 +177,8 @@ func (m *Mapper) goType(t *irv1.TypeRef, nullable bool) (goExpr string, imports 
 		}
 		// --- composite ---
 		if entry, ok := m.reg.composites[pgName]; ok {
-			typeName := UDTName(entry.schema, pgName)
-			return m.wrapNull(typeName, nil, nullable)
+			name, imps := m.qualifyUDT(UDTName(entry.schema, pgName))
+			return m.wrapNull(name, imps, nullable)
 		}
 		// --- custom range (CREATE TYPE ... AS RANGE) ---
 		//

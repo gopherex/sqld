@@ -48,6 +48,45 @@ func TestGoTypePointerMode(t *testing.T) {
 	}
 }
 
+func TestGoTypeUDTPackage(t *testing.T) {
+	// Catalog with an enum app.user_status; gen-go names it "AppUserStatus".
+	cat := &irv1.Catalog{
+		Schemas: []*irv1.Schema{{
+			Name: "app",
+			Enums: []*irv1.EnumType{{
+				Name:   &irv1.QualifiedName{Schema: "app", Name: "user_status"},
+				Labels: []string{"active", "closed"},
+			}},
+		}},
+	}
+	m := NewMapper(cat, nil, Pointer).SetUDTPackage("db", `"example.com/app/db"`)
+
+	enumRef := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "user_status"}
+	expr, imps := m.GoType("", enumRef, false)
+	if expr != "db.AppUserStatus" {
+		t.Errorf("enum expr = %q; want db.AppUserStatus", expr)
+	}
+	if !importsEqual(imps, []string{`"example.com/app/db"`}) {
+		t.Errorf("enum imports = %v; want the db import", imps)
+	}
+
+	// Array of enum qualifies the element through recursion.
+	arrRef := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_ARRAY, Element: enumRef}
+	expr, imps = m.GoType("", arrRef, false)
+	if expr != "[]db.AppUserStatus" {
+		t.Errorf("array-of-enum expr = %q; want []db.AppUserStatus", expr)
+	}
+	if !importsEqual(imps, []string{`"example.com/app/db"`}) {
+		t.Errorf("array-of-enum imports = %v", imps)
+	}
+
+	// Without SetUDTPackage, names are unqualified (gen-go behaviour).
+	plain := NewMapper(cat, nil, Pointer)
+	if expr, _ := plain.GoType("", enumRef, false); expr != "AppUserStatus" {
+		t.Errorf("unqualified enum expr = %q; want AppUserStatus", expr)
+	}
+}
+
 func TestGoTypeOptMode(t *testing.T) {
 	m := NewMapper2(nil, nil, Opt)
 	cases := []struct {
