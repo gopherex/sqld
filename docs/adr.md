@@ -649,8 +649,10 @@ catalog) to Go, with pgx v5 as the runtime.
   enums + composites + their arrays in dependency-first (topological) order;
   wire it into `pgxpool.AfterConnect`.
 - **range / multirange** (builtin) → `pgtype.Range[T]` / `pgtype.Multirange[...]`
-  (e.g. `int4range` → `pgtype.Range[pgtype.Int4]`). Custom `CREATE TYPE AS RANGE`
-  deferred.
+  (e.g. `int4range` → `pgtype.Range[pgtype.Int4]`). **Custom `CREATE TYPE AS RANGE`**
+  is collected into `Schema.Ranges` and maps to `pgtype.Range[<subtype element>]`
+  (subtype→pgtype via `pgtypeElement`); registered by `RegisterTypes` (`LoadType`
+  handles range + its array, subtype-first) like composites.
 - **Nullability:** nullable → pointer `*T`, EXCEPT `[]byte`, slices, maps,
   `json.RawMessage`, and `pgtype.Range`/`Multirange` (which carry NULL via a
   `Valid` field) — those stay value types.
