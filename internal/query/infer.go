@@ -45,8 +45,14 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	// 2. Shallow type inference via operator context.
 	// ------------------------------------------------------------------ //
 	// For each operator expr we check whether one side is a ParameterRef and
-	// the other is a ColumnRef; if so, resolve the column and assign its type.
+	// the other is a ColumnRef; if so, resolve the column and assign its type
+	// and (for positional params) its name.
 	inferParamTypes(q.Ast, paramMap, catIdx, q.GetName(), d)
+
+	// Infer positional param names from UPDATE SET assignments.
+	if q.Ast.GetUpdate() != nil {
+		inferUpdateSetParamNames(q.Ast.GetUpdate(), paramMap, catIdx)
+	}
 
 	// Emit diagnostics for unresolved params and build the ordered param slice.
 	// Order by position (1-based).
@@ -579,7 +585,8 @@ func inferParamTypesInExpr(e *irv1.Expr, paramMap map[uint32]*pluginv1.QueryPara
 
 // tryInferParamFromPair: if `maybeParam` is a ParameterRef and `maybeCol` is
 // a ColumnRef, resolve the column from aliasMap/catIdx and assign its type to
-// the parameter (if not already set).
+// the parameter (if not already set). Also sets the param Name from the column
+// when the param has no Name yet (positional params).
 func tryInferParamFromPair(maybeParam, maybeCol *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
 	if maybeParam == nil || maybeCol == nil {
 		return
@@ -597,19 +604,71 @@ func tryInferParamFromPair(maybeParam, maybeCol *irv1.Expr, paramMap map[uint32]
 		return
 	}
 	p, ok := paramMap[pos]
-	if !ok || p.GetType() != nil {
-		return // already resolved
+	if !ok {
+		return
 	}
 
 	col := resolveColumnRef(colRef, aliasMap, catIdx)
 	if col == nil {
 		return
 	}
-	p.Type = col.GetType()
-	p.Nullable = col.GetNullable()
-	p.Column = &irv1.ObjectRef{
-		Id:   col.GetId(),
-		Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN,
+	if p.GetType() == nil {
+		p.Type = col.GetType()
+		p.Nullable = col.GetNullable()
+		p.Column = &irv1.ObjectRef{
+			Id:   col.GetId(),
+			Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN,
+		}
+	}
+	// Set the Name from the column only for positional params (no existing Name).
+	if p.GetName() == "" {
+		p.Name = col.GetName()
+	}
+}
+
+// inferUpdateSetParamNames assigns Name (and Type/Nullable when not already set)
+// to positional parameters that appear directly as the value in an UPDATE SET
+// assignment. For example: UPDATE t SET status = $2 → param $2 gets Name "status".
+func inferUpdateSetParamNames(upd *irv1.UpdateStmt, paramMap map[uint32]*pluginv1.QueryParameter, catIdx catalogIndex) {
+	if upd == nil {
+		return
+	}
+	tbl := catIdx.lookupTable(upd.GetTableName().GetName())
+	for _, assign := range upd.GetSet() {
+		cols := assign.GetColumns()
+		if len(cols) != 1 {
+			continue
+		}
+		val := assign.GetValue()
+		if val == nil {
+			continue
+		}
+		param := val.GetParameter()
+		if param == nil {
+			continue
+		}
+		pos := param.GetPosition()
+		if pos == 0 {
+			continue
+		}
+		p, ok := paramMap[pos]
+		if !ok || p.GetName() != "" {
+			continue // skip if already named
+		}
+		colName := cols[0]
+		p.Name = colName
+		// Also assign type/nullable from the catalog column when not yet set.
+		if p.GetType() == nil && tbl != nil {
+			col := catIdx.lookupColumn(tbl, colName)
+			if col != nil {
+				p.Type = col.GetType()
+				p.Nullable = col.GetNullable()
+				p.Column = &irv1.ObjectRef{
+					Id:   col.GetId(),
+					Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN,
+				}
+			}
+		}
 	}
 }
 
