@@ -19,9 +19,11 @@ type bobOptions struct {
 	// generators emit identical types for overridden columns.
 	Overrides map[string]string `json:"overrides"`
 
-	Models            *bool `json:"models"`
-	Factories         *bool `json:"factories"`
-	Relationships     *bool `json:"relationships"`
+	Models    *bool `json:"models"`
+	Factories *bool `json:"factories"`
+	// WhereLoadersJoins toggles bob's where/loaders/joins/counts helpers.
+	// (Relationships are always generated from FK constraints — bob has no
+	// separate toggle — so there is no relationships option.)
 	WhereLoadersJoins *bool `json:"whereLoadersJoins"`
 }
 
