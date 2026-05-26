@@ -751,8 +751,24 @@ sqld-controlled Go types and runs natively on `*pgxpool.Pool`.
   `DBInfo.Enums` is left empty so bob emits **no** competing enum types. bob
   writes its multi-package output directly into the plugin `out` dir (its import
   paths are rooted there) and the plugin returns an empty file list.
-- **Null mode + overrides are shared options** — `nullMode` (`pointer`|`opt`) and
-  `overrides` must match between the two plugins so their structs interoperate.
+- **Overrides are a shared option** — the `overrides` Go-type table must match
+  between the two plugins so both emit identical types for overridden columns.
+  `nullMode` (`pointer`|`opt`) **no longer has to match**: it now only tells the
+  `ToSqld` bridge (below) which nullable form sqld-gen-go emits.
+- **`ToSqld()` bob→sqld bridge** (auto-emitted whenever `typesPackage` is set):
+  bob models are not Go-convertible to sqld-gen-go's flat models (bob carries
+  `R`/`C` ORM fields and wraps every nullable column in `null.Val[T]`), so
+  `sqld-gen-bob` writes `gen/bob/models/sqld_bridge.go` with a
+  `func (m AppUser) ToSqld() db.AppUsers` field-copy on every model. The bob model
+  type per table is discovered by parsing the generated `*.bob.go`
+  `psql.NewTablex`/`NewViewx` lines (avoiding re-deriving bob's singular
+  inflection). Null unwrapping: a wrapped scalar/enum/composite → `.Ptr()` in
+  `pointer` mode (direct copy under `opt`); a nil-capable column (slice/map/
+  `json.RawMessage`/`pgtype.*` struct/range/`[]Composite`), which bob still wraps
+  in `null.Val[T]` but sqld-gen-go emits as a bare value, → `.GetOrZero()`. The
+  direction is bob → sqld only; there is no reverse method. This **removes the
+  nullMode-matching requirement for interop**: leave sqld-gen-go in its default
+  `pointer` mode and let the bridge convert.
 - **Runtime:** both generators' code runs on ONE `*pgxpool.Pool`; bob is wrapped
   via `bobpgx.NewPool`. sqld-gen-go's `RegisterTypes` (custom-type codecs) is
   registered once in `pgxpool.Config.AfterConnect` and inherited by both halves.
@@ -763,14 +779,16 @@ sqld's queries without conversion (compile-level test in `example/`). Scope v1:
 models, relationships, where/loaders/joins/counts. Out of scope / limitations:
 factories are opt-in (bob needs a random expression per type, unavailable for
 externally-owned composites/`pgtype.*`); bob's query-folder codegen is unused
-(sqld owns queries). **Nullable-wrapper alignment is now selectable:** with
-`nullMode: opt` on both plugins, sqld-gen-go emits `null.Val[T]` for nullable
-model *and* row fields, matching bob's nullable model field exactly — so model
-and row field types align (a nullable composite result column scans via
+(sqld owns queries). **Interop no longer needs matching nullMode:** the
+auto-emitted `ToSqld()` bridge converts bob's `null.Val[T]` model fields into
+whatever sqld-gen-go produces, so sqld-gen-go can stay in its default `pointer`
+mode (byte-identical historical output) while bob keeps `null.Val[T]`. Matching
+`nullMode: opt` on both plugins is still *available* if you want the struct field
+types themselves to align (then a nullable composite result column scans via
 `null.FromPtr` glue, since pgx cannot carry a non-null composite through
-`null.Val`'s `sql.Scanner`). Query params are unaffected (they stay `*T`/value-
-typed — sqld-internal, not consumed by bob). The default `pointer` mode keeps the
-historical `*T` model/row fields (byte-identical output). Docs: `docs/bob.md`.
+`null.Val`'s `sql.Scanner`), but it is not required. Query params are unaffected
+(they stay `*T`/value-typed — sqld-internal, not consumed by bob). Docs:
+`docs/bob.md`.
 
 ---
 

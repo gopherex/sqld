@@ -60,6 +60,17 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 	if err := gen.Run[any, any, any](context.Background(), state, driver, outPlugins...); err != nil {
 		return nil, fmt.Errorf("bob gen: %w", err)
 	}
+
+	// When the shared leaf-type package is configured, emit a ToSqld bridge on
+	// every bob model: a field-copy into sqld-gen-go's flat model that unwraps
+	// bob's null.Val[T] back to what sqld-gen-go emits. This auto-enables the
+	// interop without requiring nullMode to match sqld-gen-go.
+	if opts.TypesPackage != "" {
+		if err := generateBridge(req, opts, driver.mapper); err != nil {
+			return nil, fmt.Errorf("bob gen bridge: %w", err)
+		}
+	}
+
 	// bob already wrote the files into out; nothing for the host to write.
 	return &pluginv1.GenerateResponse{}, nil
 }
