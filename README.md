@@ -14,7 +14,7 @@ sqld is an open alternative to **sqlc + Atlas**. sqlc lacks dynamic queries; Atl
 - **Open migrator with schema-diff generation** — `sqld-migrate generate <name>` diffs your declarative `schema.sql` against the current migration history via ephemeral Postgres (testcontainers or `--dev-url`) and writes the new migration with up + down DDL. Fully open; nothing is behind a paywall.
 - **`embed.FS` auto-apply** — embed migrations in your binary and call `migrate.Migrate(ctx, pool, migrationsFS)` to apply pending migrations on startup.
 - **Plugin architecture** — code generators implement a `Generator` gRPC service contract; the host invokes them over stdio (binary/command) or as WASM modules (wazero). Plugins depend only on the public proto contract and can be written in any language.
-- **ORM ⊕ sqlc via bob** — `sqld-gen-bob` feeds the same IR into [stephenafamo/bob](https://github.com/stephenafamo/bob) to generate a full Go ORM (models, relationships, eager loading, typed where/loaders/joins) that **shares one canonical Go type per column** with the `sqld-gen-go` query code and runs on one `*pgxpool.Pool`. See [docs/bob.md](docs/bob.md).
+- **ORM ⊕ sqlc via bob** — `sqld-gen-bob` feeds the same IR into [stephenafamo/bob](https://github.com/stephenafamo/bob) to generate a full Go ORM (models, relationships, eager loading, typed where/loaders/joins) that **shares one canonical Go type per column** with the `sqld-gen-go` query code and runs on one `*pgxpool.Pool`. See [docs/cmd/sqld-gen-bob.md](docs/cmd/sqld-gen-bob.md).
 
 ---
 
@@ -268,9 +268,20 @@ make example-wasm        # generate example/gen/dbwasm/ via the WASM transport
 
 ## Documentation
 
-- [`docs/adr.md`](docs/adr.md) — architecture decision records
+**Start here:** [`docs/architecture.md`](docs/architecture.md) — how the whole project fits together (the IR hub, the SQL→IR pipeline, the plugin model, the ORM ⊕ sqlc symbiosis, the repo/module layout).
+
+**Per-command references:**
+
+- [`docs/cmd/sqld.md`](docs/cmd/sqld.md) — the host CLI (`generate` / `collect` / `init`) + the full `sqld.yaml` reference
+- [`docs/cmd/sqld-gen-go.md`](docs/cmd/sqld-gen-go.md) — the built-in Go generator: query annotations, dynamic queries, type mapping, `RegisterTypes`, copyfrom/batch, WASM
+- [`docs/cmd/sqld-gen-bob.md`](docs/cmd/sqld-gen-bob.md) — the bob ORM generator (nested module): shared types, one pool, the `ToSqld()` bridge
+- [`docs/cmd/sqld-migrate.md`](docs/cmd/sqld-migrate.md) — the migrator CLI: up/down/status/generate/lint + `pkg/migrate`
+
+**Reference material:**
+
+- [`docs/adr.md`](docs/adr.md) — architecture decision records (the *why*)
 - [`docs/types.md`](docs/types.md) — full PostgreSQL → Go type mapping table
-- [`docs/migrations.md`](docs/migrations.md) — migration system reference
+- [`docs/migrations.md`](docs/migrations.md) — migration file format, diff generation, library use
 
 ---
 

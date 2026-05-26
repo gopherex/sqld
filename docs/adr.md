@@ -795,7 +795,7 @@ types themselves to align (then a nullable composite result column scans via
 `null.FromPtr` glue, since pgx cannot carry a non-null composite through
 `null.Val`'s `sql.Scanner`), but it is not required. Query params are unaffected
 (they stay `*T`/value-typed — sqld-internal, not consumed by bob). Docs:
-`docs/bob.md`.
+`docs/cmd/sqld-gen-bob.md`.
 
 ---
 
