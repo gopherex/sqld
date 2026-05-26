@@ -24,6 +24,13 @@ type Queries struct {
 
 func New(db DBTX) *Queries { return &Queries{db: db} }
 
+type OrderDir string
+
+const (
+	OrderAsc  OrderDir = "ASC"
+	OrderDesc OrderDir = "DESC"
+)
+
 const getUserSQL = `SELECT id, email, status FROM app.users WHERE id = $1;`
 
 type GetUserRow struct {
@@ -135,12 +142,18 @@ func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (i
 	return tag.RowsAffected(), err
 }
 
-var searchUsersOrderBy = map[string]string{"created_at": "created_at", "email": "email"}
+type SearchUsersOrderBy string
+
+const (
+	SearchUsersOrderByCreatedAt SearchUsersOrderBy = "created_at"
+	SearchUsersOrderByEmail     SearchUsersOrderBy = "email"
+)
 
 type SearchUsersParams struct {
-	Name    *any
-	Ids     []int64
-	OrderBy string
+	Email    *any
+	Ids      []int64
+	OrderBy  SearchUsersOrderBy
+	OrderDir OrderDir
 }
 
 type SearchUsersRow struct {
@@ -151,24 +164,27 @@ type SearchUsersRow struct {
 
 func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]SearchUsersRow, error) {
 	var b strings.Builder
+	b.WriteString("SELECT id, email, status FROM app.users")
 	var args []any
-	b.WriteString("SELECT id, email, status FROM app.users\nWHERE true")
-	if arg.Name != nil {
-		args = append(args, *arg.Name)
-		fmt.Fprintf(&b, " AND email = $%d", len(args))
+	var conds []string
+	if arg.Email != nil {
+		args = append(args, *arg.Email)
+		conds = append(conds, fmt.Sprintf("email = $%d", len(args)))
 	}
 	if len(arg.Ids) > 0 {
 		args = append(args, arg.Ids)
-		fmt.Fprintf(&b, " AND id = ANY($%d)", len(args))
+		conds = append(conds, fmt.Sprintf("id = ANY($%d)", len(args)))
+	}
+	if len(conds) > 0 {
+		b.WriteString(" WHERE " + strings.Join(conds, " AND "))
 	}
 	if arg.OrderBy != "" {
-		col, ok := searchUsersOrderBy[arg.OrderBy]
-		if !ok {
-			return nil, fmt.Errorf("invalid order by: %s", arg.OrderBy)
+		dir := "ASC"
+		if arg.OrderDir == OrderDesc {
+			dir = "DESC"
 		}
-		fmt.Fprintf(&b, " ORDER BY %s", col)
+		fmt.Fprintf(&b, " ORDER BY %s %s", string(arg.OrderBy), dir)
 	}
-	b.WriteString(";")
 	rows, err := q.db.Query(ctx, b.String(), args...)
 	if err != nil {
 		return nil, err

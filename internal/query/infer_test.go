@@ -1,6 +1,7 @@
 package query
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/yaroher/sqld/internal/catalog"
@@ -102,6 +103,45 @@ func TestInferParamInJoinOn(t *testing.T) {
 	Infer(qs[0], cat, &d)
 	if len(qs[0].GetParameters()) != 1 {
 		t.Fatalf("join-on params = %d, want 1", len(qs[0].GetParameters()))
+	}
+}
+
+// TestInferNamedParam verifies end-to-end: a query that uses @email named
+// param is rewritten to $1 by ParseQueries, and after Infer the parameter
+// carries Name="email", Number=1, and its type resolved from the catalog.
+func TestInferNamedParam(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TABLE users(id bigint primary key, email text not null);")
+	cat, _ := catalog.Build(stmts)
+	qs, err := ParseQueries("-- name: GetByEmail :one\nSELECT id FROM users WHERE email = @email;\n", "q.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 1 {
+		t.Fatalf("queries=%d", len(qs))
+	}
+	q := qs[0]
+	// Sql must contain $1, not @email.
+	if !strings.Contains(q.GetSql(), "$1") {
+		t.Errorf("Sql=%q does not contain $1", q.GetSql())
+	}
+	if strings.Contains(q.GetSql(), "@email") {
+		t.Errorf("Sql=%q still contains @email", q.GetSql())
+	}
+	var d catalog.Diagnostics
+	Infer(q, cat, &d)
+	params := q.GetParameters()
+	if len(params) != 1 {
+		t.Fatalf("params=%d want 1", len(params))
+	}
+	p := params[0]
+	if p.GetNumber() != 1 {
+		t.Errorf("Number=%d want 1", p.GetNumber())
+	}
+	if p.GetName() != "email" {
+		t.Errorf("Name=%q want email", p.GetName())
+	}
+	if p.GetType() == nil || p.GetType().GetPgName() != "text" {
+		t.Errorf("Type=%v want text", p.GetType())
 	}
 }
 

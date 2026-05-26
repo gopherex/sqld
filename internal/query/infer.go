@@ -29,7 +29,16 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	// ------------------------------------------------------------------ //
 	// 1. Collect all parameter refs from the full AST.
 	// ------------------------------------------------------------------ //
+	// Seed paramMap from any parameters already set on the query (e.g. named
+	// params seeded by ParseQueries via rewriteNamedParams).  This ensures
+	// that Infer fills in Type/Nullable/Column on the existing entries rather
+	// than creating duplicates, so the original Name is preserved.
 	paramMap := make(map[uint32]*pluginv1.QueryParameter) // keyed by position
+	for _, p := range q.GetParameters() {
+		if p != nil && p.GetNumber() > 0 {
+			paramMap[p.GetNumber()] = p
+		}
+	}
 	collectParams(q.Ast, paramMap)
 
 	// ------------------------------------------------------------------ //

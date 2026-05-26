@@ -27,33 +27,20 @@ func Info() *pluginv1.GetInfoResponse {
 			CommentStyles: []string{"--", "/* */"},
 			Annotations: []*pluginv1.AnnotationDef{
 				{
+					// @if — FLAG, trailing on a WHERE condition line → that condition is optional.
 					Name: "if",
 					Value: &pluginv1.AnnotationValueSpec{
-						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_POSITIONAL,
-						Fields: []*pluginv1.FieldSpec{
-							{Name: "condition", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT},
-						},
+						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_FLAG,
 					},
 				},
 				{
-					Name:  "endif",
-					Value: &pluginv1.AnnotationValueSpec{Form: pluginv1.AnnotationForm_ANNOTATION_FORM_FLAG},
-				},
-				{
-					Name: "slice",
-					Value: &pluginv1.AnnotationValueSpec{
-						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_POSITIONAL,
-						Fields: []*pluginv1.FieldSpec{
-							{Name: "param", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT},
-						},
-					},
-				},
-				{
+					// @orderby col1,col2 — LIST of column idents → runtime ORDER BY restricted
+					// to those columns, as a typed enum + direction.
 					Name: "orderby",
 					Value: &pluginv1.AnnotationValueSpec{
-						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_KEYED,
-						Fields: []*pluginv1.FieldSpec{
-							{Name: "allow", Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_STRING},
+						Form: pluginv1.AnnotationForm_ANNOTATION_FORM_LIST,
+						Element: &pluginv1.FieldSpec{
+							Type: irv1.AnnotationArgType_ANNOTATION_ARG_TYPE_IDENT,
 						},
 					},
 				},
@@ -338,11 +325,16 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 		}
 	}
 
-	// Determine if any query is dynamic (has annotations).
+	// Determine if any query is dynamic (has @if or @orderby annotations).
 	hasDynamic := false
 	for _, q := range queries {
-		if len(annotByQuery[q.GetName()]) > 0 {
-			hasDynamic = true
+		for _, a := range annotByQuery[q.GetName()] {
+			if a.GetName() == "if" || a.GetName() == "orderby" {
+				hasDynamic = true
+				break
+			}
+		}
+		if hasDynamic {
 			break
 		}
 	}
@@ -368,7 +360,14 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 
 	for _, q := range queries {
 		qAnns := annotByQuery[q.GetName()]
-		isDynamic := len(qAnns) > 0
+		// A query is dynamic if it has any @if or @orderby annotation.
+		isDynamic := false
+		for _, a := range qAnns {
+			if a.GetName() == "if" || a.GetName() == "orderby" {
+				isDynamic = true
+				break
+			}
+		}
 
 		qCols := q.GetColumns()
 		var cols []qField
@@ -449,6 +448,27 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 
 	sb.WriteString("type Queries struct {\n\tdb DBTX\n}\n\n")
 	sb.WriteString("func New(db DBTX) *Queries { return &Queries{db: db} }\n\n")
+
+	// Emit shared OrderDir type once if any query has @orderby.
+	hasAnyOrderBy := false
+	for _, de := range dynamicEntries {
+		for _, a := range de.anns {
+			if a.GetName() == "orderby" {
+				hasAnyOrderBy = true
+				break
+			}
+		}
+		if hasAnyOrderBy {
+			break
+		}
+	}
+	if hasAnyOrderBy {
+		sb.WriteString("type OrderDir string\n\n")
+		sb.WriteString("const (\n")
+		sb.WriteString("\tOrderAsc  OrderDir = \"ASC\"\n")
+		sb.WriteString("\tOrderDesc OrderDir = \"DESC\"\n")
+		sb.WriteString(")\n\n")
+	}
 
 	for _, se := range staticEntries {
 		writeQueryCode(&sb, se.qi)
@@ -591,32 +611,40 @@ func formatSource(src, filename string) ([]byte, []*pluginv1.Diagnostic) {
 	return formatted, nil
 }
 
-// ---- dynamic query generation ----
+// ---- dynamic query generation (WHERE-aware, named-param model) ----
 
-// dynSegKind classifies a segment within a dynamic query's SQL.
-type dynSegKind int
+// whereRe matches the top-level WHERE keyword (word-boundary, case-insensitive).
+var whereRe = regexp.MustCompile(`(?i)\bWHERE\b`)
 
-const (
-	dynSegStatic  dynSegKind = iota // verbatim SQL text (may contain $N placeholders)
-	dynSegIf                        // @if region
-	dynSegSlice                     // @slice region
-	dynSegOrderBy                   // @orderby marker
-)
+// paramNumRe matches $N placeholders.
+var paramNumRe = regexp.MustCompile(`\$(\d+)`)
 
-type dynSegment struct {
-	kind        dynSegKind
-	text        string // static: SQL text; conditional: fragment SQL
-	fieldName   string // if/slice: Go field name (PascalCase)
-	goType      string // slice: element type; if: pointer-base type
-	allowList   string // orderby: comma-sep allowed columns
-	paramNumber uint32 // for if/slice: the $N inside the fragment
+// anyParamRe detects the ANY($N) pattern (slice parameter).
+var anyParamRe = regexp.MustCompile(`(?i)\bANY\(\$\d+\)`)
+
+// trailingCommentRe strips a trailing -- ... or /* ... */ comment from a line.
+var trailingCommentRe = regexp.MustCompile(`(?:--[^\n]*|/\*.*?\*/)$`)
+
+// conditionInfo describes one parsed WHERE condition.
+type conditionInfo struct {
+	// condSQL is the cleaned condition SQL (without leading AND/OR and trailing comment).
+	condSQL string
+	// isOptional is true if an @if annotation's offset lands on this line.
+	isOptional bool
+	// isSlice is true if the condition contains ANY($N).
+	isSlice bool
+	// paramNum is the $N (first) found in the condition (0 if none).
+	paramNum uint32
+	// fieldName is the PascalCase Go field name derived from the parameter name.
+	fieldName string
+	// goType is the Go element type (for slices) or base type (for optionals/required).
+	goType string
 }
 
-// writeDynamicQueryCode generates a query method that builds SQL at runtime.
+// writeDynamicQueryCode generates a WHERE-aware dynamic query method.
 func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.AnnotationValue, cols []qField) {
 	sql := q.GetSql()
 	methodName := pascal(q.GetName())
-	lowerName := lowerCamel(q.GetName())
 
 	// Build a map from param number to QueryParameter.
 	paramByNum := make(map[uint32]*pluginv1.QueryParameter)
@@ -624,111 +652,160 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 		paramByNum[p.GetNumber()] = p
 	}
 
-	// Sort annotations by StartOffset.
-	sorted := make([]*irv1.AnnotationValue, len(anns))
-	copy(sorted, anns)
-	sort.Slice(sorted, func(i, j int) bool {
-		si := sorted[i].GetTarget().GetSource().GetStartOffset()
-		sj := sorted[j].GetTarget().GetSource().GetStartOffset()
-		return si < sj
-	})
-
-	// Pair opens (if/slice) with the next endif, in order.
-	// Build a list of "events" over the SQL: open, close, orderby.
-	type annEvent struct {
-		name     string
-		startOff uint64
-		endOff   uint64
-		argValue string // condition/param name or allow list
-	}
-	var events []annEvent
-	for _, a := range sorted {
-		src := a.GetTarget().GetSource()
-		argVal := ""
-		if len(a.GetArgs()) > 0 {
-			argVal = a.GetArgs()[0].GetStringValue()
+	// Collect @if and @orderby annotations.
+	var ifAnns []*irv1.AnnotationValue
+	var orderbyAnns []*irv1.AnnotationValue
+	for _, a := range anns {
+		switch a.GetName() {
+		case "if":
+			ifAnns = append(ifAnns, a)
+		case "orderby":
+			orderbyAnns = append(orderbyAnns, a)
 		}
-		events = append(events, annEvent{
-			name:     a.GetName(),
-			startOff: src.GetStartOffset(),
-			endOff:   src.GetEndOffset(),
-			argValue: argVal,
-		})
 	}
 
-	// Walk events and build segments, tracking excluded byte ranges.
-	// excluded ranges = all directive comment byte ranges.
-	type byteRange struct{ start, end uint64 }
-	var excluded []byteRange
-	for _, ev := range events {
-		excluded = append(excluded, byteRange{ev.startOff, ev.endOff})
-	}
+	// ----- Step 1: Locate WHERE keyword -----
+	loc := whereRe.FindStringIndex(sql)
+	var base string
+	var whereBody string
+	if loc != nil {
+		base = strings.TrimRight(sql[:loc[0]], " \t\n\r")
+		rest := sql[loc[1]:]
 
-	// Build ordered segments by processing events left-to-right.
-	// We maintain a cursor over the SQL and pop off each directive.
-	var segments []dynSegment
-	cursor := uint64(0)
+		// Strip trailing semicolon.
+		rest = strings.TrimRight(rest, " \t\n\r")
+		rest = strings.TrimSuffix(rest, ";")
 
-	// Stack of open regions: each entry = index into events of the opener.
-	type openEntry struct {
-		evIdx     int
-		openEvent annEvent
-	}
-	var openStack []openEntry
-
-	for i, ev := range events {
-		switch ev.name {
-		case "if", "slice":
-			// Emit static text from cursor to start of this directive.
-			if ev.startOff > cursor {
-				staticText := strings.TrimRight(sql[cursor:ev.startOff], " \t\n\r")
-				if staticText != "" {
-					segments = append(segments, dynSegment{kind: dynSegStatic, text: staticText})
+		// Remove any @orderby comment lines from whereBody.
+		// We identify @orderby directive lines by checking offsets.
+		// Build set of byte ranges to remove (orderby annotation source spans within whereBody).
+		// The offsets are relative to the whole sql string, so we need to strip them from rest
+		// by converting absolute offsets to positions within rest.
+		whereStart := uint64(loc[1])
+		restLines := strings.Split(rest, "\n")
+		var filteredLines []string
+		lineStart := whereStart
+		for _, line := range restLines {
+			lineEnd := lineStart + uint64(len(line)) + 1 // +1 for \n
+			isOrderByLine := false
+			for _, oa := range orderbyAnns {
+				src := oa.GetTarget().GetSource()
+				// If the @orderby annotation falls within this line, skip the line.
+				if src.GetStartOffset() >= lineStart && src.GetStartOffset() < lineEnd {
+					isOrderByLine = true
+					break
 				}
 			}
-			cursor = ev.endOff
-			openStack = append(openStack, openEntry{evIdx: i, openEvent: ev})
+			if !isOrderByLine {
+				filteredLines = append(filteredLines, line)
+			}
+			lineStart = lineEnd
+		}
+		whereBody = strings.Join(filteredLines, "\n")
+	} else {
+		// No WHERE clause — treat whole SQL as base with no conditions.
+		base = strings.TrimRight(sql, " \t\n\r")
+		base = strings.TrimSuffix(base, ";")
+		whereBody = ""
+	}
 
-		case "endif":
-			if len(openStack) == 0 {
-				// Orphan endif — treat as static exclusion.
-				cursor = ev.endOff
+	// ----- Step 2: Split whereBody into per-line conditions -----
+	// Build a map: for each @if annotation, record its start offset.
+	type ifOff struct {
+		start uint64
+		end   uint64
+	}
+	var ifOffsets []ifOff
+	for _, a := range ifAnns {
+		src := a.GetTarget().GetSource()
+		ifOffsets = append(ifOffsets, ifOff{src.GetStartOffset(), src.GetEndOffset()})
+	}
+
+	// Parse conditions line-by-line.
+	var conditions []conditionInfo
+	if whereBody != "" && loc != nil {
+		// Absolute byte offset of the start of whereBody in sql.
+		// After WHERE keyword end = loc[1].
+		// We already filtered out orderby lines; but we need the correct offsets.
+		// Recompute line offsets against the original sql to detect @if.
+		whereEnd := loc[1] // absolute offset of char after WHERE
+		currentOff := uint64(whereEnd)
+		rawLines := strings.Split(sql[whereEnd:], "\n")
+		for _, rawLine := range rawLines {
+			lineLen := uint64(len(rawLine))
+			lineStartOff := currentOff
+			lineEndOff := currentOff + lineLen
+
+			// Trim the line.
+			trimmed := strings.TrimSpace(rawLine)
+
+			// Skip blank lines and @orderby lines.
+			if trimmed == "" {
+				currentOff = lineEndOff + 1 // +1 for \n
 				continue
 			}
-			opener := openStack[len(openStack)-1]
-			openStack = openStack[:len(openStack)-1]
-
-			// Fragment text: from end of opener directive to start of this endif.
-			fragText := ""
-			if ev.startOff > opener.openEvent.endOff {
-				fragText = strings.TrimSpace(sql[opener.openEvent.endOff:ev.startOff])
+			isOrderByLine := false
+			for _, oa := range orderbyAnns {
+				src := oa.GetTarget().GetSource()
+				if src.GetStartOffset() >= lineStartOff && src.GetStartOffset() <= lineEndOff {
+					isOrderByLine = true
+					break
+				}
+			}
+			if isOrderByLine {
+				currentOff = lineEndOff + 1
+				continue
 			}
 
-			// Find the $N inside the fragment.
-			paramNum := findFirstParamNum(fragText)
+			// Strip leading AND/OR keyword.
+			condSQL := trimmed
+			upper := strings.ToUpper(condSQL)
+			if strings.HasPrefix(upper, "AND ") {
+				condSQL = strings.TrimSpace(condSQL[4:])
+			} else if strings.HasPrefix(upper, "OR ") {
+				condSQL = strings.TrimSpace(condSQL[3:])
+			}
 
-			var fieldName, goTypeStr string
-			switch opener.openEvent.name {
-			case "if":
-				fieldName = pascal(opener.openEvent.argValue)
-				// Get the param's base type (no pointer — we'll add * when generating).
-				if p, ok := paramByNum[paramNum]; ok {
-					gt, _ := goType(p.GetType(), false)
-					goTypeStr = gt
-				} else {
-					goTypeStr = "any"
+			// Strip trailing -- ... or /* ... */ comment.
+			condSQL = strings.TrimSpace(trailingCommentRe.ReplaceAllString(condSQL, ""))
+
+			// Strip a trailing statement terminator so a lone ";" line (or a
+			// ";" appended to the last condition) is not treated as a condition.
+			condSQL = strings.TrimSpace(strings.TrimSuffix(condSQL, ";"))
+
+			if condSQL == "" {
+				currentOff = lineEndOff + 1
+				continue
+			}
+
+			// Check if an @if annotation falls on this line.
+			isOptional := false
+			for _, iof := range ifOffsets {
+				if iof.start >= lineStartOff && iof.start <= lineEndOff {
+					isOptional = true
+					break
 				}
-				segments = append(segments, dynSegment{
-					kind:        dynSegIf,
-					text:        fragText,
-					fieldName:   fieldName,
-					goType:      goTypeStr,
-					paramNumber: paramNum,
-				})
-			case "slice":
-				fieldName = pascal(opener.openEvent.argValue)
-				// Determine element type.
-				if p, ok := paramByNum[paramNum]; ok {
+			}
+
+			// Detect slice: condition contains ANY($N).
+			isSlice := anyParamRe.MatchString(condSQL)
+
+			// Find first $N in the condition.
+			var paramNum uint32
+			if m := paramNumRe.FindStringSubmatch(condSQL); m != nil {
+				fmt.Sscanf(m[1], "%d", &paramNum)
+			}
+
+			// Determine field name and Go type from parameter.
+			var fieldName, goTypeStr string
+			if p, ok := paramByNum[paramNum]; ok {
+				pName := p.GetName()
+				if pName == "" {
+					pName = fmt.Sprintf("arg%d", paramNum)
+				}
+				fieldName = pascal(pName)
+				if isSlice {
+					// Slice: determine element type.
 					tr := p.GetType()
 					if tr != nil && tr.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
 						gt, _ := goType(tr.GetElement(), false)
@@ -738,100 +815,74 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 						goTypeStr = gt
 					}
 				} else {
-					goTypeStr = "any"
+					gt, _ := goType(p.GetType(), false)
+					goTypeStr = gt
 				}
-				segments = append(segments, dynSegment{
-					kind:        dynSegSlice,
-					text:        fragText,
-					fieldName:   fieldName,
-					goType:      goTypeStr,
-					paramNumber: paramNum,
-				})
+			} else {
+				fieldName = fmt.Sprintf("Arg%d", paramNum)
+				goTypeStr = "any"
 			}
-			cursor = ev.endOff
 
-		case "orderby":
-			// Emit static text before this directive.
-			if ev.startOff > cursor {
-				staticText := strings.TrimRight(sql[cursor:ev.startOff], " \t\n\r")
-				if staticText != "" {
-					segments = append(segments, dynSegment{kind: dynSegStatic, text: staticText})
-				}
-			}
-			segments = append(segments, dynSegment{
-				kind:      dynSegOrderBy,
-				allowList: ev.argValue,
+			conditions = append(conditions, conditionInfo{
+				condSQL:    condSQL,
+				isOptional: isOptional,
+				isSlice:    isSlice,
+				paramNum:   paramNum,
+				fieldName:  fieldName,
+				goType:     goTypeStr,
 			})
-			cursor = ev.endOff
+
+			currentOff = lineEndOff + 1
 		}
 	}
 
-	// Emit any trailing static text.
-	if int(cursor) < len(sql) {
-		staticText := strings.TrimRight(sql[cursor:], " \t\n\r")
-		if staticText != "" {
-			segments = append(segments, dynSegment{kind: dynSegStatic, text: staticText})
-		}
-	}
-
-	// Collect Params struct fields.
-	type paramField struct {
-		name      string
-		goType    string // full type including * or []
-		kind      dynSegKind
-		allowList string
-	}
-	var fields []paramField
-	hasOrderBy := false
-	for _, seg := range segments {
-		switch seg.kind {
-		case dynSegIf:
-			fields = append(fields, paramField{name: seg.fieldName, goType: "*" + seg.goType, kind: dynSegIf})
-		case dynSegSlice:
-			fields = append(fields, paramField{name: seg.fieldName, goType: "[]" + seg.goType, kind: dynSegSlice})
-		case dynSegOrderBy:
-			if !hasOrderBy {
-				fields = append(fields, paramField{name: "OrderBy", goType: "string", kind: dynSegOrderBy, allowList: seg.allowList})
-				hasOrderBy = true
+	// ----- Step 3: Parse @orderby columns -----
+	var orderByCols []string
+	for _, a := range orderbyAnns {
+		for _, arg := range a.GetArgs() {
+			col := strings.TrimSpace(arg.GetStringValue())
+			if col == "" {
+				col = strings.TrimSpace(arg.GetRaw())
+			}
+			if col != "" {
+				orderByCols = append(orderByCols, col)
 			}
 		}
 	}
+	hasOrderBy := len(orderByCols) > 0
 
-	// Emit orderby allowlist map var (before the method).
+	// ----- Step 4: Emit typed OrderBy enum for this query -----
+	orderByTypeName := methodName + "OrderBy"
 	if hasOrderBy {
-		mapVarName := lowerName + "OrderBy"
-		// Collect allowed columns.
-		var allowCols []string
-		for _, seg := range segments {
-			if seg.kind == dynSegOrderBy {
-				for _, col := range strings.Split(seg.allowList, ",") {
-					col = strings.TrimSpace(col)
-					if col != "" {
-						allowCols = append(allowCols, col)
-					}
-				}
-				break
-			}
+		sb.WriteString(fmt.Sprintf("type %s string\n\n", orderByTypeName))
+		sb.WriteString("const (\n")
+		for _, col := range orderByCols {
+			constName := orderByTypeName + pascal(col)
+			sb.WriteString(fmt.Sprintf("\t%s %s = %q\n", constName, orderByTypeName, col))
 		}
-		sb.WriteString(fmt.Sprintf("var %s = map[string]string{", mapVarName))
-		for i, col := range allowCols {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(fmt.Sprintf("%q: %q", col, col))
-		}
-		sb.WriteString("}\n\n")
+		sb.WriteString(")\n\n")
 	}
 
-	// Params struct.
+	// ----- Step 5: Emit Params struct -----
 	paramsStructName := methodName + "Params"
 	sb.WriteString(fmt.Sprintf("type %s struct {\n", paramsStructName))
-	for _, f := range fields {
-		sb.WriteString(fmt.Sprintf("\t%s %s\n", f.name, f.goType))
+	for _, cond := range conditions {
+		switch {
+		case cond.isSlice:
+			sb.WriteString(fmt.Sprintf("\t%s []%s\n", cond.fieldName, cond.goType))
+		case cond.isOptional:
+			sb.WriteString(fmt.Sprintf("\t%s *%s\n", cond.fieldName, cond.goType))
+		default:
+			sb.WriteString(fmt.Sprintf("\t%s %s\n", cond.fieldName, cond.goType))
+		}
+	}
+	if hasOrderBy {
+		sb.WriteString(fmt.Sprintf("\tOrderBy %s\n", orderByTypeName))
+		sb.WriteString("\tOrderDir OrderDir\n")
 	}
 	sb.WriteString("}\n\n")
 
-	// Row struct.
+	// ----- Step 6: Emit Row struct -----
 	rowTypeName := methodName + "Row"
 	isExec := isExecCommand(q.GetCommand())
 	if !isExec && len(cols) > 0 {
@@ -842,7 +893,7 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 		sb.WriteString("}\n\n")
 	}
 
-	// Method signature.
+	// ----- Step 7: Emit method -----
 	var retType string
 	switch {
 	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_ONE:
@@ -863,46 +914,50 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 			methodName, paramsStructName, retType))
 	}
 
-	// Body: build SQL string at runtime.
+	// Build SQL at runtime.
 	sb.WriteString("\tvar b strings.Builder\n")
+	sb.WriteString(fmt.Sprintf("\tb.WriteString(%q)\n", base))
 	sb.WriteString("\tvar args []any\n")
+	sb.WriteString("\tvar conds []string\n")
 
-	mapVarName := lowerName + "OrderBy"
+	for _, cond := range conditions {
+		// Rewrite the condition SQL: replace $N with $%d (using len(args) after append).
+		rewritten := paramNumRe.ReplaceAllString(cond.condSQL, "$%d")
 
-	for _, seg := range segments {
-		switch seg.kind {
-		case dynSegStatic:
-			// Handle $N placeholders within the static text.
-			writeStaticSegment(sb, seg.text)
-
-		case dynSegIf:
-			// if arg.X != nil { args = append(args, *arg.X); fmt.Fprintf(&b, " ... $%d ...", len(args)) }
-			// The fragment is trimmed of surrounding whitespace, so prefix a single
-			// leading space to keep the assembled SQL separated (avoid e.g. "trueAND").
-			rewritten := " " + rewriteFragment(seg.text)
-			sb.WriteString(fmt.Sprintf("\tif arg.%s != nil {\n", seg.fieldName))
-			sb.WriteString(fmt.Sprintf("\t\targs = append(args, *arg.%s)\n", seg.fieldName))
-			sb.WriteString(fmt.Sprintf("\t\tfmt.Fprintf(&b, %q, len(args))\n", rewritten))
+		switch {
+		case cond.isSlice:
+			// Slice: included when len > 0.
+			sb.WriteString(fmt.Sprintf("\tif len(arg.%s) > 0 {\n", cond.fieldName))
+			sb.WriteString(fmt.Sprintf("\t\targs = append(args, arg.%s)\n", cond.fieldName))
+			sb.WriteString(fmt.Sprintf("\t\tconds = append(conds, fmt.Sprintf(%q, len(args)))\n", rewritten))
 			sb.WriteString("\t}\n")
-
-		case dynSegSlice:
-			// Prefix a single leading space (fragment is trimmed) so consecutive
-			// conditional fragments stay separated by exactly one space.
-			rewritten := " " + rewriteFragment(seg.text)
-			sb.WriteString(fmt.Sprintf("\tif len(arg.%s) > 0 {\n", seg.fieldName))
-			sb.WriteString(fmt.Sprintf("\t\targs = append(args, arg.%s)\n", seg.fieldName))
-			sb.WriteString(fmt.Sprintf("\t\tfmt.Fprintf(&b, %q, len(args))\n", rewritten))
+		case cond.isOptional:
+			// Optional pointer: included when != nil.
+			sb.WriteString(fmt.Sprintf("\tif arg.%s != nil {\n", cond.fieldName))
+			sb.WriteString(fmt.Sprintf("\t\targs = append(args, *arg.%s)\n", cond.fieldName))
+			sb.WriteString(fmt.Sprintf("\t\tconds = append(conds, fmt.Sprintf(%q, len(args)))\n", rewritten))
 			sb.WriteString("\t}\n")
-
-		case dynSegOrderBy:
-			sb.WriteString("\tif arg.OrderBy != \"\" {\n")
-			sb.WriteString(fmt.Sprintf("\t\tcol, ok := %s[arg.OrderBy]\n", mapVarName))
-			sb.WriteString("\t\tif !ok {\n")
-			sb.WriteString("\t\t\treturn " + dynReturnNil(q.GetCommand()) + "fmt.Errorf(\"invalid order by: %s\", arg.OrderBy)\n")
-			sb.WriteString("\t\t}\n")
-			sb.WriteString("\t\tfmt.Fprintf(&b, \" ORDER BY %s\", col)\n")
-			sb.WriteString("\t}\n")
+		default:
+			// Required: always included.
+			sb.WriteString(fmt.Sprintf("\targs = append(args, arg.%s)\n", cond.fieldName))
+			sb.WriteString(fmt.Sprintf("\tconds = append(conds, fmt.Sprintf(%q, len(args)))\n", rewritten))
 		}
+	}
+
+	// Emit WHERE clause only if any conditions are present.
+	sb.WriteString("\tif len(conds) > 0 {\n")
+	sb.WriteString("\t\tb.WriteString(\" WHERE \" + strings.Join(conds, \" AND \"))\n")
+	sb.WriteString("\t}\n")
+
+	// Emit ORDER BY block.
+	if hasOrderBy {
+		sb.WriteString("\tif arg.OrderBy != \"\" {\n")
+		sb.WriteString("\t\tdir := \"ASC\"\n")
+		sb.WriteString("\t\tif arg.OrderDir == OrderDesc {\n")
+		sb.WriteString("\t\t\tdir = \"DESC\"\n")
+		sb.WriteString("\t\t}\n")
+		sb.WriteString("\t\tfmt.Fprintf(&b, \" ORDER BY %s %s\", string(arg.OrderBy), dir)\n")
+		sb.WriteString("\t}\n")
 	}
 
 	// Execute the built query.
@@ -935,53 +990,6 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 	}
 
 	sb.WriteString("}\n\n")
-}
-
-// dynReturnNil returns the prefix to prepend before an error return for dynamic
-// queries that have non-error return types (e.g. "nil, ").
-func dynReturnNil(cmd pluginv1.QueryCommand) string {
-	switch cmd {
-	case pluginv1.QueryCommand_QUERY_COMMAND_ONE, pluginv1.QueryCommand_QUERY_COMMAND_MANY:
-		return "nil, "
-	case pluginv1.QueryCommand_QUERY_COMMAND_EXEC_ROWS:
-		return "0, "
-	default:
-		return ""
-	}
-}
-
-// findFirstParamNum scans text for the first $N and returns N.
-// Returns 0 if not found.
-func findFirstParamNum(text string) uint32 {
-	re := regexp.MustCompile(`\$(\d+)`)
-	m := re.FindStringSubmatch(text)
-	if m == nil {
-		return 0
-	}
-	var n uint32
-	fmt.Sscanf(m[1], "%d", &n)
-	return n
-}
-
-// rewriteFragment replaces the first $N in a fragment with $%d (for fmt.Fprintf).
-func rewriteFragment(text string) string {
-	re := regexp.MustCompile(`\$\d+`)
-	return re.ReplaceAllString(text, "$%d")
-}
-
-// writeStaticSegment emits b.WriteString / fmt.Fprintf calls for a static
-// SQL segment that may contain $N placeholders. Each $N is replaced with
-// a runtime-numbered $%d after appending the corresponding argument.
-// Since static segments outside any region use positional params that are
-// always present, we just emit the text as a WriteString (no args to append —
-// static params outside conditional regions are not supported in dynamic queries;
-// all params must be inside regions). If the static text has no $N we simply
-// emit a WriteString.
-func writeStaticSegment(sb *strings.Builder, text string) {
-	// For the current design, static text outside regions should not contain
-	// $N (those are always inside regions in a dynamic query). We write it
-	// literally via b.WriteString.
-	sb.WriteString(fmt.Sprintf("\tb.WriteString(%q)\n", text))
 }
 
 // ensure sort is used (it's used in uniqueSorted)

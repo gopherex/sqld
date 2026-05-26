@@ -37,7 +37,7 @@ The companion design doc with full rationale and examples lives at
 - [ADR-0025 — Go module path & go_package alignment](#adr-0025)
 - [ADR-0026 — Statement-level losslessness: MERGE + RawStatement](#adr-0026)
 - [ADR-0027 — Core engine implemented; plugin transport is stdio-framed protobuf](#adr-0027)
-- [ADR-0028 — Dynamic queries implemented (@if/@slice/@orderby → runtime builder)](#adr-0028)
+- [ADR-0028 — Dynamic queries implemented (named params, smart WHERE, typed @orderby)](#adr-0028)
 - [Semantics reference](#semantics-reference)
 
 ---
@@ -567,7 +567,7 @@ plan, subagent-driven). `Collect(cfg) (*irv1.Catalog, error)` and
 ---
 
 <a id="adr-0028"></a>
-## ADR-0028 — Dynamic queries implemented (@if/@slice/@orderby → runtime builder)
+## ADR-0028 — Dynamic queries implemented (named params, smart WHERE, typed @orderby)
 
 **Status:** accepted (implemented)
 
@@ -576,30 +576,39 @@ filters, variable IN-lists, runtime ORDER BY) — was only foundation (node_id,
 annotation model). It is now implemented end-to-end through the real pipeline.
 
 **Decision / outcome:**
-- **Directive grammar** (block or line comments in a named query's SQL):
-  `/*@if cond*/ ... /*@endif*/` (optional fragment guarded by an optional param),
-  `/*@slice param*/ ... /*@endif*/` (fragment whose `$N` param is a slice,
-  included when non-empty), `/*@orderby allow=col,col*/` (runtime ORDER BY from a
-  schema-derived allowlist). The base SQL (comments ignored by libpg_query) stays
-  valid, so column/param inference works and the result shape is fixed.
+- **Named parameters.** Queries use `@name` (not `$N`). The host rewrites
+  `@ident` → `$N` before parsing via a SQL-aware lexer that skips comments,
+  string literals, dollar-quotes, and `@`-operators (`@>`, `@@`); the name↔
+  position map is kept and each `QueryParameter` carries its `Name`.
+- **Directive grammar** (comments in a named query's WHERE clause):
+  `-- @if` trailing a condition line marks that condition OPTIONAL; a condition
+  using `= ANY(@p)` is auto-detected as a SLICE; `-- @orderby col1, col2`
+  declares an allowlist for a runtime `ORDER BY`. No `@endif`/`@slice` keywords.
+  The base SQL (comments ignored by libpg_query) stays valid, so column/param
+  inference works and the result shape is fixed.
 - **Host parses, plugin interprets** (per ADR-0016/0020): `sqld-gen-go` declares
-  these directives in its `AnnotationSchema` (`GetInfo`). The host's `Annotate`
-  scans `--` and `/* */` comments, records byte offsets within each query's SQL,
-  and binds every `AnnotationValue` to its query (`Target.QueryName`). The plugin
-  pairs opens/closes by offset, slices fragments out of `Query.Sql`, maps each
-  `$N` to its inferred `QueryParameter` type, and emits a runtime builder.
-- **Generated Go**: a `<Name>Params` struct (optional `@if` → `*T` pointer,
-  `@slice` → `[]T`, `@orderby` → `OrderBy string`), and a method that assembles
-  parameterized SQL with `strings.Builder`, **omitting absent clauses entirely**
-  (not `OR NULL`), **renumbering `$N` placeholders** in append order, validating
-  the sort column against the allowlist (no injection). Fixed typed result row.
+  the directives in its `AnnotationSchema` (`GetInfo`): `if` (FLAG), `orderby`
+  (LIST of idents). The host's `Annotate` scans `--` and `/* */` comments,
+  records byte offsets within each query's `Sql`, and binds every
+  `AnnotationValue` to its query (`Target.QueryName`). The plugin locates the
+  WHERE clause, splits it into per-line conditions, matches `@if` by offset→line,
+  reads each condition's `$N` → `QueryParameter` (name + type), and emits a
+  builder.
+- **Generated Go**: a `<Name>Params` struct — optional condition → `*T` pointer,
+  `ANY(@p)` → `[]T` slice, `@orderby` → a typed enum `<Name>OrderBy` (+ a shared
+  `OrderDir` ASC/DESC). The method assembles parameterized SQL with a
+  `strings.Builder`, collecting included conditions into `conds` and emitting
+  **a clean `WHERE c1 AND c2`** only when non-empty (no `WHERE true`, no
+  `OR NULL`), **renumbering `$N`** in append order, and appending
+  `ORDER BY <enum> <dir>` (sort column from the allowlist enum → injection-safe).
+  Fixed typed result row.
 
 **Consequences:** Typed dynamic queries — sqlc's blocking gap — work end-to-end
-(`example/queries/search.sql` → `SearchUsers`). Fragment boundaries are space-
-separated (regression-tested against the `trueAND` bug). Known gap: domain/enum
-params render as `*any` until UDT→Go typing lands (the type is correct, just
-opaque). Multi-statement/nested-region edge cases beyond one `$N` per region are
-best-effort.
+(`example/queries/search.sql` → `SearchUsers`): named params, clean dynamic
+`WHERE`, typed sort enum + direction. Known gap: domain/enum params render as
+`*any` until UDT→Go typing lands (the type is correct, just opaque). v1 condition
+splitting is per-line over a top-level `WHERE` (one `$N` per condition); nested
+OR/paren-heavy WHEREs are best-effort.
 
 ---
 
