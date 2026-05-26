@@ -109,6 +109,58 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestLint(t *testing.T) {
+	root := t.TempDir()
+	migDir := filepath.Join(root, "migrations")
+	if err := os.MkdirAll(migDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A destructive migration: DROP TABLE -> error finding, non-zero exit.
+	destructive := filepath.Join(migDir, "001_drop_users.sql")
+	if err := os.WriteFile(destructive, []byte("-- sqld:up\nDROP TABLE users;\n-- sqld:down\nCREATE TABLE users(id int);\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := writeConfig(t, root, migDir, "")
+
+	var out, errb bytes.Buffer
+	code := run([]string{"lint", "-c", cfgPath}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("lint: expected non-zero exit on destructive migration, got 0\nstdout=%q\nstderr=%q", out.String(), errb.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "destructive-drop") {
+		t.Fatalf("lint: expected destructive-drop finding, got %q", s)
+	}
+	if !strings.Contains(s, "users") {
+		t.Fatalf("lint: expected the dropped table name in output, got %q", s)
+	}
+	if !strings.Contains(s, "001") {
+		t.Fatalf("lint: expected the migration version in output, got %q", s)
+	}
+}
+
+func TestLintClean(t *testing.T) {
+	root := t.TempDir()
+	migDir := filepath.Join(root, "migrations")
+	if err := os.MkdirAll(migDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	clean := filepath.Join(migDir, "001_create_users.sql")
+	if err := os.WriteFile(clean, []byte("-- sqld:up\nCREATE TABLE users(id int);\n-- sqld:down\nDROP TABLE users;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := writeConfig(t, root, migDir, "")
+
+	var out, errb bytes.Buffer
+	code := run([]string{"lint", "-c", cfgPath}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("lint: expected zero exit on clean migration, got %d\nstdout=%q\nstderr=%q", code, out.String(), errb.String())
+	}
+}
+
 func TestHash(t *testing.T) {
 	root := t.TempDir()
 	migDir := filepath.Join(root, "migrations")
