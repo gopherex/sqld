@@ -8,8 +8,13 @@ import (
 
 // The pg→Go type mapping lives in the shared pkg/gotypes package so that both
 // sqld-gen-go and sqld-gen-bob emit identical Go types. The shims below keep the
-// existing call sites in gogen.go (and the package tests) unchanged; sqld-gen-go
-// always uses the historical Pointer null mode.
+// existing call sites in gogen.go (and the package tests) unchanged.
+//
+// resolveGoType (model + row column fields) honours the configurable goNullMode
+// (Pointer default | Opt), set in Generate from the "nullMode" option, so opt
+// mode emits null.Val[T] for nullable fields to match sqld-gen-bob.
+// resolveGoParamType keeps the historical Pointer mode unconditionally — query
+// params are sqld-internal and not consumed by bob.
 
 type udtRegistry = gotypes.Registry
 
@@ -24,7 +29,7 @@ func collectUsedExtensionTypes(c *irv1.Catalog, q []*pluginv1.Query) []string {
 }
 
 func resolveGoType(reg *udtRegistry, ov overrides, columnID string, t *irv1.TypeRef, nullable bool) (string, []string) {
-	return gotypes.NewMapper2(reg, ov, gotypes.Pointer).GoType(columnID, t, nullable)
+	return gotypes.NewMapper2(reg, ov, goNullMode).GoType(columnID, t, nullable)
 }
 
 func resolveGoParamType(reg *udtRegistry, ov overrides, columnID string, t *irv1.TypeRef, nullable bool) (string, []string) {

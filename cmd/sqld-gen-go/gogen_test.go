@@ -800,6 +800,178 @@ func TestGenerateExecResultAndLastID(t *testing.T) {
 	}
 }
 
+// TestNullModeOpt verifies that with nullMode: opt the generated MODEL and ROW
+// struct fields wrap nullable scalars/enums in null.Val[T] (matching
+// sqld-gen-bob), import github.com/aarondl/opt/null, and that a nullable
+// COMPOSITE result column produces a null.Val[<Composite>] field plus scan glue
+// (a *<Composite> temp scanned then assigned via null.FromPtr). Param types are
+// unaffected. It also confirms pointer-mode output is unchanged for the same IR.
+func TestNullModeOpt(t *testing.T) {
+	addrComposite := &irv1.CompositeType{
+		Name: &irv1.QualifiedName{Schema: "app", Name: "address"},
+		Fields: []*irv1.CompositeField{
+			{Name: "street", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "text"}},
+		},
+	}
+	addrRef := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "address"}
+
+	mkReq := func(opts []byte) *pluginv1.GenerateRequest {
+		return &pluginv1.GenerateRequest{
+			OutDir:  "gen/db",
+			Options: opts,
+			Catalog: &irv1.Catalog{Schemas: []*irv1.Schema{{
+				Name:       "app",
+				Enums:      []*irv1.EnumType{{Name: &irv1.QualifiedName{Schema: "app", Name: "status"}, Labels: []string{"active", "banned"}}},
+				Composites: []*irv1.CompositeType{addrComposite},
+				Tables: []*irv1.Table{{
+					Name: &irv1.QualifiedName{Schema: "app", Name: "users"},
+					Columns: []*irv1.Column{
+						{Id: "app.users.id", Name: "id", Type: &irv1.TypeRef{PgName: "int8"}, Nullable: false},
+						{Id: "app.users.bio", Name: "bio", Type: &irv1.TypeRef{PgName: "text"}, Nullable: true},
+						{Id: "app.users.status", Name: "status", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "status"}, Nullable: true},
+						{Id: "app.users.home", Name: "home", Type: addrRef, Nullable: true},
+					},
+				}},
+			}}},
+			Queries: []*pluginv1.Query{
+				{
+					Name:    "GetUser",
+					Sql:     "SELECT bio, status, home FROM app.users WHERE id = $1",
+					Command: pluginv1.QueryCommand_QUERY_COMMAND_ONE,
+					Parameters: []*pluginv1.QueryParameter{
+						// nullable scalar param stays pointer-typed regardless of nullMode.
+						{Number: 1, Name: "id", Type: &irv1.TypeRef{PgName: "int8"}, Nullable: true},
+					},
+					Columns: []*pluginv1.QueryColumn{
+						{Name: "bio", SourceColumn: &irv1.ObjectRef{Id: "app.users.bio"}, Type: &irv1.TypeRef{PgName: "text"}, Nullable: true},
+						{Name: "status", SourceColumn: &irv1.ObjectRef{Id: "app.users.status"}, Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "status"}, Nullable: true},
+						{Name: "home", SourceColumn: &irv1.ObjectRef{Id: "app.users.home"}, Type: addrRef, Nullable: true},
+					},
+				},
+				{
+					Name:    "ListUsers",
+					Sql:     "SELECT bio, home FROM app.users",
+					Command: pluginv1.QueryCommand_QUERY_COMMAND_MANY,
+					Columns: []*pluginv1.QueryColumn{
+						{Name: "bio", SourceColumn: &irv1.ObjectRef{Id: "app.users.bio"}, Type: &irv1.TypeRef{PgName: "text"}, Nullable: true},
+						{Name: "home", SourceColumn: &irv1.ObjectRef{Id: "app.users.home"}, Type: addrRef, Nullable: true},
+					},
+				},
+			},
+		}
+	}
+
+	// ---- opt mode ----
+	resp, err := Generate(mkReq([]byte(`{"package":"db","nullMode":"opt"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, f := range resp.GetFiles() {
+		files[f.GetPath()] = string(f.GetContents())
+	}
+	models := normalizeSpaces(files["models.go"])
+	queries := files["queries.go"]
+	nqueries := normalizeSpaces(queries)
+
+	// Model fields: nullable scalar/enum/composite → null.Val[T]; non-null stays bare.
+	for _, want := range []string{
+		"Bio null.Val[string]",
+		"Status null.Val[AppStatus]",
+		"Home null.Val[AppAddress]",
+		"ID int64", // non-null unchanged
+	} {
+		if !strings.Contains(models, want) {
+			t.Errorf("models.go (opt) missing %q\n---\n%s", want, files["models.go"])
+		}
+	}
+	if !strings.Contains(files["models.go"], `"github.com/aarondl/opt/null"`) {
+		t.Errorf("models.go (opt) must import opt/null\n%s", files["models.go"])
+	}
+
+	// Row fields mirror the model field types.
+	for _, want := range []string{
+		"Bio null.Val[string]",
+		"Status null.Val[AppStatus]",
+		"Home null.Val[AppAddress]",
+	} {
+		if !strings.Contains(nqueries, want) {
+			t.Errorf("queries.go (opt) row field missing %q\n---\n%s", want, queries)
+		}
+	}
+	if !strings.Contains(queries, `"github.com/aarondl/opt/null"`) {
+		t.Errorf("queries.go (opt) must import opt/null\n%s", queries)
+	}
+
+	// Scan glue for the nullable composite column (:one). The composite slot is
+	// scanned through a *AppAddress temp, then assigned via null.FromPtr; the
+	// scalar/enum null.Val fields scan directly.
+	for _, want := range []string{
+		"var t2p *AppAddress", // composite temp (col index 2 in GetUser)
+		"row.Scan(&i.Bio, &i.Status, &t2p)",
+		"i.Home = null.FromPtr(t2p)",
+	} {
+		if !strings.Contains(nqueries, normalizeSpaces(want)) {
+			t.Errorf("queries.go (opt) :one scan glue missing %q\n---\n%s", want, queries)
+		}
+	}
+	// Scan glue for :many — temps + assignment INSIDE the loop, before append.
+	for _, want := range []string{
+		"var t1p *AppAddress", // composite temp (col index 1 in ListUsers)
+		"rows.Scan(&i.Bio, &t1p)",
+		"i.Home = null.FromPtr(t1p)",
+		"items = append(items, i)",
+	} {
+		if !strings.Contains(nqueries, normalizeSpaces(want)) {
+			t.Errorf("queries.go (opt) :many scan glue missing %q\n---\n%s", want, queries)
+		}
+	}
+
+	// Param type is unaffected by nullMode: nullable scalar param stays *int64.
+	if !strings.Contains(nqueries, "id *int64") {
+		t.Errorf("queries.go (opt) nullable scalar param must stay *int64\n%s", queries)
+	}
+	// null.Val must NOT leak into the param type.
+	if strings.Contains(nqueries, "id null.Val[int64]") {
+		t.Errorf("queries.go (opt) param must not be null.Val\n%s", queries)
+	}
+
+	// Both files must be valid Go.
+	if _, err := format.Source([]byte(files["models.go"])); err != nil {
+		t.Fatalf("opt models.go not valid Go: %v\n%s", err, files["models.go"])
+	}
+	if _, err := format.Source([]byte(queries)); err != nil {
+		t.Fatalf("opt queries.go not valid Go: %v\n%s", err, queries)
+	}
+
+	// ---- pointer mode (default): nullable fields are *T, no null.Val, no glue ----
+	respP, err := Generate(mkReq([]byte(`{"package":"db"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pFiles := map[string]string{}
+	for _, f := range respP.GetFiles() {
+		pFiles[f.GetPath()] = string(f.GetContents())
+	}
+	pModels := normalizeSpaces(pFiles["models.go"])
+	pQueries := pFiles["queries.go"]
+	for _, want := range []string{"Bio *string", "Status *AppStatus", "Home *AppAddress"} {
+		if !strings.Contains(pModels, want) {
+			t.Errorf("models.go (pointer) missing %q\n%s", want, pFiles["models.go"])
+		}
+	}
+	if strings.Contains(pModels, "null.Val[") || strings.Contains(pQueries, "null.Val[") {
+		t.Errorf("pointer mode must not emit null.Val")
+	}
+	if strings.Contains(pQueries, "null.FromPtr") {
+		t.Errorf("pointer mode must not emit scan glue (null.FromPtr)")
+	}
+	// Pointer-mode composite row field scans directly.
+	if !strings.Contains(normalizeSpaces(pQueries), "row.Scan(&i.Bio, &i.Status, &i.Home)") {
+		t.Errorf("pointer mode :one must scan composite directly\n%s", pQueries)
+	}
+}
+
 // normalizeSpaces collapses runs of whitespace to single spaces and trims ends.
 func normalizeSpaces(s string) string {
 	return strings.Join(strings.Fields(s), " ")
