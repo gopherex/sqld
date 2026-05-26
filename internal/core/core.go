@@ -62,11 +62,14 @@ func Gather(cfg *config.Config) (*Result, error) {
 	}
 
 	// Step 2: split units by kind.
+	var schemaUnits []source.Unit
 	var migrationUpUnits []source.Unit
 	var queryUnits []source.Unit
 
 	for _, u := range units {
 		switch u.Kind {
+		case source.KindSchema:
+			schemaUnits = append(schemaUnits, u)
 		case source.KindMigrationUp:
 			migrationUpUnits = append(migrationUpUnits, u)
 		case source.KindQuery:
@@ -74,12 +77,17 @@ func Gather(cfg *config.Config) (*Result, error) {
 		}
 	}
 
-	// Build schemaStmts from migration-up units (applied in version order).
+	// Build schemaStmts: use declarative schema units when present; otherwise
+	// fall back to migration-up units (backward-compat for migration-only configs).
 	var schemaStmts []parse.Stmt
-	for _, u := range migrationUpUnits {
+	catalogUnits := schemaUnits
+	if len(catalogUnits) == 0 {
+		catalogUnits = migrationUpUnits
+	}
+	for _, u := range catalogUnits {
 		stmts, err := parse.Statements(u.SQL)
 		if err != nil {
-			return nil, fmt.Errorf("parse migration %q: %w", u.Path, err)
+			return nil, fmt.Errorf("parse schema %q: %w", u.Path, err)
 		}
 		schemaStmts = append(schemaStmts, stmts...)
 	}
@@ -87,13 +95,12 @@ func Gather(cfg *config.Config) (*Result, error) {
 	// Step 3: build the catalog.
 	cat, diags := catalog.Build(schemaStmts)
 
-	// Step 4: build migration objects.
+	// Step 4: build migration objects (always from migration units regardless of schema source).
 	var migrations []*pluginv1.Migration
 	for _, u := range migrationUpUnits {
 		stmts, err := parse.Statements(u.SQL)
 		if err != nil {
-			// Already checked above; this should not fail again, but guard anyway.
-			diags.Add("error", fmt.Sprintf("re-parse migration %q: %v", u.Path, err))
+			diags.Add("error", fmt.Sprintf("parse migration %q: %v", u.Path, err))
 			continue
 		}
 		mig := &pluginv1.Migration{

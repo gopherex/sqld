@@ -67,3 +67,63 @@ func TestGatherQueries(t *testing.T) {
 		t.Fatalf("query columns=%d", len(r.Queries[0].GetColumns()))
 	}
 }
+
+// tempProjectWithSchema builds a Config that uses a declarative schema source
+// (KindSchema) instead of migrations as the catalog source of truth.
+func tempProjectWithSchema(t *testing.T) *config.Config {
+	t.Helper()
+	return &config.Config{
+		Engine: config.EnginePostgreSQL,
+		Schema: []config.Source{
+			{Inline: `
+				CREATE TABLE users(id bigint primary key, email text not null);
+				CREATE TABLE orders(id bigint primary key, user_id bigint not null references users(id));
+			`},
+		},
+		Queries: []config.Source{
+			{Inline: "-- name: GetUser :one\nSELECT id, email FROM users WHERE id = $1;\n"},
+		},
+	}
+}
+
+func TestCollectCatalogFromSchema(t *testing.T) {
+	cat, err := Collect(tempProjectWithSchema(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cat.GetSchemas()) != 1 || len(cat.GetSchemas()[0].GetTables()) != 2 {
+		t.Fatalf("schemas/tables wrong: %+v", cat.GetSchemas())
+	}
+	if len(cat.GetRelationships()) == 0 {
+		t.Fatal("no relationships derived from schema source")
+	}
+}
+
+func TestGatherSchemaSourcePreferredOverMigrations(t *testing.T) {
+	// When schema sources are present, catalog is built from them.
+	// Migrations are still resolved into the Migration list.
+	migDir := writeMigrations(t, "CREATE TABLE legacy(id bigint primary key);")
+	cfg := &config.Config{
+		Engine: config.EnginePostgreSQL,
+		Schema: []config.Source{
+			{Inline: "CREATE TABLE canonical(id bigint primary key);"},
+		},
+		Migrations: []config.MigrationSource{{Dir: migDir}},
+	}
+	r, err := Gather(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Catalog must contain "canonical" (from schema), not "legacy" (from migrations).
+	if len(r.Catalog.GetSchemas()) != 1 {
+		t.Fatalf("expected 1 schema, got %d", len(r.Catalog.GetSchemas()))
+	}
+	tables := r.Catalog.GetSchemas()[0].GetTables()
+	if len(tables) != 1 || tables[0].GetName().GetName() != "canonical" {
+		t.Fatalf("catalog table wrong: %+v", tables)
+	}
+	// Migrations list must still be populated.
+	if len(r.Migrations) != 1 {
+		t.Fatalf("expected 1 migration, got %d", len(r.Migrations))
+	}
+}

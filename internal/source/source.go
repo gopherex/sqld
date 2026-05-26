@@ -15,6 +15,7 @@ type Kind int
 const (
 	KindQuery Kind = iota
 	KindMigrationUp
+	KindSchema
 )
 
 // Unit is one SQL chunk with provenance.
@@ -25,11 +26,19 @@ type Unit struct {
 	Version string // migrations only
 }
 
-// Resolve reads all query and migration sources into ordered units.
-// Migrations are the sole source of schema DDL (KindMigrationUp).
+// Resolve reads all schema, query, and migration sources into ordered units.
+// Declarative schema sources (KindSchema) come from cfg.Schema.
 // Named queries come from cfg.Queries (KindQuery).
+// Migration files come from cfg.Migrations (KindMigrationUp).
 func Resolve(cfg *config.Config) ([]Unit, error) {
 	var units []Unit
+	for _, s := range cfg.Schema {
+		us, err := resolveSchema(s)
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, us...)
+	}
 	for _, s := range cfg.Queries {
 		us, err := resolveQuery(s)
 		if err != nil {
@@ -45,6 +54,27 @@ func Resolve(cfg *config.Config) ([]Unit, error) {
 		units = append(units, us...)
 	}
 	return units, nil
+}
+
+func resolveSchema(s config.Source) ([]Unit, error) {
+	switch {
+	case s.Inline != "":
+		return []Unit{{Path: "<inline>", SQL: s.Inline, Kind: KindSchema}}, nil
+	case s.File != "":
+		b, err := os.ReadFile(s.File)
+		if err != nil {
+			return nil, err
+		}
+		return []Unit{{Path: s.File, SQL: string(b), Kind: KindSchema}}, nil
+	case s.Dir != "":
+		glob := s.Glob
+		if glob == "" {
+			glob = "*.sql"
+		}
+		return readDir(s.Dir, glob, s.Recursive, KindSchema)
+	default:
+		return nil, fmt.Errorf("schema source: empty")
+	}
 }
 
 func resolveQuery(s config.Source) ([]Unit, error) {
