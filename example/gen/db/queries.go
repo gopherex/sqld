@@ -35,8 +35,8 @@ const getUserSQL = `SELECT id, email, status FROM app.users WHERE id = $1;`
 
 type GetUserRow struct {
 	ID     int64
-	Email  any
-	Status any
+	Email  string
+	Status AppUserStatus
 }
 
 func (q *Queries) GetUser(ctx context.Context, id int64) (GetUserRow, error) {
@@ -50,7 +50,7 @@ const listActiveUsersSQL = `SELECT id, email FROM app.users WHERE status = 'acti
 
 type ListActiveUsersRow struct {
 	ID    int64
-	Email any
+	Email string
 }
 
 func (q *Queries) ListActiveUsers(ctx context.Context) ([]ListActiveUsersRow, error) {
@@ -134,7 +134,7 @@ const setUserStatusSQL = `UPDATE app.users SET status = $2 WHERE id = $1;`
 
 type SetUserStatusParams struct {
 	ID     int64
-	Status any
+	Status AppUserStatus
 }
 
 func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (int64, error) {
@@ -150,7 +150,7 @@ const (
 )
 
 type SearchUsersParams struct {
-	Email    *any
+	Email    *string
 	Ids      []int64
 	OrderBy  SearchUsersOrderBy
 	OrderDir OrderDir
@@ -158,8 +158,8 @@ type SearchUsersParams struct {
 
 type SearchUsersRow struct {
 	ID     int64
-	Email  any
-	Status any
+	Email  string
+	Status AppUserStatus
 }
 
 func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]SearchUsersRow, error) {
