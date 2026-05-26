@@ -903,9 +903,39 @@
               "nullable":  true
             },
             {
+              "id":  "app.kitchen_sink.c_point",
+              "name":  "c_point",
+              "position":  22,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "point"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_tags",
+              "name":  "c_tags",
+              "position":  23,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "hstore"
+              },
+              "nullable":  true
+            },
+            {
+              "id":  "app.kitchen_sink.c_ltree",
+              "name":  "c_ltree",
+              "position":  24,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "ltree"
+              },
+              "nullable":  true
+            },
+            {
               "id":  "app.kitchen_sink.c_int_array",
               "name":  "c_int_array",
-              "position":  22,
+              "position":  25,
               "type":  {
                 "kind":  "TYPE_KIND_ARRAY",
                 "pgName":  "int4",
@@ -920,7 +950,7 @@
             {
               "id":  "app.kitchen_sink.c_text_array",
               "name":  "c_text_array",
-              "position":  23,
+              "position":  26,
               "type":  {
                 "kind":  "TYPE_KIND_ARRAY",
                 "pgName":  "text",
@@ -935,7 +965,7 @@
             {
               "id":  "app.kitchen_sink.c_status",
               "name":  "c_status",
-              "position":  24,
+              "position":  27,
               "type":  {
                 "kind":  "TYPE_KIND_SCALAR",
                 "pgName":  "user_status"
@@ -945,7 +975,7 @@
             {
               "id":  "app.kitchen_sink.c_address",
               "name":  "c_address",
-              "position":  25,
+              "position":  28,
               "type":  {
                 "kind":  "TYPE_KIND_SCALAR",
                 "pgName":  "address"
@@ -955,7 +985,7 @@
             {
               "id":  "app.kitchen_sink.c_email",
               "name":  "c_email",
-              "position":  26,
+              "position":  29,
               "type":  {
                 "kind":  "TYPE_KIND_SCALAR",
                 "pgName":  "email"
@@ -965,7 +995,7 @@
             {
               "id":  "app.kitchen_sink.c_int4range",
               "name":  "c_int4range",
-              "position":  27,
+              "position":  30,
               "type":  {
                 "kind":  "TYPE_KIND_SCALAR",
                 "pgName":  "int4range"
@@ -975,7 +1005,7 @@
             {
               "id":  "app.kitchen_sink.c_nummultirange",
               "name":  "c_nummultirange",
-              "position":  28,
+              "position":  31,
               "type":  {
                 "kind":  "TYPE_KIND_SCALAR",
                 "pgName":  "nummultirange"
@@ -985,7 +1015,7 @@
             {
               "id":  "app.kitchen_sink.c_generated",
               "name":  "c_generated",
-              "position":  29,
+              "position":  32,
               "type":  {
                 "kind":  "TYPE_KIND_SCALAR",
                 "pgName":  "int4"
@@ -1017,7 +1047,7 @@
             {
               "id":  "app.kitchen_sink.c_identity",
               "name":  "c_identity",
-              "position":  30,
+              "position":  33,
               "type":  {
                 "kind":  "TYPE_KIND_SCALAR",
                 "pgName":  "int4"

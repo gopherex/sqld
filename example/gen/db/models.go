@@ -100,18 +100,21 @@ func (a AppPerson) IsNull() bool { return false }
 var _ pgtype.CompositeIndexScanner = (*AppPerson)(nil)
 var _ pgtype.CompositeIndexGetter = AppPerson{}
 
-// RegisterTypes loads and registers the database's enum, composite, and
-// custom range types (and their array types) on a connection so enum-array,
-// composite, and custom-range columns/params scan and encode into their Go
-// types. Wire it into pgxpool.Config.AfterConnect (it runs per connection).
+// RegisterTypes loads and registers the database's extension (hstore/ltree),
+// enum, composite, and custom range types (and their array types) on a
+// connection so those columns/params scan and encode into their Go types.
+// Wire it into pgxpool.Config.AfterConnect (it runs per connection).
 //
-// The order is dependency-safe: each enum/composite/range is registered before
-// its array type, a composite is registered after every composite it has a
-// field of (topological order), and custom ranges come last (their subtypes
-// are already registered), because pgx's Conn.LoadType resolves a derived type
-// only once its element/field/subtype types are registered.
+// The order is dependency-safe: extension types come first (no deps), each
+// enum/composite/range is registered before its array type, a composite is
+// registered after every composite it has a field of (topological order), and
+// custom ranges come last (their subtypes are already registered), because
+// pgx's Conn.LoadType resolves a derived type only once its element/field/
+// subtype types are registered.
 func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	for _, name := range []string{
+		"hstore",
+		"ltree",
 		"app.user_status",
 		"app._user_status",
 		"app.address",
@@ -190,7 +193,10 @@ type AppKitchenSink struct {
 	CTime          *time.Time
 	CTimestamp     *time.Time
 	CTimestamptz   *time.Time
-	CInterval      *any
+	CInterval      pgtype.Interval
+	CPoint         pgtype.Point
+	CTags          pgtype.Hstore
+	CLtree         *string
 	CIntArray      []int32
 	CTextArray     []string
 	CStatus        *AppUserStatus

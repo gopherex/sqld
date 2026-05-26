@@ -56,11 +56,16 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 	// Build a UDT registry so goType can resolve enums / domains / composites.
 	reg := buildUDTRegistry(req.GetCatalog())
 
+	// Detect which extension types (hstore/ltree/lquery) are actually used, by
+	// scanning both the catalog columns and the query columns/params. Only used
+	// extension types are registered (LoadType + RegisterType) in RegisterTypes.
+	usedExtTypes := collectUsedExtensionTypes(req.GetCatalog(), req.GetQueries())
+
 	var diagnostics []*pluginv1.Diagnostic
 	var files []*pluginv1.GeneratedFile
 
 	// models.go
-	modelsBytes, diags := generateModels(pkg, req.GetCatalog(), reg, ov)
+	modelsBytes, diags := generateModels(pkg, req.GetCatalog(), reg, ov, usedExtTypes)
 	diagnostics = append(diagnostics, diags...)
 	files = append(files, &pluginv1.GeneratedFile{
 		Path:     "models.go",
@@ -264,7 +269,7 @@ func uniqueSorted(ss []string) []string {
 
 // ---- models.go generation ----
 
-func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov overrides) ([]byte, []*pluginv1.Diagnostic) {
+func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov overrides, usedExtTypes []string) ([]byte, []*pluginv1.Diagnostic) {
 	type fieldDef struct {
 		name   string
 		goType string
@@ -414,12 +419,14 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 		}
 	}
 
-	// RegisterTypes is emitted whenever there are enums or composites: it loads
-	// and registers each type (and its array) so that enum-array and composite
-	// columns/params scan and encode. It needs context, fmt, and the pgx
-	// package. Composites additionally need the pgtype package for the
-	// CompositeIndexScanner / CompositeIndexGetter interface assertions.
-	if len(enumDefs) > 0 || len(compositeDefs) > 0 || len(rangeDefs) > 0 {
+	// RegisterTypes is emitted whenever there are enums, composites, custom
+	// ranges, OR used extension types: it loads and registers each type (and its
+	// array, where applicable) so that enum-array, composite, custom-range, and
+	// extension (hstore/ltree) columns/params scan and encode. It needs context,
+	// fmt, and the pgx package. Composites additionally need the pgtype package
+	// for the CompositeIndexScanner / CompositeIndexGetter interface assertions.
+	needsRegister := len(enumDefs) > 0 || len(compositeDefs) > 0 || len(rangeDefs) > 0 || len(usedExtTypes) > 0
+	if needsRegister {
 		allImports = append(allImports,
 			"context",
 			"fmt",
@@ -524,13 +531,16 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 		sb.WriteString(fmt.Sprintf("var _ pgtype.CompositeIndexGetter = %s{}\n\n", c.typeName))
 	}
 
-	// Emit RegisterTypes: loads and registers each enum and composite type (and
-	// its array) on a connection so enum-array and composite columns/params
-	// scan into their Go types.
-	if len(enumDefs) > 0 || len(compositeDefs) > 0 || len(rangeDefs) > 0 {
+	// Emit RegisterTypes: loads and registers each extension, enum, composite,
+	// and custom range type (and its array, where applicable) on a connection so
+	// those columns/params scan into their Go types.
+	if needsRegister {
 		// Build the dependency-safe ordered list of PostgreSQL type names.
 		//
-		// 1. Enums (no deps) first, each followed by its array type.
+		// 0. Extension types (hstore, ltree, …) FIRST. They have no element
+		//    dependencies and pgx resolves them directly by name once loaded; we
+		//    register only the bare type (no array companion is generated).
+		// 1. Enums (no deps), each followed by its array type.
 		// 2. Composites in topological order (a composite whose field is another
 		//    composite comes AFTER that field-composite), each followed by its
 		//    array type.
@@ -544,8 +554,14 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 		// range type's subtype to be registered first.
 		type regType struct {
 			pgName, arrayPgName string
+			// noArray is true for types that have no companion array to register
+			// (the extension types loaded by bare name).
+			noArray bool
 		}
 		var ordered []regType
+		for _, name := range usedExtTypes {
+			ordered = append(ordered, regType{pgName: name, noArray: true})
+		}
 		for _, e := range enumDefs {
 			ordered = append(ordered, regType{pgName: e.pgName, arrayPgName: e.arrayPgName})
 		}
@@ -616,22 +632,26 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 			}
 		}
 
-		sb.WriteString("// RegisterTypes loads and registers the database's enum, composite, and\n")
-		sb.WriteString("// custom range types (and their array types) on a connection so enum-array,\n")
-		sb.WriteString("// composite, and custom-range columns/params scan and encode into their Go\n")
-		sb.WriteString("// types. Wire it into pgxpool.Config.AfterConnect (it runs per connection).\n")
+		sb.WriteString("// RegisterTypes loads and registers the database's extension (hstore/ltree),\n")
+		sb.WriteString("// enum, composite, and custom range types (and their array types) on a\n")
+		sb.WriteString("// connection so those columns/params scan and encode into their Go types.\n")
+		sb.WriteString("// Wire it into pgxpool.Config.AfterConnect (it runs per connection).\n")
 		sb.WriteString("//\n")
-		sb.WriteString("// The order is dependency-safe: each enum/composite/range is registered before\n")
-		sb.WriteString("// its array type, a composite is registered after every composite it has a\n")
-		sb.WriteString("// field of (topological order), and custom ranges come last (their subtypes\n")
-		sb.WriteString("// are already registered), because pgx's Conn.LoadType resolves a derived type\n")
-		sb.WriteString("// only once its element/field/subtype types are registered.\n")
+		sb.WriteString("// The order is dependency-safe: extension types come first (no deps), each\n")
+		sb.WriteString("// enum/composite/range is registered before its array type, a composite is\n")
+		sb.WriteString("// registered after every composite it has a field of (topological order), and\n")
+		sb.WriteString("// custom ranges come last (their subtypes are already registered), because\n")
+		sb.WriteString("// pgx's Conn.LoadType resolves a derived type only once its element/field/\n")
+		sb.WriteString("// subtype types are registered.\n")
 		sb.WriteString("func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {\n")
 		sb.WriteString("\tfor _, name := range []string{\n")
 		for _, rt := range ordered {
 			// Element first, then its array type — the order LoadType requires.
+			// Extension types loaded by bare name have no array companion.
 			sb.WriteString(fmt.Sprintf("\t\t%q,\n", rt.pgName))
-			sb.WriteString(fmt.Sprintf("\t\t%q,\n", rt.arrayPgName))
+			if !rt.noArray {
+				sb.WriteString(fmt.Sprintf("\t\t%q,\n", rt.arrayPgName))
+			}
 		}
 		sb.WriteString("\t} {\n")
 		sb.WriteString("\t\tt, err := conn.LoadType(ctx, name)\n")
