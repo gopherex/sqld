@@ -320,9 +320,18 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 	// array type (arrayPgName). pgx's Conn.LoadType resolves a range type once
 	// its subtype is registered; builtin subtypes (timestamptz, …) are already
 	// registered in pgx's default map, so the range loads directly.
+	//
+	// PostgreSQL 14+ also auto-creates a MULTIRANGE type for each range
+	// (multirangePgName, with its own array multirangeArrayPgName). pgx's
+	// Conn.LoadType of a multirange requires the element RANGE to be registered
+	// first, so the registration order is: range, _range, multirange,
+	// _multirange. multirangePgName is empty when the range has no associated
+	// multirange.
 	type rangeDef struct {
-		pgName      string
-		arrayPgName string
+		pgName                string
+		arrayPgName           string
+		multirangePgName      string
+		multirangeArrayPgName string
 	}
 
 	var enumDefs []enumDef
@@ -388,10 +397,20 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 				pgName = sName + "." + bareName
 				arrayPgName = sName + "._" + bareName
 			}
-			rangeDefs = append(rangeDefs, rangeDef{
+			rd := rangeDef{
 				pgName:      pgName,
 				arrayPgName: arrayPgName,
-			})
+			}
+			// Associated multirange (PG 14+), in the same schema as the range.
+			if mr := r.GetMultirange(); mr != "" {
+				rd.multirangePgName = mr
+				rd.multirangeArrayPgName = "_" + mr
+				if sName != "" {
+					rd.multirangePgName = sName + "." + mr
+					rd.multirangeArrayPgName = sName + "._" + mr
+				}
+			}
+			rangeDefs = append(rangeDefs, rd)
 		}
 	}
 
@@ -585,9 +604,16 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 		}
 
 		// Custom ranges last (subtypes already registered — builtin or via the
-		// pgx default map), each followed by its array type.
+		// pgx default map). For each range we register, in order: the range and
+		// its array, then (PG 14+) the associated multirange and its array. The
+		// element RANGE must be registered before its MULTIRANGE, because pgx's
+		// Conn.LoadType of a multirange resolves it via the already-registered
+		// range element.
 		for _, r := range rangeDefs {
 			ordered = append(ordered, regType{pgName: r.pgName, arrayPgName: r.arrayPgName})
+			if r.multirangePgName != "" {
+				ordered = append(ordered, regType{pgName: r.multirangePgName, arrayPgName: r.multirangeArrayPgName})
+			}
 		}
 
 		sb.WriteString("// RegisterTypes loads and registers the database's enum, composite, and\n")

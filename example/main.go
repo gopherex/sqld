@@ -50,6 +50,11 @@ func main() {
 	// the row field is pgtype.Range[pgtype.Timestamptz], registered by RegisterTypes.
 	_, _ = q.GetValidWindow(ctx, 1)
 
+	// Custom multirange scan (the MULTIRANGE auto-created for app.timerange):
+	// the row field is pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]],
+	// registered by RegisterTypes after the range element.
+	_, _ = q.GetWindows(ctx, 1)
+
 	// Dynamic query: only the supplied filters are applied at runtime.
 	email := "alice@example.com"
 	_, _ = q.SearchUsers(ctx, db.SearchUsersParams{
