@@ -651,8 +651,11 @@ catalog) to Go, with pgx v5 as the runtime.
 - **range / multirange** (builtin) → `pgtype.Range[T]` / `pgtype.Multirange[...]`
   (e.g. `int4range` → `pgtype.Range[pgtype.Int4]`). **Custom `CREATE TYPE AS RANGE`**
   is collected into `Schema.Ranges` and maps to `pgtype.Range[<subtype element>]`
-  (subtype→pgtype via `pgtypeElement`); registered by `RegisterTypes` (`LoadType`
-  handles range + its array, subtype-first) like composites.
+  (subtype→pgtype via `pgtypeElement`). Its associated **multirange** (explicit
+  `multirange_type_name` or PG's auto-derived name — last `range`→`multirange`,
+  else `+_multirange`) maps to `pgtype.Multirange[pgtype.Range[<elem>]]`.
+  `RegisterTypes` registers range, its array, multirange, multirange array
+  (element-first) via `LoadType`, like composites.
 - **Nullability:** nullable → pointer `*T`, EXCEPT `[]byte`, slices, maps,
   `json.RawMessage`, and `pgtype.Range`/`Multirange` (which carry NULL via a
   `Valid` field) — those stay value types.

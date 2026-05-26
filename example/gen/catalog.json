@@ -270,6 +270,16 @@
                 "pgName":  "timerange"
               },
               "nullable":  true
+            },
+            {
+              "id":  "app.profiles.windows",
+              "name":  "windows",
+              "position":  9,
+              "type":  {
+                "kind":  "TYPE_KIND_SCALAR",
+                "pgName":  "timemultirange"
+              },
+              "nullable":  true
             }
           ],
           "constraints":  [
@@ -1372,7 +1382,8 @@
                 "withTimezone":  true
               }
             }
-          }
+          },
+          "multirange":  "timemultirange"
         }
       ]
     },

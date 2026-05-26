@@ -120,6 +120,8 @@ func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 		"app._person",
 		"app.timerange",
 		"app._timerange",
+		"app.timemultirange",
+		"app._timemultirange",
 	} {
 		t, err := conn.LoadType(ctx, name)
 		if err != nil {
@@ -147,6 +149,7 @@ type AppProfiles struct {
 	Owner         AppPerson
 	ActiveDuring  pgtype.Range[pgtype.Timestamptz]
 	ValidWindow   pgtype.Range[pgtype.Timestamptz]
+	Windows       pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]]
 }
 
 type AppOrders struct {

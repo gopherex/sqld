@@ -366,8 +366,45 @@ func TestMapCreateRange_AllParams(t *testing.T) {
 	if r.GetSubtypeDiff() != "mydiff" {
 		t.Fatalf("subtype_diff=%q", r.GetSubtypeDiff())
 	}
-	if r.GetMultirange() != "app.timemultirange" {
+	// The multirange name is stored BARE (schema qualifier dropped), consistent
+	// with how the range's own Name is stored.
+	if r.GetMultirange() != "timemultirange" {
 		t.Fatalf("multirange=%q", r.GetMultirange())
+	}
+}
+
+// TestMapCreateRange_DerivesMultirange verifies that when no explicit
+// multirange_type_name is given, the multirange name is auto-derived from the
+// range name following PostgreSQL's rule (last "range" → "multirange").
+func TestMapCreateRange_DerivesMultirange(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TYPE app.timerange AS RANGE (subtype = timestamptz);")
+	r := MapCreateRange(stmts[0].Node.GetCreateRangeStmt())
+	if r == nil {
+		t.Fatal("MapCreateRange returned nil")
+	}
+	if r.GetMultirange() != "timemultirange" {
+		t.Fatalf("derived multirange=%q; want timemultirange", r.GetMultirange())
+	}
+}
+
+// TestDeriveMultirangeName covers PostgreSQL's auto-generated multirange naming
+// rule directly: replace the LAST "range" with "multirange", else append
+// "_multirange".
+func TestDeriveMultirangeName(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"timerange", "timemultirange"},
+		{"myrange", "mymultirange"},
+		{"foo", "foo_multirange"},
+		{"rangerange", "rangemultirange"}, // only the LAST "range" is replaced
+		{"int4range", "int4multirange"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := deriveMultirangeName(c.in); got != c.want {
+			t.Errorf("deriveMultirangeName(%q) = %q; want %q", c.in, got, c.want)
+		}
 	}
 }
 

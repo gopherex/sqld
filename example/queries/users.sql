@@ -31,6 +31,9 @@ SELECT active_during FROM app.profiles WHERE user_id = @user_id;
 -- name: GetValidWindow :one
 SELECT valid_window FROM app.profiles WHERE user_id = @user_id;
 
+-- name: GetWindows :one
+SELECT windows FROM app.profiles WHERE user_id = @user_id;
+
 -- name: SetAddress :exec
 UPDATE app.profiles SET address = @address WHERE user_id = @user_id;
 

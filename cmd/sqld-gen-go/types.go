@@ -29,6 +29,14 @@ type rangeEntry struct {
 	r      *irv1.RangeType
 }
 
+// multirangeEntry holds the schema and subtype of a custom multirange type (the
+// MULTIRANGE auto-created for a custom CREATE TYPE ... AS RANGE). It is derived
+// from a RangeType's Multirange name; the subtype is the range's subtype.
+type multirangeEntry struct {
+	schema  string
+	subtype *irv1.TypeRef
+}
+
 // udtRegistry is an index of all UDTs in the catalog, keyed by bare type name
 // (the Name.Name field — not schema-qualified).  When two schemas define a type
 // with the same bare name the first one wins; that matches the PostgreSQL
@@ -41,15 +49,20 @@ type udtRegistry struct {
 	// name. Builtin ranges (int4range, …) are NOT here — they map directly in
 	// scalarGoType and need no registration.
 	ranges map[string]rangeEntry
+	// multiranges holds the MULTIRANGE types auto-created for custom ranges,
+	// keyed by bare multirange name (RangeType.Multirange). Builtin multiranges
+	// (int4multirange, …) are NOT here — they map directly in scalarGoType.
+	multiranges map[string]multirangeEntry
 }
 
 // buildUDTRegistry walks catalog schemas and builds a flat lookup table.
 func buildUDTRegistry(catalog *irv1.Catalog) *udtRegistry {
 	reg := &udtRegistry{
-		enums:      make(map[string]enumEntry),
-		domains:    make(map[string]domainEntry),
-		composites: make(map[string]compositeEntry),
-		ranges:     make(map[string]rangeEntry),
+		enums:       make(map[string]enumEntry),
+		domains:     make(map[string]domainEntry),
+		composites:  make(map[string]compositeEntry),
+		ranges:      make(map[string]rangeEntry),
+		multiranges: make(map[string]multirangeEntry),
 	}
 	for _, schema := range catalog.GetSchemas() {
 		sName := schema.GetName()
@@ -75,6 +88,14 @@ func buildUDTRegistry(catalog *irv1.Catalog) *udtRegistry {
 			name := r.GetName().GetName()
 			if _, exists := reg.ranges[name]; !exists {
 				reg.ranges[name] = rangeEntry{schema: sName, r: r}
+			}
+			// Register the associated multirange (PG 14+) keyed by its bare
+			// name, sharing the range's subtype so a multirange column maps to
+			// pgtype.Multirange[pgtype.Range[<subtypeElem>]].
+			if mr := r.GetMultirange(); mr != "" {
+				if _, exists := reg.multiranges[mr]; !exists {
+					reg.multiranges[mr] = multirangeEntry{schema: sName, subtype: r.GetSubtype()}
+				}
 			}
 		}
 	}
@@ -226,6 +247,21 @@ func goType(reg *udtRegistry, t *irv1.TypeRef, nullable bool) (goExpr string, im
 				elem = "pgtype.Text"
 			}
 			return "pgtype.Range[" + elem + "]", []string{"github.com/jackc/pgx/v5/pgtype"}
+		}
+		// --- custom multirange (auto-created for CREATE TYPE ... AS RANGE) ---
+		//
+		// Maps to pgtype.Multirange[pgtype.Range[<subtypeElem>]] where
+		// <subtypeElem> is the pgtype element for the range's subtype. Like
+		// pgtype.Range, pgtype.Multirange carries Valid/IsNull, so a nullable
+		// custom multirange is a value type, never a pointer (see goTypeNoPointer).
+		if entry, ok := reg.multiranges[pgName]; ok {
+			subPg := entry.subtype.GetPgName()
+			elem, ok := pgtypeElement(subPg)
+			if !ok {
+				// Unknown subtype: fall back like the range case.
+				elem = "pgtype.Text"
+			}
+			return "pgtype.Multirange[pgtype.Range[" + elem + "]]", []string{"github.com/jackc/pgx/v5/pgtype"}
 		}
 	}
 

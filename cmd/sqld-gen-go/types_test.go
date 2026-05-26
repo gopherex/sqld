@@ -543,3 +543,78 @@ func TestCustomRangeType(t *testing.T) {
 		t.Errorf("range element %d must come before its array %d in RegisterTypes", idxRange, idxRangeArr)
 	}
 }
+
+// TestCustomMultirangeType verifies that the MULTIRANGE auto-created for a
+// custom CREATE TYPE ... AS RANGE maps a column to
+// pgtype.Multirange[pgtype.Range[<subtypeElem>]], and that RegisterTypes lists
+// the range, its array, the multirange, and the multirange array in that order
+// (element RANGE before its MULTIRANGE; each element before its array).
+func TestCustomMultirangeType(t *testing.T) {
+	req := &pluginv1.GenerateRequest{
+		OutDir: "gen/db",
+		Catalog: &irv1.Catalog{
+			Schemas: []*irv1.Schema{{
+				Name: "app",
+				Ranges: []*irv1.RangeType{{
+					Name:       &irv1.QualifiedName{Schema: "app", Name: "timerange"},
+					Subtype:    &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "timestamptz"},
+					Multirange: "timemultirange",
+				}},
+				Tables: []*irv1.Table{{
+					Name: &irv1.QualifiedName{Schema: "app", Name: "profiles"},
+					Columns: []*irv1.Column{
+						{Name: "user_id", Type: &irv1.TypeRef{PgName: "int8"}, Nullable: false},
+						// nullable custom multirange → value type (Multirange carries Valid).
+						{Name: "windows", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_RANGE, PgName: "timemultirange"}, Nullable: true},
+					},
+				}},
+			}},
+		},
+	}
+
+	// 1. Direct goType resolution: custom multirange →
+	//    pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]], value type even when nullable.
+	reg := buildUDTRegistry(req.GetCatalog())
+	ref := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_RANGE, PgName: "timemultirange"}
+	got, imps := goType(reg, ref, true)
+	want := "pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]]"
+	if got != want {
+		t.Errorf("custom multirange goType = %q; want %q", got, want)
+	}
+	wantImp := "github.com/jackc/pgx/v5/pgtype"
+	if len(imps) != 1 || imps[0] != wantImp {
+		t.Errorf("custom multirange imports = %v; want [%s]", imps, wantImp)
+	}
+
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var models string
+	for _, f := range resp.GetFiles() {
+		if f.GetPath() == "models.go" {
+			models = string(f.GetContents())
+		}
+	}
+	if models == "" {
+		t.Fatal("models.go not found in response")
+	}
+
+	// 2. The table field uses the resolved Go type.
+	if !strings.Contains(normalizeSpaces(models), normalizeSpaces("Windows "+want)) {
+		t.Errorf("missing Windows field in models.go:\n%s", models)
+	}
+
+	// 3. RegisterTypes lists range, _range, multirange, _multirange in that order.
+	idxRange := strings.Index(models, `"app.timerange"`)
+	idxRangeArr := strings.Index(models, `"app._timerange"`)
+	idxMR := strings.Index(models, `"app.timemultirange"`)
+	idxMRArr := strings.Index(models, `"app._timemultirange"`)
+	if idxRange < 0 || idxRangeArr < 0 || idxMR < 0 || idxMRArr < 0 {
+		t.Fatalf("expected range, _range, multirange, _multirange entries in RegisterTypes:\n%s", models)
+	}
+	if !(idxRange < idxRangeArr && idxRangeArr < idxMR && idxMR < idxMRArr) {
+		t.Errorf("RegisterTypes order wrong: range=%d _range=%d multirange=%d _multirange=%d (want strictly increasing)",
+			idxRange, idxRangeArr, idxMR, idxMRArr)
+	}
+}

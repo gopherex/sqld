@@ -204,6 +204,19 @@ func (q *Queries) GetValidWindow(ctx context.Context, userID int64) (GetValidWin
 	return i, err
 }
 
+const getWindowsSQL = `SELECT windows FROM app.profiles WHERE user_id = $1;`
+
+type GetWindowsRow struct {
+	Windows pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]]
+}
+
+func (q *Queries) GetWindows(ctx context.Context, userID int64) (GetWindowsRow, error) {
+	row := q.db.QueryRow(ctx, getWindowsSQL, userID)
+	var i GetWindowsRow
+	err := row.Scan(&i.Windows)
+	return i, err
+}
+
 const setAddressSQL = `UPDATE app.profiles SET address = $1 WHERE user_id = $2;`
 
 type SetAddressParams struct {

@@ -7,7 +7,7 @@ CREATE SCHEMA audit;
 CREATE TYPE app.user_status AS ENUM ('active', 'inactive', 'banned');
 CREATE DOMAIN app.email AS text NOT NULL CHECK (VALUE ~ '@');
 CREATE TYPE app.address AS (street text, city text, zip text);
-CREATE TYPE app.timerange AS RANGE (subtype = timestamptz);
+CREATE TYPE app.timerange AS RANGE (subtype = timestamptz, multirange_type_name = app.timemultirange);
 CREATE TYPE app.person AS (name text, home app.address, status app.user_status);
 
 CREATE SEQUENCE app.order_number_seq;
@@ -28,7 +28,8 @@ CREATE TABLE app.profiles (
   status_history app.user_status[],
   owner          app.person NOT NULL,
   active_during  tstzrange,
-  valid_window   app.timerange
+  valid_window   app.timerange,
+  windows        app.timemultirange
 );
 
 CREATE TABLE app.orders (

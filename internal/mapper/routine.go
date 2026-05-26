@@ -59,6 +59,8 @@ package mapper
 //     .GetTableSpaceName() string
 
 import (
+	"strings"
+
 	pg "github.com/pganalyze/pg_query_go/v6"
 	"github.com/yaroher/sqld/internal/nodeid"
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
@@ -488,8 +490,9 @@ func triggerEventsFromInt32(events int32) []irv1.TriggerEvent {
 //	  "collation"         → arg.GetTypeName()  → extractPgName(tn)
 //	  "canonical"         → arg.GetTypeName()  → extractPgName(tn)  (function name)
 //	  "subtype_diff"      → arg.GetTypeName()  → extractPgName(tn)  (function name)
-//	  "multirange_type_name" → arg.GetTypeName() → extractPgName(tn) (simple name) or
-//	                           schema-qualified via typeNodeListToQualifiedName + join
+//	  "multirange_type_name" → arg.GetTypeName() → bare name (schema qualifier,
+//	                           if any, dropped). When absent, derived from the
+//	                           range name via deriveMultirangeName.
 func MapCreateRange(rs *pg.CreateRangeStmt) *irv1.RangeType {
 	if rs == nil {
 		return nil
@@ -526,18 +529,43 @@ func MapCreateRange(rs *pg.CreateRangeStmt) *irv1.RangeType {
 		case "subtype_diff":
 			rt.SubtypeDiff = extractPgName(tn)
 		case "multirange_type_name":
-			// May be schema-qualified: build "schema.name" or just "name".
+			// Store the BARE name (drop any schema qualifier): the multirange
+			// always lives in the same schema as the range, consistent with how
+			// the range's own Name is stored (QualifiedName.Name is bare).
 			qn := typeNodeListToQualifiedName(tn.GetNames())
-			if qn.GetSchema() != "" {
-				rt.Multirange = qn.GetSchema() + "." + qn.GetName()
-			} else {
-				rt.Multirange = qn.GetName()
-			}
+			rt.Multirange = qn.GetName()
 		}
 		// Unknown defnames are silently skipped (best-effort, no panic).
 	}
 
+	// If no explicit multirange_type_name was given, derive PostgreSQL's
+	// auto-generated multirange name from the (bare) range name. PostgreSQL's
+	// rule: replace the LAST occurrence of the substring "range" with
+	// "multirange"; if "range" does not appear, append "_multirange".
+	if rt.Multirange == "" {
+		rt.Multirange = deriveMultirangeName(rt.GetName().GetName())
+	}
+
 	return rt
+}
+
+// deriveMultirangeName reproduces PostgreSQL's auto-generated multirange type
+// name for a range type whose multirange_type_name was not given explicitly.
+// The rule (see PostgreSQL's makeMultirangeTypeName): replace the LAST
+// occurrence of the substring "range" with "multirange"; if "range" is not
+// present at all, append "_multirange".
+//
+//	timerange → timemultirange
+//	myrange   → mymultirange
+//	foo       → foo_multirange
+func deriveMultirangeName(rangeName string) string {
+	if rangeName == "" {
+		return ""
+	}
+	if i := strings.LastIndex(rangeName, "range"); i >= 0 {
+		return rangeName[:i] + "multirange" + rangeName[i+len("range"):]
+	}
+	return rangeName + "_multirange"
 }
 
 // ---------------------------------------------------------------------------
