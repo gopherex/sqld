@@ -49,6 +49,10 @@ func Info() *pluginv1.GetInfoResponse {
 func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error) {
 	pkg := resolvePackage(req.GetOptions(), req.GetOutDir())
 
+	// Go-type overrides live in the plugin's options (Go type paths are
+	// plugin-specific), parsed once and threaded through generation.
+	ov := parseOverrides(req.GetOptions())
+
 	// Build a UDT registry so goType can resolve enums / domains / composites.
 	reg := buildUDTRegistry(req.GetCatalog())
 
@@ -56,7 +60,7 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 	var files []*pluginv1.GeneratedFile
 
 	// models.go
-	modelsBytes, diags := generateModels(pkg, req.GetCatalog(), reg)
+	modelsBytes, diags := generateModels(pkg, req.GetCatalog(), reg, ov)
 	diagnostics = append(diagnostics, diags...)
 	files = append(files, &pluginv1.GeneratedFile{
 		Path:     "models.go",
@@ -65,7 +69,7 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 
 	// queries.go — only when there are queries
 	if qs := req.GetQueries(); len(qs) > 0 {
-		qBytes, qDiags := generateQueries(pkg, qs, req.GetAnnotations(), reg)
+		qBytes, qDiags := generateQueries(pkg, qs, req.GetAnnotations(), reg, ov)
 		diagnostics = append(diagnostics, qDiags...)
 		files = append(files, &pluginv1.GeneratedFile{
 			Path:     "queries.go",
@@ -82,7 +86,21 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 // ---- package resolution ----
 
 type pluginOptions struct {
-	Package string `json:"package"`
+	Package   string            `json:"package"`
+	Overrides map[string]string `json:"overrides"`
+}
+
+// parseOverrides decodes the "overrides" map from the plugin's options JSON.
+// Returns nil when there are no options or no overrides.
+func parseOverrides(opts []byte) overrides {
+	if len(opts) == 0 {
+		return nil
+	}
+	var o pluginOptions
+	if err := json.Unmarshal(opts, &o); err != nil || len(o.Overrides) == 0 {
+		return nil
+	}
+	return overrides(o.Overrides)
 }
 
 func resolvePackage(opts []byte, outDir string) string {
@@ -246,7 +264,7 @@ func uniqueSorted(ss []string) []string {
 
 // ---- models.go generation ----
 
-func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte, []*pluginv1.Diagnostic) {
+func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov overrides) ([]byte, []*pluginv1.Diagnostic) {
 	type fieldDef struct {
 		name   string
 		goType string
@@ -326,7 +344,9 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 			var fields []fieldDef
 			var depNames []string
 			for _, f := range c.GetFields() {
-				gt, imps := goType(reg, f.GetType(), false)
+				// Composite fields have no column id; only a type-name override
+				// (or the default mapping) can apply.
+				gt, imps := resolveGoType(reg, ov, "", f.GetType(), false)
 				allImports = append(allImports, imps...)
 				fields = append(fields, fieldDef{name: pascal(f.GetName()), goType: gt})
 				if dep := compositeDepName(reg, f.GetType()); dep != "" {
@@ -382,7 +402,7 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry) ([]byte
 
 			var fields []fieldDef
 			for _, col := range table.GetColumns() {
-				gt, imps := goType(reg, col.GetType(), col.GetNullable())
+				gt, imps := resolveGoType(reg, ov, col.GetId(), col.GetType(), col.GetNullable())
 				allImports = append(allImports, imps...)
 				fields = append(fields, fieldDef{name: pascal(col.GetName()), goType: gt})
 			}
@@ -596,7 +616,7 @@ type qInfo struct {
 	paramStructName string
 }
 
-func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.AnnotationValue, reg *udtRegistry) ([]byte, []*pluginv1.Diagnostic) {
+func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.AnnotationValue, reg *udtRegistry, ov overrides) ([]byte, []*pluginv1.Diagnostic) {
 	// Index annotations by query name.
 	annotByQuery := make(map[string][]*irv1.AnnotationValue)
 	for _, a := range annotations {
@@ -643,9 +663,17 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 		qCols := q.GetColumns()
 		var cols []qField
 		for _, c := range qCols {
-			gt, imps := goType(reg, c.GetType(), c.GetNullable())
+			gt, imps := resolveGoType(reg, ov, c.GetSourceColumn().GetId(), c.GetType(), c.GetNullable())
 			allImports = append(allImports, imps...)
 			cols = append(cols, qField{name: pascal(c.GetName()), goType: gt})
+		}
+
+		// Collect parameter-type imports for every query (dynamic ones build
+		// their Params struct in writeDynamicQueryCode, which discards imports —
+		// so an override import on a dynamic param must be gathered here).
+		for _, p := range q.GetParameters() {
+			_, imps := resolveGoParamType(reg, ov, p.GetColumn().GetId(), p.GetType(), p.GetNullable())
+			allImports = append(allImports, imps...)
 		}
 
 		if isDynamic {
@@ -667,7 +695,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 					pName = fmt.Sprintf("arg%d", p.GetNumber())
 				}
 			}
-			gt, imps := goParamType(reg, p.GetType(), p.GetNullable())
+			gt, imps := resolveGoParamType(reg, ov, p.GetColumn().GetId(), p.GetType(), p.GetNullable())
 			allImports = append(allImports, imps...)
 			params = append(params, qParam{goName: lowerCamel(pName), goType: gt})
 		}
@@ -746,7 +774,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 	}
 
 	for _, de := range dynamicEntries {
-		writeDynamicQueryCode(&sb, de.q, de.anns, de.cols, reg)
+		writeDynamicQueryCode(&sb, de.q, de.anns, de.cols, reg, ov)
 	}
 
 	return formatSource(sb.String(), "queries.go")
@@ -935,7 +963,7 @@ func isDynamicQuery(q *pluginv1.Query, anns []*irv1.AnnotationValue) bool {
 }
 
 // writeDynamicQueryCode generates a WHERE-aware dynamic query method.
-func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.AnnotationValue, cols []qField, reg *udtRegistry) {
+func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.AnnotationValue, cols []qField, reg *udtRegistry, ov overrides) {
 	sql := q.GetSql()
 	methodName := pascal(q.GetName())
 
@@ -1086,18 +1114,20 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 					pName = fmt.Sprintf("arg%d", paramNum)
 				}
 				fieldName = pascal(pName)
+				colID := p.GetColumn().GetId()
 				if isSlice {
-					// Slice: determine element type.
+					// Slice: determine element type. A column-id/type-name
+					// override applies to the element type.
 					tr := p.GetType()
 					if tr != nil && tr.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
-						gt, _ := goType(reg, tr.GetElement(), false)
+						gt, _ := resolveGoType(reg, ov, colID, tr.GetElement(), false)
 						goTypeStr = gt
 					} else {
-						gt, _ := goType(reg, tr, false)
+						gt, _ := resolveGoType(reg, ov, colID, tr, false)
 						goTypeStr = gt
 					}
 				} else {
-					gt, _ := goParamType(reg, p.GetType(), false)
+					gt, _ := resolveGoParamType(reg, ov, colID, p.GetType(), false)
 					goTypeStr = gt
 				}
 			} else {

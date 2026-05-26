@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type DBTX interface {
@@ -174,6 +175,19 @@ func (q *Queries) GetOwner(ctx context.Context, userID int64) (GetOwnerRow, erro
 	row := q.db.QueryRow(ctx, getOwnerSQL, userID)
 	var i GetOwnerRow
 	err := row.Scan(&i.Owner)
+	return i, err
+}
+
+const getActiveDuringSQL = `SELECT active_during FROM app.profiles WHERE user_id = $1;`
+
+type GetActiveDuringRow struct {
+	ActiveDuring pgtype.Range[pgtype.Timestamptz]
+}
+
+func (q *Queries) GetActiveDuring(ctx context.Context, userID int64) (GetActiveDuringRow, error) {
+	row := q.db.QueryRow(ctx, getActiveDuringSQL, userID)
+	var i GetActiveDuringRow
+	err := row.Scan(&i.ActiveDuring)
 	return i, err
 }
 

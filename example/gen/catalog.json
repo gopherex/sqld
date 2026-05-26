@@ -250,6 +250,16 @@
                 "kind": "TYPE_KIND_SCALAR",
                 "pgName": "person"
               }
+            },
+            {
+              "id": "app.profiles.active_during",
+              "name": "active_during",
+              "position": 7,
+              "type": {
+                "kind": "TYPE_KIND_SCALAR",
+                "pgName": "tstzrange"
+              },
+              "nullable": true
             }
           ],
           "constraints": [
@@ -933,9 +943,29 @@
               "nullable": true
             },
             {
+              "id": "app.kitchen_sink.c_int4range",
+              "name": "c_int4range",
+              "position": 27,
+              "type": {
+                "kind": "TYPE_KIND_SCALAR",
+                "pgName": "int4range"
+              },
+              "nullable": true
+            },
+            {
+              "id": "app.kitchen_sink.c_nummultirange",
+              "name": "c_nummultirange",
+              "position": 28,
+              "type": {
+                "kind": "TYPE_KIND_SCALAR",
+                "pgName": "nummultirange"
+              },
+              "nullable": true
+            },
+            {
               "id": "app.kitchen_sink.c_generated",
               "name": "c_generated",
-              "position": 27,
+              "position": 29,
               "type": {
                 "kind": "TYPE_KIND_SCALAR",
                 "pgName": "int4"
@@ -967,7 +997,7 @@
             {
               "id": "app.kitchen_sink.c_identity",
               "name": "c_identity",
-              "position": 28,
+              "position": 30,
               "type": {
                 "kind": "TYPE_KIND_SCALAR",
                 "pgName": "int4"
