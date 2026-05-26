@@ -123,6 +123,21 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Creat
 	return i, err
 }
 
+const getProfileSQL = `SELECT user_id, bio, address FROM app.profiles WHERE user_id = $1;`
+
+type GetProfileRow struct {
+	UserID  int64
+	Bio     *string
+	Address *AppAddress
+}
+
+func (q *Queries) GetProfile(ctx context.Context, userID int64) (GetProfileRow, error) {
+	row := q.db.QueryRow(ctx, getProfileSQL, userID)
+	var i GetProfileRow
+	err := row.Scan(&i.UserID, &i.Bio, &i.Address)
+	return i, err
+}
+
 const deleteUserSQL = `DELETE FROM app.users WHERE id = $1;`
 
 func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
