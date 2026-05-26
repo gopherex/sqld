@@ -54,12 +54,21 @@ type Plan struct {
 // Empty reports whether the plan has no changes.
 func (p *Plan) Empty() bool { return len(p.Changes) == 0 }
 
-// UpSQL renders the forward migration: changes stable-sorted by ascending
-// sortKey, with each non-empty UpSQL joined by newlines.
-func (p *Plan) UpSQL() string {
+// upOrdered returns the plan's changes in forward (apply) order: a stable sort
+// by ascending sortKey that preserves the relative order within a bucket. The
+// down migration is the exact reverse of this slice, so both directions agree
+// on a single canonical ordering.
+func (p *Plan) upOrdered() []Change {
 	cs := make([]Change, len(p.Changes))
 	copy(cs, p.Changes)
 	sort.SliceStable(cs, func(i, j int) bool { return cs[i].sortKey() < cs[j].sortKey() })
+	return cs
+}
+
+// UpSQL renders the forward migration: changes in ascending sortKey order, with
+// each non-empty UpSQL joined by newlines.
+func (p *Plan) UpSQL() string {
+	cs := p.upOrdered()
 	var b []string
 	for _, c := range cs {
 		if s := strings.TrimSpace(c.UpSQL()); s != "" {
@@ -69,15 +78,18 @@ func (p *Plan) UpSQL() string {
 	return strings.Join(b, "\n")
 }
 
-// DownSQL renders the inverse migration: changes stable-sorted by descending
-// sortKey, with each non-empty DownSQL joined by newlines.
+// DownSQL renders the inverse migration: the exact reverse of the up order,
+// emitting each change's DownSQL. Reversing the up order (rather than
+// re-sorting descending) is required for correctness when a single logical
+// change expands to an ordered pair in the same bucket — e.g. a changed
+// constraint emits [Drop(old), Add(new)] on up, whose correct inverse is
+// [Drop(new).Down=Add(new)... ] reversed to [Add(new).Down=Drop(new),
+// Drop(old).Down=Add(old)], i.e. drop the new then re-add the old.
 func (p *Plan) DownSQL() string {
-	cs := make([]Change, len(p.Changes))
-	copy(cs, p.Changes)
-	sort.SliceStable(cs, func(i, j int) bool { return cs[i].sortKey() > cs[j].sortKey() })
+	cs := p.upOrdered()
 	var b []string
-	for _, c := range cs {
-		if s := strings.TrimSpace(c.DownSQL()); s != "" {
+	for i := len(cs) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(cs[i].DownSQL()); s != "" {
 			b = append(b, s)
 		}
 	}

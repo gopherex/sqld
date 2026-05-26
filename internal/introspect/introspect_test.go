@@ -213,7 +213,11 @@ func TestIntrospect(t *testing.T) {
 		t.Fatalf("orders check constraint missing")
 	}
 
-	// ---- Indexes (on orders: idx_orders_user, idx_orders_lower_amt, + pk) ----
+	// ---- Indexes (on orders: idx_orders_user, idx_orders_lower_amt) ----
+	// Constraint-backed indexes (the PK-backing index) are owned by their
+	// constraint and intentionally NOT introspected as standalone indexes, so
+	// that generate does not emit both ADD CONSTRAINT and CREATE INDEX for the
+	// same physical relation.
 	var haveUserIdx, havePartialIdx, havePrimaryIdx bool
 	for _, idx := range orders.GetIndexes() {
 		switch idx.GetName() {
@@ -241,8 +245,8 @@ func TestIntrospect(t *testing.T) {
 	if !havePartialIdx {
 		t.Fatalf("idx_orders_lower_amt not found; have %v", indexNames(orders))
 	}
-	if !havePrimaryIdx {
-		t.Fatalf("primary-key-backing index not flagged; have %v", indexNames(orders))
+	if havePrimaryIdx {
+		t.Fatalf("primary-key-backing index should be excluded (owned by constraint); have %v", indexNames(orders))
 	}
 
 	// ---- Enum ----

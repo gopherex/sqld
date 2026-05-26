@@ -30,8 +30,13 @@ SELECT n.nspname,
 FROM pg_catalog.pg_type t
 JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
 JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid
+LEFT JOIN pg_catalog.pg_depend d
+       ON d.classid = 'pg_catalog.pg_type'::regclass
+      AND d.objid = t.oid
+      AND d.deptype = 'e'
 WHERE t.typtype = 'e'
   AND n.nspname = ANY($1)
+  AND d.objid IS NULL
 GROUP BY n.nspname, t.typname
 ORDER BY n.nspname, t.typname`
 	rows, err := b.conn.Query(ctx, q, schemas)
@@ -73,8 +78,13 @@ SELECT n.nspname,
 FROM pg_catalog.pg_type t
 JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
 LEFT JOIN pg_catalog.pg_collation co ON co.oid = t.typcollation AND t.typcollation <> 0
+LEFT JOIN pg_catalog.pg_depend d
+       ON d.classid = 'pg_catalog.pg_type'::regclass
+      AND d.objid = t.oid
+      AND d.deptype = 'e'
 WHERE t.typtype = 'd'
   AND n.nspname = ANY($1)
+  AND d.objid IS NULL
 ORDER BY n.nspname, t.typname`
 	rows, err := b.conn.Query(ctx, q, schemas)
 	if err != nil {
@@ -165,9 +175,14 @@ SELECT n.nspname, t.typname, t.typrelid
 FROM pg_catalog.pg_type t
 JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
 JOIN pg_catalog.pg_class c ON c.oid = t.typrelid
+LEFT JOIN pg_catalog.pg_depend d
+       ON d.classid = 'pg_catalog.pg_type'::regclass
+      AND d.objid = t.oid
+      AND d.deptype = 'e'
 WHERE t.typtype = 'c'
   AND c.relkind = 'c'
   AND n.nspname = ANY($1)
+  AND d.objid IS NULL
 ORDER BY n.nspname, t.typname`
 	rows, err := b.conn.Query(ctx, q, schemas)
 	if err != nil {
@@ -265,8 +280,13 @@ LEFT JOIN pg_catalog.pg_opclass opc ON opc.oid = r.rngsubopc AND r.rngsubopc <> 
 LEFT JOIN pg_catalog.pg_proc can ON can.oid = r.rngcanonical AND r.rngcanonical <> 0
 LEFT JOIN pg_catalog.pg_proc dif ON dif.oid = r.rngsubdiff AND r.rngsubdiff <> 0
 LEFT JOIN pg_catalog.pg_type mt ON mt.oid = r.rngmultitypid AND r.rngmultitypid <> 0
+LEFT JOIN pg_catalog.pg_depend d
+       ON d.classid = 'pg_catalog.pg_type'::regclass
+      AND d.objid = t.oid
+      AND d.deptype = 'e'
 WHERE t.typtype = 'r'
   AND n.nspname = ANY($1)
+  AND d.objid IS NULL
 ORDER BY n.nspname, t.typname`
 	rows, err := b.conn.Query(ctx, q, schemas)
 	if err != nil {

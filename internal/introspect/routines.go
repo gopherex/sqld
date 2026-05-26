@@ -10,10 +10,14 @@ import (
 // loadIndexes reads pg_index for the relations in the wanted schemas and
 // attaches Index entries to their owning Table.
 //
-// Indexes that merely back a PrimaryKey or UNIQUE constraint are still
-// recorded, but flagged: indisprimary sets Index.Primary, and constraint-owned
-// unique indexes set Index.Unique. The diff engine can decide whether to treat
-// them as redundant; we keep them so an introspected index list is complete.
+// Indexes that back a UNIQUE / PRIMARY KEY / EXCLUSION constraint are owned by
+// that constraint (pg_constraint.conindid) and are NOT introspected as
+// standalone indexes: the constraint already represents them. Emitting both an
+// "ADD CONSTRAINT ... UNIQUE" and a "CREATE UNIQUE INDEX" for the same physical
+// index makes the generated DDL fail to apply ("relation already exists"), and
+// the parse path likewise produces no separate Index for an inline UNIQUE/PK.
+// The indrelid filter therefore excludes any index referenced by some
+// constraint's conindid.
 func (b *builder) loadIndexes(ctx context.Context, schemas []string) error {
 	// Column names are resolved in SQL. keycol_names holds one entry per key
 	// attribute (in order); a NULL entry marks an expression key (attnum 0).
@@ -43,6 +47,8 @@ JOIN pg_catalog.pg_namespace n ON n.oid = tc.relnamespace
 JOIN pg_catalog.pg_am am ON am.oid = ic.relam
 WHERE n.nspname = ANY($1)
   AND tc.relkind = 'r'
+  AND i.indexrelid NOT IN (
+        SELECT con.conindid FROM pg_catalog.pg_constraint con WHERE con.conindid <> 0)
 ORDER BY n.nspname, tc.relname, ic.relname`
 	rows, err := b.conn.Query(ctx, q, schemas)
 	if err != nil {
@@ -174,8 +180,13 @@ SELECT n.nspname,
 FROM pg_catalog.pg_proc p
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 JOIN pg_catalog.pg_language l ON l.oid = p.prolang
+LEFT JOIN pg_catalog.pg_depend d
+       ON d.classid = 'pg_catalog.pg_proc'::regclass
+      AND d.objid = p.oid
+      AND d.deptype = 'e'
 WHERE n.nspname = ANY($1)
   AND p.prokind IN ('f','p')
+  AND d.objid IS NULL
 ORDER BY n.nspname, p.proname`
 	rows, err := b.conn.Query(ctx, q, schemas)
 	if err != nil {

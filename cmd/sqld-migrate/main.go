@@ -448,7 +448,7 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "generate: mkdir %s: %v\n", dir, err)
 		return 1
 	}
-	version := time.Now().UTC().Format("20060102150405")
+	version := genVersion(time.Now().UTC())
 	outPath := filepath.Join(dir, version+"_"+name+".sql")
 	content := "-- sqld:up\n" + plan.UpSQL() + "\n\n-- sqld:down\n" + plan.DownSQL() + "\n"
 	if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
@@ -458,6 +458,14 @@ func runGenerate(args []string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintln(stdout, outPath)
 	return 0
+}
+
+// genVersion renders a migration version stamp at millisecond resolution so
+// two generates within the same second do not collide. The "." in the
+// reference layout is stripped so the version stays an all-digit,
+// lexicographically sortable token (e.g. 20060102150405123).
+func genVersion(t time.Time) string {
+	return strings.Replace(t.UTC().Format("20060102150405.000"), ".", "", 1)
 }
 
 // buildCatalog spins up a fresh dev database, applies sql (when non-empty), and
@@ -473,6 +481,15 @@ func buildCatalog(ctx context.Context, devURL, sql string, schemas []string) (ca
 			err = cerr
 		}
 	}()
+
+	// An external --dev-url database is reused across calls (Close is a no-op),
+	// so each independent state must start from a clean slate. The ephemeral
+	// container path gets a brand-new instance per Open and needs no reset.
+	if dev.External() {
+		if err := dev.Reset(ctx); err != nil {
+			return nil, fmt.Errorf("reset dev db: %w", err)
+		}
+	}
 
 	if strings.TrimSpace(sql) != "" {
 		if err := dev.Apply(ctx, sql); err != nil {

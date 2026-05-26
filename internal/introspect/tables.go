@@ -25,8 +25,13 @@ func (b *builder) loadTables(ctx context.Context, schemas []string) error {
 SELECT c.oid, n.nspname, c.relname, c.relpersistence::text
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_catalog.pg_depend d
+       ON d.classid = 'pg_catalog.pg_class'::regclass
+      AND d.objid = c.oid
+      AND d.deptype = 'e'
 WHERE c.relkind = 'r'
   AND n.nspname = ANY($1)
+  AND d.objid IS NULL
 ORDER BY n.nspname, c.relname`
 	rows, err := b.conn.Query(ctx, q, schemas)
 	if err != nil {
@@ -240,7 +245,7 @@ ORDER BY rn.nspname, rc.relname, con.conname`
 		case "x":
 			c.Type = irv1.ConstraintType_CONSTRAINT_TYPE_EXCLUSION
 			c.Body = &irv1.Constraint_Exclusion{
-				Exclusion: &irv1.ExclusionConstraint{},
+				Exclusion: parseExclusionDef(def),
 			}
 		case "f":
 			c.Type = irv1.ConstraintType_CONSTRAINT_TYPE_FOREIGN_KEY
@@ -346,6 +351,112 @@ func checkBody(def string) string {
 		s = s[1 : len(s)-1]
 	}
 	return strings.TrimSpace(s)
+}
+
+// parseExclusionDef parses a pg_get_constraintdef result for an EXCLUSION
+// constraint into a structured ExclusionConstraint so renderConstraintBody can
+// emit a valid `EXCLUDE USING <method> (<elem> WITH <op>, ...) [WHERE (...)]`.
+//
+// The def has the shape:
+//
+//	EXCLUDE USING gist (id WITH =, during WITH &&) [WHERE (<predicate>)]
+//
+// Element targets are kept as raw expressions (column names included) so that
+// even non-trivial expression elements round-trip; the leading "<target> WITH
+// <op>" split is performed on the last " WITH " of each element.
+func parseExclusionDef(def string) *irv1.ExclusionConstraint {
+	ex := &irv1.ExclusionConstraint{}
+	s := strings.TrimSpace(def)
+
+	const excl = "EXCLUDE"
+	if !strings.HasPrefix(s, excl) {
+		return ex
+	}
+	s = strings.TrimSpace(s[len(excl):])
+
+	// Optional USING <method>.
+	if strings.HasPrefix(s, "USING ") {
+		s = strings.TrimSpace(s[len("USING "):])
+		// method is the token up to the first '('.
+		if i := strings.IndexByte(s, '('); i >= 0 {
+			ex.IndexMethod = strings.TrimSpace(s[:i])
+			s = s[i:]
+		}
+	}
+
+	// Element list within the first balanced parenthesis group.
+	open := strings.IndexByte(s, '(')
+	if open < 0 {
+		return ex
+	}
+	depth := 0
+	closeIdx := -1
+	for i := open; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				closeIdx = i
+			}
+		}
+		if closeIdx >= 0 {
+			break
+		}
+	}
+	if closeIdx < 0 {
+		return ex
+	}
+	inner := s[open+1 : closeIdx]
+	for _, part := range splitTopLevelCommas(inner) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		target, op := part, ""
+		if idx := strings.LastIndex(part, " WITH "); idx >= 0 {
+			target = strings.TrimSpace(part[:idx])
+			op = strings.TrimSpace(part[idx+len(" WITH "):])
+		}
+		ex.Elements = append(ex.Elements, &irv1.ExclusionElement{
+			Target:   &irv1.ExclusionElement_Expr{Expr: rawExpr(target)},
+			Operator: op,
+		})
+	}
+
+	// Optional trailing WHERE (predicate).
+	rest := strings.TrimSpace(s[closeIdx+1:])
+	if strings.HasPrefix(rest, "WHERE ") {
+		pred := strings.TrimSpace(rest[len("WHERE "):])
+		if len(pred) >= 2 && pred[0] == '(' && pred[len(pred)-1] == ')' {
+			pred = strings.TrimSpace(pred[1 : len(pred)-1])
+		}
+		ex.Predicate = rawExpr(pred)
+	}
+	return ex
+}
+
+// splitTopLevelCommas splits s on commas that are not nested inside parens.
+func splitTopLevelCommas(s string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, s[start:])
+	return out
 }
 
 // persistence maps relpersistence to TablePersistence.

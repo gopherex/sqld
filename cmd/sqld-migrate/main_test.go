@@ -7,9 +7,43 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yaroher/sqld/internal/devdb"
 )
+
+// TestGenVersionUnique (M1) verifies the version stamp has millisecond
+// resolution, so two generates within the same second produce distinct,
+// sortable versions. The old second-resolution format collided.
+func TestGenVersionUnique(t *testing.T) {
+	base := time.Date(2026, 5, 26, 10, 30, 15, 0, time.UTC)
+
+	v0 := genVersion(base)                                  // .000 ms
+	v1 := genVersion(base.Add(123 * time.Millisecond))      // .123 ms
+	v2 := genVersion(base.Add(1 * time.Millisecond))        // .001 ms
+	sameSec := genVersion(base.Add(900 * time.Millisecond)) // .900 ms
+
+	// All-digit and 17 chars (yyyymmddHHMMSS + 3 ms digits).
+	for _, v := range []string{v0, v1, v2, sameSec} {
+		if len(v) != 17 {
+			t.Fatalf("version %q length=%d, want 17", v, len(v))
+		}
+		for _, r := range v {
+			if r < '0' || r > '9' {
+				t.Fatalf("version %q is not all-digit", v)
+			}
+		}
+	}
+
+	// Distinct within the same second.
+	if v0 == v1 || v0 == v2 || v1 == sameSec {
+		t.Fatalf("versions within one second collided: %q %q %q %q", v0, v1, v2, sameSec)
+	}
+	// Sortable: later millisecond sorts lexicographically after earlier.
+	if !(v0 < v2 && v2 < v1 && v1 < sameSec) {
+		t.Fatalf("versions not lexicographically sortable: %q %q %q %q", v0, v2, v1, sameSec)
+	}
+}
 
 func TestUsage(t *testing.T) {
 	var out, errb bytes.Buffer

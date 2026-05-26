@@ -255,15 +255,22 @@ func (b *builder) typeRefFromOID(oid uint32, formatted string) *irv1.TypeRef {
 	info, ok := b.oidToType[oid]
 	if !ok {
 		// Unknown oid: best effort with the formatted name.
+		pg := basePgName(formatted)
 		return &irv1.TypeRef{
-			Kind:   irv1.TypeKind_TYPE_KIND_SCALAR,
-			PgName: basePgName(formatted),
+			Kind:     irv1.TypeKind_TYPE_KIND_SCALAR,
+			PgName:   pg,
+			Modifier: modifierFromFormatted(pg, formatted),
 		}
 	}
 
 	if info.kind == irv1.TypeKind_TYPE_KIND_ARRAY {
-		// Resolve the element type (info.elem) for the array.
+		// Resolve the element type (info.elem) for the array. The column's
+		// modifier (e.g. numeric(10,2)[]) applies to the element type, so the
+		// formatted string is carried onto the element so its modifier renders.
 		elem := b.scalarOrUserRef(info.elem)
+		if mod := modifierFromFormatted(elem.GetPgName(), formatted); mod != nil {
+			elem.Modifier = mod
+		}
 		return &irv1.TypeRef{
 			Kind:            irv1.TypeKind_TYPE_KIND_ARRAY,
 			PgName:          info.name, // e.g. "_int4"
@@ -273,8 +280,9 @@ func (b *builder) typeRefFromOID(oid uint32, formatted string) *irv1.TypeRef {
 	}
 
 	ref := &irv1.TypeRef{
-		Kind:   info.kind,
-		PgName: info.name,
+		Kind:     info.kind,
+		PgName:   info.name,
+		Modifier: modifierFromFormatted(info.name, formatted),
 	}
 	switch info.kind {
 	case irv1.TypeKind_TYPE_KIND_ENUM:
@@ -330,4 +338,162 @@ func rawExpr(sql string) *irv1.Expr {
 // qname builds a schema-qualified QualifiedName.
 func qname(schema, name string) *irv1.QualifiedName {
 	return &irv1.QualifiedName{Schema: schema, Name: name}
+}
+
+// modifierFromFormatted builds a TypeModifier for a scalar type from its
+// format_type output, keyed by the bare pg_type name (typname). It mirrors how
+// internal/mapper.MapType represents modifiers from parsed DDL, so an
+// introspected column and a parsed column of the same type render identically
+// (no spurious modifier diffs).
+//
+// pgName is the bare typname (e.g. "numeric", "varchar", "timestamptz");
+// formatted is the pg_catalog.format_type result (e.g. "numeric(10,2)",
+// "character varying(50)", "timestamp(3) with time zone"). The leading
+// number(s) inside the first parenthesized group carry the modifier values.
+func modifierFromFormatted(pgName, formatted string) *irv1.TypeModifier {
+	nums := formatModifierNumbers(formatted)
+
+	switch pgName {
+	case "numeric", "float4", "float8":
+		if len(nums) == 0 {
+			return nil
+		}
+		m := &irv1.NumericModifier{Precision: uint32(nums[0])}
+		if len(nums) > 1 {
+			m.Scale = uint32(nums[1])
+		}
+		return &irv1.TypeModifier{Modifier: &irv1.TypeModifier_Numeric{Numeric: m}}
+
+	case "varchar", "bpchar", "char", "bit", "varbit":
+		if len(nums) == 0 {
+			return nil
+		}
+		return &irv1.TypeModifier{
+			Modifier: &irv1.TypeModifier_Text{Text: &irv1.StringModifier{Length: uint32(nums[0])}},
+		}
+
+	case "timestamp", "timestamptz":
+		tz := pgName == "timestamptz"
+		if len(nums) == 0 {
+			if tz {
+				// Bare timestamptz still carries WithTimezone, matching the parser.
+				return &irv1.TypeModifier{
+					Modifier: &irv1.TypeModifier_DateTime{DateTime: &irv1.DateTimeModifier{WithTimezone: true}},
+				}
+			}
+			return nil
+		}
+		return &irv1.TypeModifier{
+			Modifier: &irv1.TypeModifier_DateTime{DateTime: &irv1.DateTimeModifier{
+				WithTimezone: tz,
+				Precision:    uint32(nums[0]),
+			}},
+		}
+
+	case "time", "timetz":
+		tz := pgName == "timetz"
+		if len(nums) == 0 {
+			if tz {
+				return &irv1.TypeModifier{
+					Modifier: &irv1.TypeModifier_DateTime{DateTime: &irv1.DateTimeModifier{WithTimezone: true}},
+				}
+			}
+			return nil
+		}
+		return &irv1.TypeModifier{
+			Modifier: &irv1.TypeModifier_DateTime{DateTime: &irv1.DateTimeModifier{
+				WithTimezone: tz,
+				Precision:    uint32(nums[0]),
+			}},
+		}
+
+	case "interval":
+		if len(nums) == 0 {
+			return nil
+		}
+		// interval(p): mapper stores precision and leaves Fields empty.
+		return &irv1.TypeModifier{
+			Modifier: &irv1.TypeModifier_Interval{Interval: &irv1.IntervalModifier{Precision: uint32(nums[0])}},
+		}
+	}
+	return nil
+}
+
+// formatModifierNumbers extracts the integer arguments from the first
+// parenthesized group of a format_type string, e.g. "numeric(10,2)" -> {10,2},
+// "character varying(50)" -> {50}, "timestamp(3) with time zone" -> {3}. It
+// returns nil when there is no parenthesized modifier (e.g. "integer", "text",
+// "character varying").
+func formatModifierNumbers(formatted string) []int {
+	open := -1
+	for i := 0; i < len(formatted); i++ {
+		if formatted[i] == '(' {
+			open = i
+			break
+		}
+	}
+	if open < 0 {
+		return nil
+	}
+	close := -1
+	for i := open + 1; i < len(formatted); i++ {
+		if formatted[i] == ')' {
+			close = i
+			break
+		}
+	}
+	if close < 0 {
+		return nil
+	}
+	inner := formatted[open+1 : close]
+	var out []int
+	for _, part := range splitComma(inner) {
+		part = trimSpace(part)
+		n, ok := atoiSimple(part)
+		if !ok {
+			return nil
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// splitComma splits on ',' without pulling in strings for a hot path.
+func splitComma(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	out = append(out, s[start:])
+	return out
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// atoiSimple parses a non-negative base-10 integer, returning ok=false for any
+// non-digit content.
+func atoiSimple(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n, true
 }
