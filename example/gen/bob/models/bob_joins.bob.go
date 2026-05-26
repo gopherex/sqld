@@ -32,11 +32,11 @@ func (j joinSet[Q]) AliasedAs(alias string) joinSet[Q] {
 }
 
 type joins[Q dialect.Joinable] struct {
-	Users     joinSet[userJoins[Q]]
-	Profiles  joinSet[profileJoins[Q]]
-	Orders    joinSet[orderJoins[Q]]
-	Roles     joinSet[roleJoins[Q]]
-	UserRoles joinSet[userRoleJoins[Q]]
+	AppUsers     joinSet[appUserJoins[Q]]
+	AppProfiles  joinSet[appProfileJoins[Q]]
+	AppOrders    joinSet[appOrderJoins[Q]]
+	AppRoles     joinSet[appRoleJoins[Q]]
+	AppUserRoles joinSet[appUserRoleJoins[Q]]
 }
 
 func buildJoinSet[Q interface{ aliasedAs(string) Q }, C any, F func(C, string) Q](c C, f F) joinSet[Q] {
@@ -49,11 +49,11 @@ func buildJoinSet[Q interface{ aliasedAs(string) Q }, C any, F func(C, string) Q
 
 func getJoins[Q dialect.Joinable]() joins[Q] {
 	return joins[Q]{
-		Users:     buildJoinSet[userJoins[Q]](Users.Columns, buildUserJoins),
-		Profiles:  buildJoinSet[profileJoins[Q]](Profiles.Columns, buildProfileJoins),
-		Orders:    buildJoinSet[orderJoins[Q]](Orders.Columns, buildOrderJoins),
-		Roles:     buildJoinSet[roleJoins[Q]](Roles.Columns, buildRoleJoins),
-		UserRoles: buildJoinSet[userRoleJoins[Q]](UserRoles.Columns, buildUserRoleJoins),
+		AppUsers:     buildJoinSet[appUserJoins[Q]](AppUsers.Columns, buildAppUserJoins),
+		AppProfiles:  buildJoinSet[appProfileJoins[Q]](AppProfiles.Columns, buildAppProfileJoins),
+		AppOrders:    buildJoinSet[appOrderJoins[Q]](AppOrders.Columns, buildAppOrderJoins),
+		AppRoles:     buildJoinSet[appRoleJoins[Q]](AppRoles.Columns, buildAppRoleJoins),
+		AppUserRoles: buildJoinSet[appUserRoleJoins[Q]](AppUserRoles.Columns, buildAppUserRoleJoins),
 	}
 }
 

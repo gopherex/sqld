@@ -17,24 +17,24 @@ import (
 	"github.com/stephenafamo/bob/expr"
 )
 
-// Log is an object representing the database table.
-type Log struct {
+// AuditLog is an object representing the database table.
+type AuditLog struct {
 	ID        int64     `db:"id,pk" `
 	TableName string    `db:"table_name" `
 	ChangedAt time.Time `db:"changed_at" `
 }
 
-// LogSlice is an alias for a slice of pointers to Log.
-// This should almost always be used instead of []*Log.
-type LogSlice []*Log
+// AuditLogSlice is an alias for a slice of pointers to AuditLog.
+// This should almost always be used instead of []*AuditLog.
+type AuditLogSlice []*AuditLog
 
-// Logs contains methods to work with the log table
-var Logs = psql.NewTablex[*Log, LogSlice, *LogSetter]("audit", "log", buildLogColumns("log"))
+// AuditLogs contains methods to work with the log table
+var AuditLogs = psql.NewTablex[*AuditLog, AuditLogSlice, *AuditLogSetter]("audit", "log", buildAuditLogColumns("audit.log"))
 
-// LogsQuery is a query on the log table
-type LogsQuery = *psql.ViewQuery[*Log, LogSlice]
+// AuditLogsQuery is a query on the log table
+type AuditLogsQuery = *psql.ViewQuery[*AuditLog, AuditLogSlice]
 
-func buildLogColumns(tableName string) logColumns {
+func buildAuditLogColumns(tableName string) auditLogColumns {
 	columnsExpr := expr.NewColumnsExpr(
 		"id", "table_name", "changed_at",
 	)
@@ -43,72 +43,72 @@ func buildLogColumns(tableName string) logColumns {
 		columnsExpr = columnsExpr.WithParent(tableName)
 	}
 
-	return logColumns{
+	return auditLogColumns{
 		ColumnsExpr: columnsExpr,
 		tableAlias:  tableName,
-		ID:          buildLogColumn(tableName, "id"),
-		TableName:   buildLogColumn(tableName, "table_name"),
-		ChangedAt:   buildLogColumn(tableName, "changed_at"),
+		ID:          buildAuditLogColumn(tableName, "id"),
+		TableName:   buildAuditLogColumn(tableName, "table_name"),
+		ChangedAt:   buildAuditLogColumn(tableName, "changed_at"),
 	}
 }
 
-type logColumns struct {
+type auditLogColumns struct {
 	expr.ColumnsExpr
 	tableAlias string
-	ID         logColumn
-	TableName  logColumn
-	ChangedAt  logColumn
+	ID         auditLogColumn
+	TableName  auditLogColumn
+	ChangedAt  auditLogColumn
 }
 
 // Alias returns the current table alias for the columns set.
-func (c logColumns) Alias() string {
+func (c auditLogColumns) Alias() string {
 	return c.tableAlias
 }
 
 // AliasedAs returns a copy of the columns set qualified by tableName.
-func (logColumns) AliasedAs(tableName string) logColumns {
-	return buildLogColumns(tableName)
+func (auditLogColumns) AliasedAs(tableName string) auditLogColumns {
+	return buildAuditLogColumns(tableName)
 }
 
 // Unqualified returns a copy of the columns set without table qualification.
-func (c logColumns) Unqualified() logColumns {
-	return buildLogColumns("")
+func (c auditLogColumns) Unqualified() auditLogColumns {
+	return buildAuditLogColumns("")
 }
 
-func buildLogColumn(alias, name string) logColumn {
-	return logColumn{
+func buildAuditLogColumn(alias, name string) auditLogColumn {
+	return auditLogColumn{
 		Expression: psql.Quote(alias, name),
 		alias:      alias,
 		name:       name,
 	}
 }
 
-type logColumn struct {
+type auditLogColumn struct {
 	psql.Expression
 	alias string
 	name  string
 }
 
 // Name returns the unqualified column name.
-func (c logColumn) Name() string {
+func (c auditLogColumn) Name() string {
 	return c.name
 }
 
 // ShouldOmitParens prevents automatic parenthesis wrapping in expression builders.
-func (c logColumn) ShouldOmitParens() bool {
+func (c auditLogColumn) ShouldOmitParens() bool {
 	return true
 }
 
-// LogSetter is used for insert/upsert/update operations
+// AuditLogSetter is used for insert/upsert/update operations
 // All values are optional, and do not have to be set
 // Generated columns are not included
-type LogSetter struct {
+type AuditLogSetter struct {
 	ID        *int64     `db:"id,pk" `
 	TableName *string    `db:"table_name" `
 	ChangedAt *time.Time `db:"changed_at" `
 }
 
-func (s LogSetter) SetColumns() []string {
+func (s AuditLogSetter) SetColumns() []string {
 	vals := make([]string, 0, 3)
 	if s.ID != nil {
 		vals = append(vals, "id")
@@ -122,7 +122,7 @@ func (s LogSetter) SetColumns() []string {
 	return vals
 }
 
-func (s LogSetter) Overwrite(t *Log) {
+func (s AuditLogSetter) Overwrite(t *AuditLog) {
 	if s.ID != nil {
 		t.ID = func() int64 {
 			if s.ID == nil {
@@ -149,9 +149,9 @@ func (s LogSetter) Overwrite(t *Log) {
 	}
 }
 
-func (s *LogSetter) Apply(q *dialect.InsertQuery) {
+func (s *AuditLogSetter) Apply(q *dialect.InsertQuery) {
 	q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-		return Logs.BeforeInsertHooks.RunHooks(ctx, exec, s)
+		return AuditLogs.BeforeInsertHooks.RunHooks(ctx, exec, s)
 	})
 
 	q.AppendValues(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
@@ -193,11 +193,11 @@ func (s *LogSetter) Apply(q *dialect.InsertQuery) {
 	}))
 }
 
-func (s LogSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (s AuditLogSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return um.Set(s.Expressions()...)
 }
 
-func (s LogSetter) Expressions(prefix ...string) []bob.Expression {
+func (s AuditLogSetter) Expressions(prefix ...string) []bob.Expression {
 	exprs := make([]bob.Expression, 0, 3)
 
 	if s.ID != nil {
@@ -224,62 +224,62 @@ func (s LogSetter) Expressions(prefix ...string) []bob.Expression {
 	return exprs
 }
 
-// FindLog retrieves a single record by primary key
+// FindAuditLog retrieves a single record by primary key
 // If cols is empty Find will return all columns.
-func FindLog(ctx context.Context, exec bob.Executor, IDPK int64, cols ...string) (*Log, error) {
+func FindAuditLog(ctx context.Context, exec bob.Executor, IDPK int64, cols ...string) (*AuditLog, error) {
 	if len(cols) == 0 {
-		return Logs.Query(
-			sm.Where(Logs.Columns.ID.EQ(psql.Arg(IDPK))),
+		return AuditLogs.Query(
+			sm.Where(AuditLogs.Columns.ID.EQ(psql.Arg(IDPK))),
 		).One(ctx, exec)
 	}
 
-	return Logs.Query(
-		sm.Where(Logs.Columns.ID.EQ(psql.Arg(IDPK))),
-		sm.Columns(Logs.Columns.Only(cols...)),
+	return AuditLogs.Query(
+		sm.Where(AuditLogs.Columns.ID.EQ(psql.Arg(IDPK))),
+		sm.Columns(AuditLogs.Columns.Only(cols...)),
 	).One(ctx, exec)
 }
 
-// LogExists checks the presence of a single record by primary key
-func LogExists(ctx context.Context, exec bob.Executor, IDPK int64) (bool, error) {
-	return Logs.Query(
-		sm.Where(Logs.Columns.ID.EQ(psql.Arg(IDPK))),
+// AuditLogExists checks the presence of a single record by primary key
+func AuditLogExists(ctx context.Context, exec bob.Executor, IDPK int64) (bool, error) {
+	return AuditLogs.Query(
+		sm.Where(AuditLogs.Columns.ID.EQ(psql.Arg(IDPK))),
 	).Exists(ctx, exec)
 }
 
-// AfterQueryHook is called after Log is retrieved from the database
-func (o *Log) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AuditLog is retrieved from the database
+func (o *AuditLog) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Logs.AfterSelectHooks.RunHooks(ctx, exec, LogSlice{o})
+		ctx, err = AuditLogs.AfterSelectHooks.RunHooks(ctx, exec, AuditLogSlice{o})
 	case bob.QueryTypeInsert:
-		ctx, err = Logs.AfterInsertHooks.RunHooks(ctx, exec, LogSlice{o})
+		ctx, err = AuditLogs.AfterInsertHooks.RunHooks(ctx, exec, AuditLogSlice{o})
 	case bob.QueryTypeUpdate:
-		ctx, err = Logs.AfterUpdateHooks.RunHooks(ctx, exec, LogSlice{o})
+		ctx, err = AuditLogs.AfterUpdateHooks.RunHooks(ctx, exec, AuditLogSlice{o})
 	case bob.QueryTypeDelete:
-		ctx, err = Logs.AfterDeleteHooks.RunHooks(ctx, exec, LogSlice{o})
+		ctx, err = AuditLogs.AfterDeleteHooks.RunHooks(ctx, exec, AuditLogSlice{o})
 	case bob.QueryTypeMerge:
-		ctx, err = Logs.AfterMergeHooks.RunHooks(ctx, exec, LogSlice{o})
+		ctx, err = AuditLogs.AfterMergeHooks.RunHooks(ctx, exec, AuditLogSlice{o})
 	}
 
 	return err
 }
 
-// primaryKeyVals returns the primary key values of the Log
-func (o *Log) primaryKeyVals() bob.Expression {
+// primaryKeyVals returns the primary key values of the AuditLog
+func (o *AuditLog) primaryKeyVals() bob.Expression {
 	return psql.Arg(o.ID)
 }
 
-func (o *Log) pkEQ() dialect.Expression {
-	return psql.Quote("log", "id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+func (o *AuditLog) pkEQ() dialect.Expression {
+	return psql.Quote("audit.log", "id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		return o.primaryKeyVals().WriteSQL(ctx, w, d, start)
 	}))
 }
 
-// Update uses an executor to update the Log
-func (o *Log) Update(ctx context.Context, exec bob.Executor, s *LogSetter) error {
-	v, err := Logs.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
+// Update uses an executor to update the AuditLog
+func (o *AuditLog) Update(ctx context.Context, exec bob.Executor, s *AuditLogSetter) error {
+	v, err := AuditLogs.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -289,16 +289,16 @@ func (o *Log) Update(ctx context.Context, exec bob.Executor, s *LogSetter) error
 	return nil
 }
 
-// Delete deletes a single Log record with an executor
-func (o *Log) Delete(ctx context.Context, exec bob.Executor) error {
-	_, err := Logs.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
+// Delete deletes a single AuditLog record with an executor
+func (o *AuditLog) Delete(ctx context.Context, exec bob.Executor) error {
+	_, err := AuditLogs.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
 	return err
 }
 
-// Reload refreshes the Log using the executor
-func (o *Log) Reload(ctx context.Context, exec bob.Executor) error {
-	o2, err := Logs.Query(
-		sm.Where(Logs.Columns.ID.EQ(psql.Arg(o.ID))),
+// Reload refreshes the AuditLog using the executor
+func (o *AuditLog) Reload(ctx context.Context, exec bob.Executor) error {
+	o2, err := AuditLogs.Query(
+		sm.Where(AuditLogs.Columns.ID.EQ(psql.Arg(o.ID))),
 	).One(ctx, exec)
 	if err != nil {
 		return err
@@ -309,32 +309,32 @@ func (o *Log) Reload(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// AfterQueryHook is called after LogSlice is retrieved from the database
-func (o LogSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AuditLogSlice is retrieved from the database
+func (o AuditLogSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Logs.AfterSelectHooks.RunHooks(ctx, exec, o)
+		ctx, err = AuditLogs.AfterSelectHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeInsert:
-		ctx, err = Logs.AfterInsertHooks.RunHooks(ctx, exec, o)
+		ctx, err = AuditLogs.AfterInsertHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeUpdate:
-		ctx, err = Logs.AfterUpdateHooks.RunHooks(ctx, exec, o)
+		ctx, err = AuditLogs.AfterUpdateHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeDelete:
-		ctx, err = Logs.AfterDeleteHooks.RunHooks(ctx, exec, o)
+		ctx, err = AuditLogs.AfterDeleteHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeMerge:
-		ctx, err = Logs.AfterMergeHooks.RunHooks(ctx, exec, o)
+		ctx, err = AuditLogs.AfterMergeHooks.RunHooks(ctx, exec, o)
 	}
 
 	return err
 }
 
-func (o LogSlice) pkIN() dialect.Expression {
+func (o AuditLogSlice) pkIN() dialect.Expression {
 	if len(o) == 0 {
 		return psql.Raw("NULL")
 	}
 
-	return psql.Quote("log", "id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+	return psql.Quote("audit.log", "id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		pkPairs := make([]bob.Expression, len(o))
 		for i, row := range o {
 			pkPairs[i] = row.primaryKeyVals()
@@ -346,7 +346,7 @@ func (o LogSlice) pkIN() dialect.Expression {
 // copyMatchingRows finds models in the given slice that have the same primary key
 // then it first copies the existing relationships from the old model to the new model
 // and then replaces the old model in the slice with the new model
-func (o LogSlice) copyMatchingRows(from ...*Log) {
+func (o AuditLogSlice) copyMatchingRows(from ...*AuditLog) {
 	for i, old := range o {
 		for _, new := range from {
 			if new.ID != old.ID {
@@ -360,25 +360,25 @@ func (o LogSlice) copyMatchingRows(from ...*Log) {
 }
 
 // UpdateMod modifies an update query with "WHERE primary_key IN (o...)"
-func (o LogSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (o AuditLogSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return bob.ModFunc[*dialect.UpdateQuery](func(q *dialect.UpdateQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Logs.BeforeUpdateHooks.RunHooks(ctx, exec, o)
+			return AuditLogs.BeforeUpdateHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Log:
+			case *AuditLog:
 				o.copyMatchingRows(retrieved)
-			case []*Log:
+			case []*AuditLog:
 				o.copyMatchingRows(retrieved...)
-			case LogSlice:
+			case AuditLogSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Log or a slice of Log
+				// If the retrieved value is not a AuditLog or a slice of AuditLog
 				// then run the AfterUpdateHooks on the slice
-				_, err = Logs.AfterUpdateHooks.RunHooks(ctx, exec, o)
+				_, err = AuditLogs.AfterUpdateHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -389,25 +389,25 @@ func (o LogSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 // DeleteMod modifies an delete query with "WHERE primary_key IN (o...)"
-func (o LogSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
+func (o AuditLogSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 	return bob.ModFunc[*dialect.DeleteQuery](func(q *dialect.DeleteQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Logs.BeforeDeleteHooks.RunHooks(ctx, exec, o)
+			return AuditLogs.BeforeDeleteHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Log:
+			case *AuditLog:
 				o.copyMatchingRows(retrieved)
-			case []*Log:
+			case []*AuditLog:
 				o.copyMatchingRows(retrieved...)
-			case LogSlice:
+			case AuditLogSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Log or a slice of Log
+				// If the retrieved value is not a AuditLog or a slice of AuditLog
 				// then run the AfterDeleteHooks on the slice
-				_, err = Logs.AfterDeleteHooks.RunHooks(ctx, exec, o)
+				_, err = AuditLogs.AfterDeleteHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -419,25 +419,25 @@ func (o LogSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 
 // MergeMod modifies a merge query to run BeforeMergeHooks and AfterMergeHooks
 // and updates the slice with the returned rows.
-func (o LogSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
+func (o AuditLogSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	return bob.ModFunc[*dialect.MergeQuery](func(q *dialect.MergeQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Logs.BeforeMergeHooks.RunHooks(ctx, exec, o)
+			return AuditLogs.BeforeMergeHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Log:
+			case *AuditLog:
 				o.copyMatchingRows(retrieved)
-			case []*Log:
+			case []*AuditLog:
 				o.copyMatchingRows(retrieved...)
-			case LogSlice:
+			case AuditLogSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Log or a slice of Log
+				// If the retrieved value is not a AuditLog or a slice of AuditLog
 				// then run the AfterMergeHooks on the slice
-				_, err = Logs.AfterMergeHooks.RunHooks(ctx, exec, o)
+				_, err = AuditLogs.AfterMergeHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -445,30 +445,30 @@ func (o LogSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	})
 }
 
-func (o LogSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals LogSetter) error {
+func (o AuditLogSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals AuditLogSetter) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Logs.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
+	_, err := AuditLogs.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
 	return err
 }
 
-func (o LogSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
+func (o AuditLogSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Logs.Delete(o.DeleteMod()).Exec(ctx, exec)
+	_, err := AuditLogs.Delete(o.DeleteMod()).Exec(ctx, exec)
 	return err
 }
 
-func (o LogSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
+func (o AuditLogSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	o2, err := Logs.Query(sm.Where(o.pkIN())).All(ctx, exec)
+	o2, err := AuditLogs.Query(sm.Where(o.pkIN())).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -478,18 +478,18 @@ func (o LogSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-type logWhere[Q psql.Filterable] struct {
+type auditLogWhere[Q psql.Filterable] struct {
 	ID        psql.WhereMod[Q, int64]
 	TableName psql.WhereMod[Q, string]
 	ChangedAt psql.WhereMod[Q, time.Time]
 }
 
-func (logWhere[Q]) AliasedAs(alias string) logWhere[Q] {
-	return buildLogWhere[Q](buildLogColumns(alias))
+func (auditLogWhere[Q]) AliasedAs(alias string) auditLogWhere[Q] {
+	return buildAuditLogWhere[Q](buildAuditLogColumns(alias))
 }
 
-func buildLogWhere[Q psql.Filterable](cols logColumns) logWhere[Q] {
-	return logWhere[Q]{
+func buildAuditLogWhere[Q psql.Filterable](cols auditLogColumns) auditLogWhere[Q] {
+	return auditLogWhere[Q]{
 		ID:        psql.Where[Q, int64](cols.ID.Expression),
 		TableName: psql.Where[Q, string](cols.TableName.Expression),
 		ChangedAt: psql.Where[Q, time.Time](cols.ChangedAt.Expression),

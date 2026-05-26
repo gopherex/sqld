@@ -23,14 +23,15 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 		return nil, fmt.Errorf("options: %w", err)
 	}
 
-	null := gotypes.Pointer
-	typeSystem := "github.com/aarondl/opt/null" // pointer-based optionals
+	// nullMode selects bob's TypeSystem: model fields are null.Val[T] either way;
+	// the mode controls the SETTER/optional wrapper — "pointer" → *T, "opt" →
+	// omit.Val[T]. It must match sqld-gen-go's nullMode.
+	typeSystem := "github.com/aarondl/opt/null" // pointer-based setters
 	if opts.NullMode == "opt" {
-		null = gotypes.Opt
-		typeSystem = "" // aarondl/opt (null.Val/omit.Val value types)
+		typeSystem = "" // aarondl/opt (omit.Val/null.Val value types)
 	}
 
-	driver := newDriver(req.GetCatalog(), opts.TypesPackage, gotypes.Overrides(opts.Overrides), null)
+	driver := newDriver(req.GetCatalog(), opts.TypesPackage, gotypes.Overrides(opts.Overrides))
 
 	out := req.GetOutDir()
 	// Factories require a RandomExpr for every column type; bob cannot synthesize

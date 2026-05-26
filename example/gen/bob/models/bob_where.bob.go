@@ -17,29 +17,29 @@ var (
 )
 
 func Where[Q psql.Filterable]() struct {
-	Users        userWhere[Q]
-	Profiles     profileWhere[Q]
-	Orders       orderWhere[Q]
-	Roles        roleWhere[Q]
-	UserRoles    userRoleWhere[Q]
-	KitchenSinks kitchenSinkWhere[Q]
-	Logs         logWhere[Q]
+	AppUsers        appUserWhere[Q]
+	AppProfiles     appProfileWhere[Q]
+	AppOrders       appOrderWhere[Q]
+	AppRoles        appRoleWhere[Q]
+	AppUserRoles    appUserRoleWhere[Q]
+	AppKitchenSinks appKitchenSinkWhere[Q]
+	AuditLogs       auditLogWhere[Q]
 } {
 	return struct {
-		Users        userWhere[Q]
-		Profiles     profileWhere[Q]
-		Orders       orderWhere[Q]
-		Roles        roleWhere[Q]
-		UserRoles    userRoleWhere[Q]
-		KitchenSinks kitchenSinkWhere[Q]
-		Logs         logWhere[Q]
+		AppUsers        appUserWhere[Q]
+		AppProfiles     appProfileWhere[Q]
+		AppOrders       appOrderWhere[Q]
+		AppRoles        appRoleWhere[Q]
+		AppUserRoles    appUserRoleWhere[Q]
+		AppKitchenSinks appKitchenSinkWhere[Q]
+		AuditLogs       auditLogWhere[Q]
 	}{
-		Users:        buildUserWhere[Q](Users.Columns),
-		Profiles:     buildProfileWhere[Q](Profiles.Columns),
-		Orders:       buildOrderWhere[Q](Orders.Columns),
-		Roles:        buildRoleWhere[Q](Roles.Columns),
-		UserRoles:    buildUserRoleWhere[Q](UserRoles.Columns),
-		KitchenSinks: buildKitchenSinkWhere[Q](KitchenSinks.Columns),
-		Logs:         buildLogWhere[Q](Logs.Columns),
+		AppUsers:        buildAppUserWhere[Q](AppUsers.Columns),
+		AppProfiles:     buildAppProfileWhere[Q](AppProfiles.Columns),
+		AppOrders:       buildAppOrderWhere[Q](AppOrders.Columns),
+		AppRoles:        buildAppRoleWhere[Q](AppRoles.Columns),
+		AppUserRoles:    buildAppUserRoleWhere[Q](AppUserRoles.Columns),
+		AppKitchenSinks: buildAppKitchenSinkWhere[Q](AppKitchenSinks.Columns),
+		AuditLogs:       buildAuditLogWhere[Q](AuditLogs.Columns),
 	}
 }

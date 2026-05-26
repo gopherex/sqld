@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/yaroher/sqld/pkg/gotypes"
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
@@ -40,6 +39,13 @@ func testCatalog() *irv1.Catalog {
 					Type: irv1.ConstraintType_CONSTRAINT_TYPE_PRIMARY_KEY,
 					Body: &irv1.Constraint_PrimaryKey{PrimaryKey: &irv1.PrimaryKey{Columns: []string{"id"}}},
 				}},
+				Indexes: []*irv1.Index{{
+					Name:   "accounts_email_key",
+					Unique: true,
+					Elements: []*irv1.IndexElement{
+						{Target: &irv1.IndexElement_Column{Column: "email"}},
+					},
+				}},
 			}},
 		}},
 	}
@@ -47,7 +53,7 @@ func testCatalog() *irv1.Catalog {
 
 func TestAssembleColumnTypes(t *testing.T) {
 	cat := testCatalog()
-	d := newDriver(cat, "example.com/app/db", nil, gotypes.Pointer)
+	d := newDriver(cat, "example.com/app/db", nil)
 	info, err := d.Assemble(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -93,5 +99,27 @@ func TestAssembleColumnTypes(t *testing.T) {
 	// the shared types package import is registered for the enum type.
 	if !d.Types().Contains("db.AccountStatus") {
 		t.Errorf("db.AccountStatus not registered in Types")
+	}
+
+	// the unique index is mapped (skipping the PK index).
+	if len(tbl.Indexes) != 1 {
+		t.Fatalf("indexes = %d; want 1", len(tbl.Indexes))
+	}
+	if idx := tbl.Indexes[0]; idx.Name != "accounts_email_key" || !idx.Unique ||
+		len(idx.Columns) != 1 || idx.Columns[0].Name != "email" {
+		t.Errorf("index = %+v; want unique accounts_email_key(email)", idx)
+	}
+}
+
+// TestTableKeyQualifiesNonDefaultSchema ensures non-default-schema tables get a
+// schema-qualified bob key, so same-bare-name tables across schemas (and the FKs
+// that reference them) don't collide in bob's table map.
+func TestTableKeyQualifiesNonDefaultSchema(t *testing.T) {
+	d := &sqldDriver{defaultSchema: "public"}
+	if got := d.tableKey("public", "users"); got != "users" {
+		t.Errorf("default-schema key = %q; want users", got)
+	}
+	if got := d.tableKey("audit", "log"); got != "audit.log" {
+		t.Errorf("non-default-schema key = %q; want audit.log", got)
 	}
 }
