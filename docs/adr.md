@@ -763,8 +763,14 @@ sqld's queries without conversion (compile-level test in `example/`). Scope v1:
 models, relationships, where/loaders/joins/counts. Out of scope / limitations:
 factories are opt-in (bob needs a random expression per type, unavailable for
 externally-owned composites/`pgtype.*`); bob's query-folder codegen is unused
-(sqld owns queries); full nullable-wrapper alignment between `*T` and `null.Val`
-is ongoing (`opt` null mode for sqld-gen-go is a later phase). Docs: `docs/bob.md`.
+(sqld owns queries). **Nullable-wrapper alignment is now selectable:** with
+`nullMode: opt` on both plugins, sqld-gen-go emits `null.Val[T]` for nullable
+model *and* row fields, matching bob's nullable model field exactly — so model
+and row field types align (a nullable composite result column scans via
+`null.FromPtr` glue, since pgx cannot carry a non-null composite through
+`null.Val`'s `sql.Scanner`). Query params are unaffected (they stay `*T`/value-
+typed — sqld-internal, not consumed by bob). The default `pointer` mode keeps the
+historical `*T` model/row fields (byte-identical output). Docs: `docs/bob.md`.
 
 ---
 
