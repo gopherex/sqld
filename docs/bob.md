@@ -64,7 +64,7 @@ Options:
 |---|---|
 | `package` | Go package name for the models (default `models`). |
 | `typesPackage` | import path of `sqld-gen-go`'s output package (where enum/composite Go types live). Required for schemas with UDTs. |
-| `nullMode` | `pointer` (default) or `opt`. Selects bob's null wrapping; **must equal `sqld-gen-go`'s `nullMode`** for the structs to interoperate. |
+| `nullMode` | `pointer` (default) or `opt`. Selects the null wrapping for nullable model/row fields; **must equal `sqld-gen-go`'s `nullMode`** for the structs to interoperate. `sqld-gen-go` accepts the same option (it defaults to `pointer`); with `opt` on **both** plugins, nullable model *and* row fields are `null.Val[T]` on both sides — full field-type parity (see Null-mode parity below). |
 | `overrides` | the same Go-type override table `sqld-gen-go` accepts; **must match** so both generators emit identical types for overridden columns. |
 | `models`, `whereLoadersJoins` | toggle those outputs (default on). |
 | `factories` | generate bob factories (default **off** — see limitations). |
@@ -99,13 +99,20 @@ _ = row.Status == user.Status              // both db.AppUserStatus
   every column type; bob cannot synthesize one for the externally-owned shared
   types (composites, `uuid.UUID`, `pgtype.*`). Enable `factories: true` only for
   schemas whose column types all have a known random expression.
-- **Null-wrapper alignment.** The shared *non-null* leaf types are identical
-  across both generators. Nullable *model* fields differ in wrapper: `sqld-gen-go`
-  uses `*T`, while bob uses `null.Val[T]` for a nullable field regardless of
-  `nullMode` (the mode only changes bob's *setter*/optional wrapper — `*T` for
-  `pointer`, `omit.Val[T]` for `opt`). Full alignment of nullable model-field
-  wrappers between the two generators is ongoing; the non-null leaf types (the
-  symbiosis keystone) already match exactly.
+- **Null-mode parity (`opt`).** The shared *non-null* leaf types are identical
+  across both generators in every mode. For nullable fields, set `nullMode: opt`
+  on **both** plugins: `sqld-gen-go` then emits `null.Val[T]` for nullable model
+  *and* row fields, exactly matching bob's nullable model field — closing the
+  field-type gap. (In the default `pointer` mode `sqld-gen-go` emits `*T` while
+  bob's nullable model field is still `null.Val[T]`, so the wrappers differ.) The
+  param side is **unaffected** by `nullMode`: `sqld-gen-go` query params keep `*T`
+  for nullable scalars and value types for composites — params are sqld-internal
+  and not consumed by bob. Nil-capable types (slices, `json.RawMessage`,
+  `pgtype.*` struct/range types, `[]Composite`) are never wrapped in either mode.
+  Note: under `opt`, a nullable *composite* result column scans via a small glue
+  (`null.FromPtr`) because pgx cannot carry a non-null composite through
+  `null.Val`'s `sql.Scanner` path — this is handled transparently by the
+  generated query method.
 - **No wasm.** Unlike `sqld-gen-go`, `sqld-gen-bob` ships only as a native binary
   (bob's generator is not a wasip1 target).
 - **Queries stay with `sqld-gen-go`.** bob's query-folder codegen is not used —

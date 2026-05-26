@@ -12,9 +12,19 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/yaroher/sqld/pkg/gotypes"
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 )
+
+// goNullMode controls how nullable MODEL and ROW struct fields are wrapped:
+// gotypes.Pointer (the historical default, *T) or gotypes.Opt (null.Val[T],
+// matching sqld-gen-bob so bob models and sqld query rows share the same Go type
+// for nullable columns). It is set once at the top of Generate from the plugin's
+// "nullMode" option and read by the resolveGoType shim in types.go. PARAM type
+// resolution (resolveGoParamType) is unaffected — it always uses Pointer, since
+// params are sqld-internal and not consumed by bob.
+var goNullMode = gotypes.Pointer
 
 // Info returns static metadata about this generator.
 func Info() *pluginv1.GetInfoResponse {
@@ -48,6 +58,11 @@ func Info() *pluginv1.GetInfoResponse {
 // Generate produces Go source files from the IR request.
 func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error) {
 	pkg := resolvePackage(req.GetOptions(), req.GetOutDir())
+
+	// Select the null-wrapping mode for model/row fields from the plugin option
+	// (pointer default | opt). resolveGoType (model + row column fields) reads
+	// this package var; resolveGoParamType stays on Pointer.
+	goNullMode = parseNullMode(req.GetOptions())
 
 	// Go-type overrides live in the plugin's options (Go type paths are
 	// plugin-specific), parsed once and threaded through generation.
@@ -93,6 +108,27 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 type pluginOptions struct {
 	Package   string            `json:"package"`
 	Overrides map[string]string `json:"overrides"`
+	// NullMode selects how nullable model/row fields are wrapped: "pointer"
+	// (default, *T) or "opt" (null.Val[T], matching sqld-gen-bob). Any other or
+	// empty value falls back to pointer. It does NOT affect query parameters.
+	NullMode string `json:"nullMode"`
+}
+
+// parseNullMode decodes the "nullMode" option to a gotypes.NullMode. It returns
+// gotypes.Opt only for the explicit value "opt"; everything else (including an
+// absent option) maps to gotypes.Pointer, preserving the historical default.
+func parseNullMode(opts []byte) gotypes.NullMode {
+	if len(opts) == 0 {
+		return gotypes.Pointer
+	}
+	var o pluginOptions
+	if err := json.Unmarshal(opts, &o); err != nil {
+		return gotypes.Pointer
+	}
+	if o.NullMode == "opt" {
+		return gotypes.Opt
+	}
+	return gotypes.Pointer
 }
 
 // parseOverrides decodes the "overrides" map from the plugin's options JSON.
@@ -605,6 +641,14 @@ func generateModels(pkg string, catalog *irv1.Catalog, reg *udtRegistry, ov over
 type qField struct {
 	name   string
 	goType string
+	// scanPtrType is non-empty only in opt mode for a nullable COMPOSITE result
+	// column, whose field type is null.Val[<Composite>]. pgx cannot scan a
+	// non-null composite through null.Val's sql.Scanner path, so the row.Scan
+	// target must be a *<Composite> temp; after a successful Scan the field is
+	// assigned via null.FromPtr(temp). scanPtrType holds <Composite> (the bare
+	// composite Go type). Empty for every normal field (and all pointer-mode
+	// fields), where the field is scanned directly via &i.Field.
+	scanPtrType string
 }
 
 type qParam struct {
@@ -708,9 +752,15 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 		qCols := q.GetColumns()
 		var cols []qField
 		for _, c := range qCols {
-			gt, imps := resolveGoType(reg, ov, c.GetSourceColumn().GetId(), c.GetType(), c.GetNullable())
+			colID := c.GetSourceColumn().GetId()
+			gt, imps := resolveGoType(reg, ov, colID, c.GetType(), c.GetNullable())
 			allImports = append(allImports, imps...)
-			cols = append(cols, qField{name: pascal(c.GetName()), goType: gt})
+			f := qField{name: pascal(c.GetName()), goType: gt}
+			if ptrType, imp := compositeScanPtr(reg, ov, colID, c.GetType(), c.GetNullable()); ptrType != "" {
+				f.scanPtrType = ptrType
+				allImports = append(allImports, imp...)
+			}
+			cols = append(cols, f)
 		}
 
 		// Collect parameter-type imports for every query (dynamic ones build
@@ -918,9 +968,7 @@ func writeQueryCode(sb *strings.Builder, qi qInfo) {
 		sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context%s) (%s, error) {\n",
 			qi.methodName, paramSig, rowTypeName))
 		sb.WriteString(fmt.Sprintf("\trow := q.db.QueryRow(ctx, %s%s)\n", qi.constName, buildArgList(qi)))
-		sb.WriteString(fmt.Sprintf("\tvar i %s\n", rowTypeName))
-		sb.WriteString(fmt.Sprintf("\terr := row.Scan(%s)\n", buildScanList(qi.cols, "i")))
-		sb.WriteString("\treturn i, err\n}\n\n")
+		writeOneScan(sb, qi.cols, rowTypeName)
 
 	case qi.command == pluginv1.QueryCommand_QUERY_COMMAND_MANY:
 		sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context%s) ([]%s, error) {\n",
@@ -929,11 +977,7 @@ func writeQueryCode(sb *strings.Builder, qi qInfo) {
 		sb.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
 		sb.WriteString("\tdefer rows.Close()\n")
 		sb.WriteString(fmt.Sprintf("\tvar items []%s\n", rowTypeName))
-		sb.WriteString("\tfor rows.Next() {\n")
-		sb.WriteString(fmt.Sprintf("\t\tvar i %s\n", rowTypeName))
-		sb.WriteString(fmt.Sprintf("\t\tif err := rows.Scan(%s); err != nil {\n", buildScanList(qi.cols, "i")))
-		sb.WriteString("\t\t\treturn nil, err\n\t\t}\n")
-		sb.WriteString("\t\titems = append(items, i)\n\t}\n")
+		writeManyScan(sb, qi.cols, rowTypeName)
 		sb.WriteString("\tif err := rows.Err(); err != nil {\n\t\treturn nil, err\n\t}\n")
 		sb.WriteString("\treturn items, nil\n}\n\n")
 
@@ -1173,6 +1217,45 @@ func buildArgList(qi qInfo) string {
 	return ", " + qi.params[0].goName
 }
 
+// compositeScanPtr reports the bare composite Go type for a result column that
+// needs scan glue, plus the imports that glue requires. Glue is needed ONLY in
+// opt mode (goNullMode == Opt) for a NULLABLE scalar COMPOSITE column: its field
+// type is null.Val[<Composite>], but pgx cannot scan a non-null composite
+// through null.Val's sql.Scanner path, so the Scan target must be a
+// *<Composite> temp assigned afterwards via null.FromPtr. Array-of-composite
+// columns ([]T) scan fine and never need glue. Returns ("", nil) for every
+// column that scans directly (the common case, and ALL pointer-mode columns).
+func compositeScanPtr(reg *udtRegistry, ov overrides, columnID string, t *irv1.TypeRef, nullable bool) (string, []string) {
+	if goNullMode != gotypes.Opt || !nullable {
+		return "", nil
+	}
+	// Array-of-composite is []T (nil-able) — no glue.
+	if t.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
+		return "", nil
+	}
+	if !isCompositeType(reg, t) {
+		return "", nil
+	}
+	// The non-nullable resolution yields the bare composite Go type (e.g.
+	// "AppAddress"); an override on this column/type, if any, is respected.
+	gt, imps := gotypes.NewMapper2(reg, ov, goNullMode).GoType(columnID, t, false)
+	// null.FromPtr lives in the opt/null package.
+	imps = append(imps, "github.com/aarondl/opt/null")
+	return gt, imps
+}
+
+// rowNeedsScanGlue reports whether any column in cols carries composite scan glue
+// (scanPtrType != ""). When false the row is scanned by the simple buildScanList
+// path so pointer-mode (and the common opt-mode) output is byte-identical.
+func rowNeedsScanGlue(cols []qField) bool {
+	for _, c := range cols {
+		if c.scanPtrType != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // buildScanList builds "&i.Field1, &i.Field2, ..." for row.Scan.
 func buildScanList(cols []qField, varName string) string {
 	var parts []string
@@ -1180,6 +1263,89 @@ func buildScanList(cols []qField, varName string) string {
 		parts = append(parts, fmt.Sprintf("&%s.%s", varName, c.name))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// scanTargets builds the row.Scan argument list, substituting a *<Composite>
+// temp pointer (named <tmpPrefix><colIndex>p) for each composite-null field that
+// needs scan glue, and "&<varName>.<Field>" for every normal field. It returns
+// the joined argument list and, for glue fields, the list of (temp index, field
+// name) pairs the caller assigns after a successful Scan. When no field needs
+// glue, the targets are exactly buildScanList's output and assigns is empty.
+func scanTargets(cols []qField, varName, tmpPrefix string) (targets string, assigns []scanAssign) {
+	var parts []string
+	for i, c := range cols {
+		if c.scanPtrType != "" {
+			parts = append(parts, fmt.Sprintf("&%s%dp", tmpPrefix, i))
+			assigns = append(assigns, scanAssign{tmpName: fmt.Sprintf("%s%dp", tmpPrefix, i), fieldName: c.name})
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("&%s.%s", varName, c.name))
+	}
+	return strings.Join(parts, ", "), assigns
+}
+
+type scanAssign struct {
+	tmpName   string // the *<Composite> temp variable name
+	fieldName string // the row field to assign via null.FromPtr(tmp)
+}
+
+// writeScanTemps emits the `var t<i>p *<Composite>` declarations for glue fields,
+// each indented by indent. No-op when cols need no glue.
+func writeScanTemps(sb *strings.Builder, cols []qField, tmpPrefix, indent string) {
+	for i, c := range cols {
+		if c.scanPtrType != "" {
+			sb.WriteString(fmt.Sprintf("%svar %s%dp *%s\n", indent, tmpPrefix, i, c.scanPtrType))
+		}
+	}
+}
+
+// writeScanAssigns emits the `<varName>.<Field> = null.FromPtr(<temp>)` lines for
+// glue fields, each indented by indent. No-op when there are none.
+func writeScanAssigns(sb *strings.Builder, assigns []scanAssign, varName, indent string) {
+	for _, a := range assigns {
+		sb.WriteString(fmt.Sprintf("%s%s.%s = null.FromPtr(%s)\n", indent, varName, a.fieldName, a.tmpName))
+	}
+}
+
+// writeOneScan emits the body of a :one query after the QueryRow call: declares
+// the row var, scans it, and returns (i, err). With no glue fields the output is
+// byte-identical to the historical form. With glue fields it scans composites
+// through *<Composite> temps and assigns them via null.FromPtr only on success.
+func writeOneScan(sb *strings.Builder, cols []qField, rowTypeName string) {
+	sb.WriteString(fmt.Sprintf("\tvar i %s\n", rowTypeName))
+	if !rowNeedsScanGlue(cols) {
+		sb.WriteString(fmt.Sprintf("\terr := row.Scan(%s)\n", buildScanList(cols, "i")))
+		sb.WriteString("\treturn i, err\n}\n\n")
+		return
+	}
+	writeScanTemps(sb, cols, "t", "\t")
+	targets, assigns := scanTargets(cols, "i", "t")
+	sb.WriteString(fmt.Sprintf("\tif err := row.Scan(%s); err != nil {\n", targets))
+	sb.WriteString(fmt.Sprintf("\t\treturn %s{}, err\n\t}\n", rowTypeName))
+	writeScanAssigns(sb, assigns, "i", "\t")
+	sb.WriteString("\treturn i, nil\n}\n\n")
+}
+
+// writeManyScan emits the row-loop body of a :many query (from "for rows.Next()")
+// through the append). closer is the trailing code after the loop (the rows.Err
+// check + return). With no glue fields the loop body is byte-identical to the
+// historical form. With glue fields the *<Composite> temps and their assignments
+// live INSIDE the loop, before the row is appended.
+func writeManyScan(sb *strings.Builder, cols []qField, rowTypeName string) {
+	sb.WriteString("\tfor rows.Next() {\n")
+	sb.WriteString(fmt.Sprintf("\t\tvar i %s\n", rowTypeName))
+	if !rowNeedsScanGlue(cols) {
+		sb.WriteString(fmt.Sprintf("\t\tif err := rows.Scan(%s); err != nil {\n", buildScanList(cols, "i")))
+		sb.WriteString("\t\t\treturn nil, err\n\t\t}\n")
+		sb.WriteString("\t\titems = append(items, i)\n\t}\n")
+		return
+	}
+	writeScanTemps(sb, cols, "t", "\t\t")
+	targets, assigns := scanTargets(cols, "i", "t")
+	sb.WriteString(fmt.Sprintf("\t\tif err := rows.Scan(%s); err != nil {\n", targets))
+	sb.WriteString("\t\t\treturn nil, err\n\t\t}\n")
+	writeScanAssigns(sb, assigns, "i", "\t\t")
+	sb.WriteString("\t\titems = append(items, i)\n\t}\n")
 }
 
 // formatSource runs gofmt on src. On failure, returns src with a warning diagnostic.
@@ -1562,8 +1728,17 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_ONE:
 		sb.WriteString("\trow := q.db.QueryRow(ctx, b.String(), args...)\n")
 		sb.WriteString(fmt.Sprintf("\tvar i %s\n", rowTypeName))
-		sb.WriteString(fmt.Sprintf("\terr := row.Scan(%s)\n", buildScanList(cols, "i")))
-		sb.WriteString("\treturn i, err\n")
+		if !rowNeedsScanGlue(cols) {
+			sb.WriteString(fmt.Sprintf("\terr := row.Scan(%s)\n", buildScanList(cols, "i")))
+			sb.WriteString("\treturn i, err\n")
+		} else {
+			writeScanTemps(sb, cols, "t", "\t")
+			targets, assigns := scanTargets(cols, "i", "t")
+			sb.WriteString(fmt.Sprintf("\tif err := row.Scan(%s); err != nil {\n", targets))
+			sb.WriteString(fmt.Sprintf("\t\treturn %s{}, err\n\t}\n", rowTypeName))
+			writeScanAssigns(sb, assigns, "i", "\t")
+			sb.WriteString("\treturn i, nil\n")
+		}
 
 	case q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_MANY:
 		sb.WriteString("\trows, err := q.db.Query(ctx, b.String(), args...)\n")
@@ -1572,8 +1747,16 @@ func writeDynamicQueryCode(sb *strings.Builder, q *pluginv1.Query, anns []*irv1.
 		sb.WriteString(fmt.Sprintf("\tvar items []%s\n", rowTypeName))
 		sb.WriteString("\tfor rows.Next() {\n")
 		sb.WriteString(fmt.Sprintf("\t\tvar i %s\n", rowTypeName))
-		sb.WriteString(fmt.Sprintf("\t\tif err := rows.Scan(%s); err != nil {\n", buildScanList(cols, "i")))
-		sb.WriteString("\t\t\treturn nil, err\n\t\t}\n")
+		if !rowNeedsScanGlue(cols) {
+			sb.WriteString(fmt.Sprintf("\t\tif err := rows.Scan(%s); err != nil {\n", buildScanList(cols, "i")))
+			sb.WriteString("\t\t\treturn nil, err\n\t\t}\n")
+		} else {
+			writeScanTemps(sb, cols, "t", "\t\t")
+			targets, assigns := scanTargets(cols, "i", "t")
+			sb.WriteString(fmt.Sprintf("\t\tif err := rows.Scan(%s); err != nil {\n", targets))
+			sb.WriteString("\t\t\treturn nil, err\n\t\t}\n")
+			writeScanAssigns(sb, assigns, "i", "\t\t")
+		}
 		sb.WriteString("\t\titems = append(items, i)\n\t}\n")
 		sb.WriteString("\treturn items, rows.Err()\n")
 
