@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yaroher/sqld/internal/devdb"
+	"github.com/yaroher/sqld/pkg/devdb"
 )
 
 // TestGenVersionUnique (M1) verifies the version stamp has millisecond

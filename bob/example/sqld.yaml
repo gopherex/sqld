@@ -1,0 +1,24 @@
+version: "1"
+engine: postgresql
+options:
+  defaultSchema: public
+schema:
+  - file: example/schema.sql
+queries:
+  - dir: example/queries
+migrations:
+  - dir: example/migrations
+plugins:
+  # Generates the bob ORM into bob/example/gen/bob, sharing sqld-gen-go's leaf
+  # types from the root example's db package (typesPackage). Run from the repo
+  # root so the schema/queries paths resolve. sqld-gen-go owns gen/db; this
+  # config only adds the bob layer.
+  - name: bob
+    binary: ./bin/sqld-gen-bob
+    out: bob/example/gen/bob
+    options:
+      package: models
+      typesPackage: github.com/yaroher/sqld/example/gen/db
+      overrides:
+        "app.kitchen_sink.c_jsonb": map[string]any
+        uuid: github.com/google/uuid.UUID

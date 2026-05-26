@@ -744,7 +744,13 @@ sqld-controlled Go types and runs natively on `*pgxpool.Pool`.
   UDT package qualifier (`SetUDTPackage`) so enum/composite names can be emitted
   as `db.AppUserStatus` for a different package. sqld-gen-go consumes it via thin
   shims; output is byte-identical (golden-locked).
-- **`cmd/sqld-gen-bob`**: a binary plugin (no wasm — bob's generator is too
+- **Separate `./bob` module**: `sqld-gen-bob`, its bob-using example, and the
+  `aarondl/opt`-using opt-mode tests live in a nested module
+  `github.com/yaroher/sqld/bob` (with `replace => ../` + a root `go.work`), so the
+  heavy bob dependency stays OUT of the core `go.mod` — `go get github.com/yaroher/sqld`
+  pulls no bob/opt. `internal/devdb` was promoted to `pkg/devdb` so the bob module
+  can reuse the testcontainers helper.
+- **`bob/cmd/sqld-gen-bob`**: a binary plugin (no wasm — bob's generator is too
   heavy) that implements bob's `drivers.Interface` over the IR `Catalog`. Each
   `Column.Type` is resolved through `pkg/gotypes` (so bob emits sqld-gen-go's
   types); enum/composite types are qualified into the `typesPackage` option and

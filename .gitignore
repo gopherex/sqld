@@ -20,8 +20,8 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
+# Go workspace file (go.work is committed: ties the core module to ./bob for
+# local dev; go.work.sum stays out)
 go.work.sum
 
 # env file
