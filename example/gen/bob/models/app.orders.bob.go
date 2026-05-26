@@ -21,41 +21,41 @@ import (
 	"github.com/stephenafamo/bob/types/pgtypes"
 )
 
-// Order is an object representing the database table.
-type Order struct {
+// AppOrder is an object representing the database table.
+type AppOrder struct {
 	ID       int64     `db:"id,pk" `
 	UserID   int64     `db:"user_id" `
 	Total    string    `db:"total" `
 	PlacedAt time.Time `db:"placed_at" `
 
-	R orderR `db:"-" `
+	R appOrderR `db:"-" `
 }
 
-// OrderSlice is an alias for a slice of pointers to Order.
-// This should almost always be used instead of []*Order.
-type OrderSlice []*Order
+// AppOrderSlice is an alias for a slice of pointers to AppOrder.
+// This should almost always be used instead of []*AppOrder.
+type AppOrderSlice []*AppOrder
 
-// Orders contains methods to work with the orders table
-var Orders = psql.NewTablex[*Order, OrderSlice, *OrderSetter]("app", "orders", buildOrderColumns("orders"))
+// AppOrders contains methods to work with the orders table
+var AppOrders = psql.NewTablex[*AppOrder, AppOrderSlice, *AppOrderSetter]("app", "orders", buildAppOrderColumns("app.orders"))
 
-// OrdersQuery is a query on the orders table
-type OrdersQuery = *psql.ViewQuery[*Order, OrderSlice]
+// AppOrdersQuery is a query on the orders table
+type AppOrdersQuery = *psql.ViewQuery[*AppOrder, AppOrderSlice]
 
-// orderR is where relationships are stored.
-type orderR struct {
-	User *User // orders_fkey_0
+// appOrderR is where relationships are stored.
+type appOrderR struct {
+	User *AppUser // orders_fkey_0
 	// Loaded reports whether each relationship has been loaded.
 	// A relationship's bool is set by Load*, Preload, ThenLoad, factory builds,
 	// and to-one Attach/Insert operations. To-many Attach/Insert operations leave it unchanged.
-	Loaded orderRLoaded `db:"-" `
+	Loaded appOrderRLoaded `db:"-" `
 }
 
-// orderRLoaded tracks which relationships on Order have been loaded.
-type orderRLoaded struct {
+// appOrderRLoaded tracks which relationships on AppOrder have been loaded.
+type appOrderRLoaded struct {
 	User bool // orders_fkey_0
 }
 
-func buildOrderColumns(tableName string) orderColumns {
+func buildAppOrderColumns(tableName string) appOrderColumns {
 	columnsExpr := expr.NewColumnsExpr(
 		"id", "user_id", "total", "placed_at",
 	)
@@ -64,75 +64,75 @@ func buildOrderColumns(tableName string) orderColumns {
 		columnsExpr = columnsExpr.WithParent(tableName)
 	}
 
-	return orderColumns{
+	return appOrderColumns{
 		ColumnsExpr: columnsExpr,
 		tableAlias:  tableName,
-		ID:          buildOrderColumn(tableName, "id"),
-		UserID:      buildOrderColumn(tableName, "user_id"),
-		Total:       buildOrderColumn(tableName, "total"),
-		PlacedAt:    buildOrderColumn(tableName, "placed_at"),
+		ID:          buildAppOrderColumn(tableName, "id"),
+		UserID:      buildAppOrderColumn(tableName, "user_id"),
+		Total:       buildAppOrderColumn(tableName, "total"),
+		PlacedAt:    buildAppOrderColumn(tableName, "placed_at"),
 	}
 }
 
-type orderColumns struct {
+type appOrderColumns struct {
 	expr.ColumnsExpr
 	tableAlias string
-	ID         orderColumn
-	UserID     orderColumn
-	Total      orderColumn
-	PlacedAt   orderColumn
+	ID         appOrderColumn
+	UserID     appOrderColumn
+	Total      appOrderColumn
+	PlacedAt   appOrderColumn
 }
 
 // Alias returns the current table alias for the columns set.
-func (c orderColumns) Alias() string {
+func (c appOrderColumns) Alias() string {
 	return c.tableAlias
 }
 
 // AliasedAs returns a copy of the columns set qualified by tableName.
-func (orderColumns) AliasedAs(tableName string) orderColumns {
-	return buildOrderColumns(tableName)
+func (appOrderColumns) AliasedAs(tableName string) appOrderColumns {
+	return buildAppOrderColumns(tableName)
 }
 
 // Unqualified returns a copy of the columns set without table qualification.
-func (c orderColumns) Unqualified() orderColumns {
-	return buildOrderColumns("")
+func (c appOrderColumns) Unqualified() appOrderColumns {
+	return buildAppOrderColumns("")
 }
 
-func buildOrderColumn(alias, name string) orderColumn {
-	return orderColumn{
+func buildAppOrderColumn(alias, name string) appOrderColumn {
+	return appOrderColumn{
 		Expression: psql.Quote(alias, name),
 		alias:      alias,
 		name:       name,
 	}
 }
 
-type orderColumn struct {
+type appOrderColumn struct {
 	psql.Expression
 	alias string
 	name  string
 }
 
 // Name returns the unqualified column name.
-func (c orderColumn) Name() string {
+func (c appOrderColumn) Name() string {
 	return c.name
 }
 
 // ShouldOmitParens prevents automatic parenthesis wrapping in expression builders.
-func (c orderColumn) ShouldOmitParens() bool {
+func (c appOrderColumn) ShouldOmitParens() bool {
 	return true
 }
 
-// OrderSetter is used for insert/upsert/update operations
+// AppOrderSetter is used for insert/upsert/update operations
 // All values are optional, and do not have to be set
 // Generated columns are not included
-type OrderSetter struct {
+type AppOrderSetter struct {
 	ID       *int64     `db:"id,pk" `
 	UserID   *int64     `db:"user_id" `
 	Total    *string    `db:"total" `
 	PlacedAt *time.Time `db:"placed_at" `
 }
 
-func (s OrderSetter) SetColumns() []string {
+func (s AppOrderSetter) SetColumns() []string {
 	vals := make([]string, 0, 4)
 	if s.ID != nil {
 		vals = append(vals, "id")
@@ -149,7 +149,7 @@ func (s OrderSetter) SetColumns() []string {
 	return vals
 }
 
-func (s OrderSetter) Overwrite(t *Order) {
+func (s AppOrderSetter) Overwrite(t *AppOrder) {
 	if s.ID != nil {
 		t.ID = func() int64 {
 			if s.ID == nil {
@@ -184,9 +184,9 @@ func (s OrderSetter) Overwrite(t *Order) {
 	}
 }
 
-func (s *OrderSetter) Apply(q *dialect.InsertQuery) {
+func (s *AppOrderSetter) Apply(q *dialect.InsertQuery) {
 	q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-		return Orders.BeforeInsertHooks.RunHooks(ctx, exec, s)
+		return AppOrders.BeforeInsertHooks.RunHooks(ctx, exec, s)
 	})
 
 	q.AppendValues(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
@@ -239,11 +239,11 @@ func (s *OrderSetter) Apply(q *dialect.InsertQuery) {
 	}))
 }
 
-func (s OrderSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (s AppOrderSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return um.Set(s.Expressions()...)
 }
 
-func (s OrderSetter) Expressions(prefix ...string) []bob.Expression {
+func (s AppOrderSetter) Expressions(prefix ...string) []bob.Expression {
 	exprs := make([]bob.Expression, 0, 4)
 
 	if s.ID != nil {
@@ -277,62 +277,62 @@ func (s OrderSetter) Expressions(prefix ...string) []bob.Expression {
 	return exprs
 }
 
-// FindOrder retrieves a single record by primary key
+// FindAppOrder retrieves a single record by primary key
 // If cols is empty Find will return all columns.
-func FindOrder(ctx context.Context, exec bob.Executor, IDPK int64, cols ...string) (*Order, error) {
+func FindAppOrder(ctx context.Context, exec bob.Executor, IDPK int64, cols ...string) (*AppOrder, error) {
 	if len(cols) == 0 {
-		return Orders.Query(
-			sm.Where(Orders.Columns.ID.EQ(psql.Arg(IDPK))),
+		return AppOrders.Query(
+			sm.Where(AppOrders.Columns.ID.EQ(psql.Arg(IDPK))),
 		).One(ctx, exec)
 	}
 
-	return Orders.Query(
-		sm.Where(Orders.Columns.ID.EQ(psql.Arg(IDPK))),
-		sm.Columns(Orders.Columns.Only(cols...)),
+	return AppOrders.Query(
+		sm.Where(AppOrders.Columns.ID.EQ(psql.Arg(IDPK))),
+		sm.Columns(AppOrders.Columns.Only(cols...)),
 	).One(ctx, exec)
 }
 
-// OrderExists checks the presence of a single record by primary key
-func OrderExists(ctx context.Context, exec bob.Executor, IDPK int64) (bool, error) {
-	return Orders.Query(
-		sm.Where(Orders.Columns.ID.EQ(psql.Arg(IDPK))),
+// AppOrderExists checks the presence of a single record by primary key
+func AppOrderExists(ctx context.Context, exec bob.Executor, IDPK int64) (bool, error) {
+	return AppOrders.Query(
+		sm.Where(AppOrders.Columns.ID.EQ(psql.Arg(IDPK))),
 	).Exists(ctx, exec)
 }
 
-// AfterQueryHook is called after Order is retrieved from the database
-func (o *Order) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppOrder is retrieved from the database
+func (o *AppOrder) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Orders.AfterSelectHooks.RunHooks(ctx, exec, OrderSlice{o})
+		ctx, err = AppOrders.AfterSelectHooks.RunHooks(ctx, exec, AppOrderSlice{o})
 	case bob.QueryTypeInsert:
-		ctx, err = Orders.AfterInsertHooks.RunHooks(ctx, exec, OrderSlice{o})
+		ctx, err = AppOrders.AfterInsertHooks.RunHooks(ctx, exec, AppOrderSlice{o})
 	case bob.QueryTypeUpdate:
-		ctx, err = Orders.AfterUpdateHooks.RunHooks(ctx, exec, OrderSlice{o})
+		ctx, err = AppOrders.AfterUpdateHooks.RunHooks(ctx, exec, AppOrderSlice{o})
 	case bob.QueryTypeDelete:
-		ctx, err = Orders.AfterDeleteHooks.RunHooks(ctx, exec, OrderSlice{o})
+		ctx, err = AppOrders.AfterDeleteHooks.RunHooks(ctx, exec, AppOrderSlice{o})
 	case bob.QueryTypeMerge:
-		ctx, err = Orders.AfterMergeHooks.RunHooks(ctx, exec, OrderSlice{o})
+		ctx, err = AppOrders.AfterMergeHooks.RunHooks(ctx, exec, AppOrderSlice{o})
 	}
 
 	return err
 }
 
-// primaryKeyVals returns the primary key values of the Order
-func (o *Order) primaryKeyVals() bob.Expression {
+// primaryKeyVals returns the primary key values of the AppOrder
+func (o *AppOrder) primaryKeyVals() bob.Expression {
 	return psql.Arg(o.ID)
 }
 
-func (o *Order) pkEQ() dialect.Expression {
-	return psql.Quote("orders", "id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+func (o *AppOrder) pkEQ() dialect.Expression {
+	return psql.Quote("app.orders", "id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		return o.primaryKeyVals().WriteSQL(ctx, w, d, start)
 	}))
 }
 
-// Update uses an executor to update the Order
-func (o *Order) Update(ctx context.Context, exec bob.Executor, s *OrderSetter) error {
-	v, err := Orders.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
+// Update uses an executor to update the AppOrder
+func (o *AppOrder) Update(ctx context.Context, exec bob.Executor, s *AppOrderSetter) error {
+	v, err := AppOrders.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -343,16 +343,16 @@ func (o *Order) Update(ctx context.Context, exec bob.Executor, s *OrderSetter) e
 	return nil
 }
 
-// Delete deletes a single Order record with an executor
-func (o *Order) Delete(ctx context.Context, exec bob.Executor) error {
-	_, err := Orders.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
+// Delete deletes a single AppOrder record with an executor
+func (o *AppOrder) Delete(ctx context.Context, exec bob.Executor) error {
+	_, err := AppOrders.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
 	return err
 }
 
-// Reload refreshes the Order using the executor
-func (o *Order) Reload(ctx context.Context, exec bob.Executor) error {
-	o2, err := Orders.Query(
-		sm.Where(Orders.Columns.ID.EQ(psql.Arg(o.ID))),
+// Reload refreshes the AppOrder using the executor
+func (o *AppOrder) Reload(ctx context.Context, exec bob.Executor) error {
+	o2, err := AppOrders.Query(
+		sm.Where(AppOrders.Columns.ID.EQ(psql.Arg(o.ID))),
 	).One(ctx, exec)
 	if err != nil {
 		return err
@@ -363,32 +363,32 @@ func (o *Order) Reload(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// AfterQueryHook is called after OrderSlice is retrieved from the database
-func (o OrderSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppOrderSlice is retrieved from the database
+func (o AppOrderSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Orders.AfterSelectHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppOrders.AfterSelectHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeInsert:
-		ctx, err = Orders.AfterInsertHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppOrders.AfterInsertHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeUpdate:
-		ctx, err = Orders.AfterUpdateHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppOrders.AfterUpdateHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeDelete:
-		ctx, err = Orders.AfterDeleteHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppOrders.AfterDeleteHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeMerge:
-		ctx, err = Orders.AfterMergeHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppOrders.AfterMergeHooks.RunHooks(ctx, exec, o)
 	}
 
 	return err
 }
 
-func (o OrderSlice) pkIN() dialect.Expression {
+func (o AppOrderSlice) pkIN() dialect.Expression {
 	if len(o) == 0 {
 		return psql.Raw("NULL")
 	}
 
-	return psql.Quote("orders", "id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+	return psql.Quote("app.orders", "id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		pkPairs := make([]bob.Expression, len(o))
 		for i, row := range o {
 			pkPairs[i] = row.primaryKeyVals()
@@ -400,7 +400,7 @@ func (o OrderSlice) pkIN() dialect.Expression {
 // copyMatchingRows finds models in the given slice that have the same primary key
 // then it first copies the existing relationships from the old model to the new model
 // and then replaces the old model in the slice with the new model
-func (o OrderSlice) copyMatchingRows(from ...*Order) {
+func (o AppOrderSlice) copyMatchingRows(from ...*AppOrder) {
 	for i, old := range o {
 		for _, new := range from {
 			if new.ID != old.ID {
@@ -414,25 +414,25 @@ func (o OrderSlice) copyMatchingRows(from ...*Order) {
 }
 
 // UpdateMod modifies an update query with "WHERE primary_key IN (o...)"
-func (o OrderSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (o AppOrderSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return bob.ModFunc[*dialect.UpdateQuery](func(q *dialect.UpdateQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Orders.BeforeUpdateHooks.RunHooks(ctx, exec, o)
+			return AppOrders.BeforeUpdateHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Order:
+			case *AppOrder:
 				o.copyMatchingRows(retrieved)
-			case []*Order:
+			case []*AppOrder:
 				o.copyMatchingRows(retrieved...)
-			case OrderSlice:
+			case AppOrderSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Order or a slice of Order
+				// If the retrieved value is not a AppOrder or a slice of AppOrder
 				// then run the AfterUpdateHooks on the slice
-				_, err = Orders.AfterUpdateHooks.RunHooks(ctx, exec, o)
+				_, err = AppOrders.AfterUpdateHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -443,25 +443,25 @@ func (o OrderSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 // DeleteMod modifies an delete query with "WHERE primary_key IN (o...)"
-func (o OrderSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
+func (o AppOrderSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 	return bob.ModFunc[*dialect.DeleteQuery](func(q *dialect.DeleteQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Orders.BeforeDeleteHooks.RunHooks(ctx, exec, o)
+			return AppOrders.BeforeDeleteHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Order:
+			case *AppOrder:
 				o.copyMatchingRows(retrieved)
-			case []*Order:
+			case []*AppOrder:
 				o.copyMatchingRows(retrieved...)
-			case OrderSlice:
+			case AppOrderSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Order or a slice of Order
+				// If the retrieved value is not a AppOrder or a slice of AppOrder
 				// then run the AfterDeleteHooks on the slice
-				_, err = Orders.AfterDeleteHooks.RunHooks(ctx, exec, o)
+				_, err = AppOrders.AfterDeleteHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -473,25 +473,25 @@ func (o OrderSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 
 // MergeMod modifies a merge query to run BeforeMergeHooks and AfterMergeHooks
 // and updates the slice with the returned rows.
-func (o OrderSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
+func (o AppOrderSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	return bob.ModFunc[*dialect.MergeQuery](func(q *dialect.MergeQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Orders.BeforeMergeHooks.RunHooks(ctx, exec, o)
+			return AppOrders.BeforeMergeHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Order:
+			case *AppOrder:
 				o.copyMatchingRows(retrieved)
-			case []*Order:
+			case []*AppOrder:
 				o.copyMatchingRows(retrieved...)
-			case OrderSlice:
+			case AppOrderSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Order or a slice of Order
+				// If the retrieved value is not a AppOrder or a slice of AppOrder
 				// then run the AfterMergeHooks on the slice
-				_, err = Orders.AfterMergeHooks.RunHooks(ctx, exec, o)
+				_, err = AppOrders.AfterMergeHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -499,30 +499,30 @@ func (o OrderSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	})
 }
 
-func (o OrderSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals OrderSetter) error {
+func (o AppOrderSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals AppOrderSetter) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Orders.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
+	_, err := AppOrders.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
 	return err
 }
 
-func (o OrderSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
+func (o AppOrderSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Orders.Delete(o.DeleteMod()).Exec(ctx, exec)
+	_, err := AppOrders.Delete(o.DeleteMod()).Exec(ctx, exec)
 	return err
 }
 
-func (o OrderSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
+func (o AppOrderSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	o2, err := Orders.Query(sm.Where(o.pkIN())).All(ctx, exec)
+	o2, err := AppOrders.Query(sm.Where(o.pkIN())).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -532,14 +532,14 @@ func (o OrderSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// User starts a query for related objects on users
-func (o *Order) User(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
-	return Users.Query(append(mods,
-		sm.Where(Users.Columns.ID.EQ(psql.Arg(o.UserID))),
+// User starts a query for related objects on app.users
+func (o *AppOrder) User(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
+	return AppUsers.Query(append(mods,
+		sm.Where(AppUsers.Columns.ID.EQ(psql.Arg(o.UserID))),
 	)...)
 }
 
-func (os OrderSlice) User(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
+func (os AppOrderSlice) User(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
 	pkUserID := make(pgtypes.Array[int64], 0, len(os))
 	for _, o := range os {
 		if o == nil {
@@ -551,74 +551,74 @@ func (os OrderSlice) User(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
 		psql.F("unnest", psql.Cast(psql.Arg(pkUserID), "int8[]")),
 	))
 
-	return Users.Query(append(mods,
-		sm.Where(psql.Group(Users.Columns.ID).OP("IN", PKArgExpr)),
+	return AppUsers.Query(append(mods,
+		sm.Where(psql.Group(AppUsers.Columns.ID).OP("IN", PKArgExpr)),
 	)...)
 }
 
-func attachOrderUser0(ctx context.Context, exec bob.Executor, count int, order0 *Order, user1 *User) (*Order, error) {
-	setter := &OrderSetter{
-		UserID: func() *int64 { return &user1.ID }(),
+func attachAppOrderUser0(ctx context.Context, exec bob.Executor, count int, appOrder0 *AppOrder, appUser1 *AppUser) (*AppOrder, error) {
+	setter := &AppOrderSetter{
+		UserID: func() *int64 { return &appUser1.ID }(),
 	}
 
-	err := order0.Update(ctx, exec, setter)
+	err := appOrder0.Update(ctx, exec, setter)
 	if err != nil {
-		return nil, fmt.Errorf("attachOrderUser0: %w", err)
+		return nil, fmt.Errorf("attachAppOrderUser0: %w", err)
 	}
 
-	return order0, nil
+	return appOrder0, nil
 }
 
-func (order0 *Order) InsertUser(ctx context.Context, exec bob.Executor, related *UserSetter) error {
+func (appOrder0 *AppOrder) InsertUser(ctx context.Context, exec bob.Executor, related *AppUserSetter) error {
 	var err error
 
-	user1, err := Users.Insert(related).One(ctx, exec)
+	appUser1, err := AppUsers.Insert(related).One(ctx, exec)
 	if err != nil {
 		return fmt.Errorf("inserting related objects: %w", err)
 	}
 
-	_, err = attachOrderUser0(ctx, exec, 1, order0, user1)
+	_, err = attachAppOrderUser0(ctx, exec, 1, appOrder0, appUser1)
 	if err != nil {
 		return err
 	}
 
-	order0.R.User = user1
-	order0.R.Loaded.User = true
+	appOrder0.R.User = appUser1
+	appOrder0.R.Loaded.User = true
 
-	user1.R.Orders = append(user1.R.Orders, order0)
+	appUser1.R.Orders = append(appUser1.R.Orders, appOrder0)
 
 	return nil
 }
 
-func (order0 *Order) AttachUser(ctx context.Context, exec bob.Executor, user1 *User) error {
+func (appOrder0 *AppOrder) AttachUser(ctx context.Context, exec bob.Executor, appUser1 *AppUser) error {
 	var err error
 
-	_, err = attachOrderUser0(ctx, exec, 1, order0, user1)
+	_, err = attachAppOrderUser0(ctx, exec, 1, appOrder0, appUser1)
 	if err != nil {
 		return err
 	}
 
-	order0.R.User = user1
-	order0.R.Loaded.User = true
+	appOrder0.R.User = appUser1
+	appOrder0.R.Loaded.User = true
 
-	user1.R.Orders = append(user1.R.Orders, order0)
+	appUser1.R.Orders = append(appUser1.R.Orders, appOrder0)
 
 	return nil
 }
 
-type orderWhere[Q psql.Filterable] struct {
+type appOrderWhere[Q psql.Filterable] struct {
 	ID       psql.WhereMod[Q, int64]
 	UserID   psql.WhereMod[Q, int64]
 	Total    psql.WhereMod[Q, string]
 	PlacedAt psql.WhereMod[Q, time.Time]
 }
 
-func (orderWhere[Q]) AliasedAs(alias string) orderWhere[Q] {
-	return buildOrderWhere[Q](buildOrderColumns(alias))
+func (appOrderWhere[Q]) AliasedAs(alias string) appOrderWhere[Q] {
+	return buildAppOrderWhere[Q](buildAppOrderColumns(alias))
 }
 
-func buildOrderWhere[Q psql.Filterable](cols orderColumns) orderWhere[Q] {
-	return orderWhere[Q]{
+func buildAppOrderWhere[Q psql.Filterable](cols appOrderColumns) appOrderWhere[Q] {
+	return appOrderWhere[Q]{
 		ID:       psql.Where[Q, int64](cols.ID.Expression),
 		UserID:   psql.Where[Q, int64](cols.UserID.Expression),
 		Total:    psql.Where[Q, string](cols.Total.Expression),
@@ -626,62 +626,62 @@ func buildOrderWhere[Q psql.Filterable](cols orderColumns) orderWhere[Q] {
 	}
 }
 
-func (o *Order) Preload(name string, retrieved any) error {
+func (o *AppOrder) Preload(name string, retrieved any) error {
 	if o == nil {
 		return nil
 	}
 
 	switch name {
 	case "User":
-		rel, ok := retrieved.(*User)
+		rel, ok := retrieved.(*AppUser)
 		if !ok {
-			return fmt.Errorf("order cannot load %T as %q", retrieved, name)
+			return fmt.Errorf("appOrder cannot load %T as %q", retrieved, name)
 		}
 
 		o.R.User = rel
 		o.R.Loaded.User = true
 
 		if rel != nil {
-			rel.R.Orders = OrderSlice{o}
+			rel.R.Orders = AppOrderSlice{o}
 		}
 		return nil
 	default:
-		return fmt.Errorf("order has no relationship %q", name)
+		return fmt.Errorf("appOrder has no relationship %q", name)
 	}
 }
 
-type orderPreloader struct {
+type appOrderPreloader struct {
 	User func(...psql.PreloadOption) psql.Preloader
 }
 
-func buildOrderPreloader() orderPreloader {
-	return orderPreloader{
+func buildAppOrderPreloader() appOrderPreloader {
+	return appOrderPreloader{
 		User: func(opts ...psql.PreloadOption) psql.Preloader {
-			return psql.Preload[*User, UserSlice](psql.PreloadRel{
+			return psql.Preload[*AppUser, AppUserSlice](psql.PreloadRel{
 				Name: "User",
 				Sides: []psql.PreloadSide{
 					{
-						From:        Orders,
-						To:          Users,
+						From:        AppOrders,
+						To:          AppUsers,
 						FromColumns: []string{"user_id"},
 						ToColumns:   []string{"id"},
 					},
 				},
-			}, Users.Columns.Names(), opts...)
+			}, AppUsers.Columns.Names(), opts...)
 		},
 	}
 }
 
-type orderThenLoader[Q orm.Loadable] struct {
+type appOrderThenLoader[Q orm.Loadable] struct {
 	User func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 }
 
-func buildOrderThenLoader[Q orm.Loadable]() orderThenLoader[Q] {
+func buildAppOrderThenLoader[Q orm.Loadable]() appOrderThenLoader[Q] {
 	type UserLoadInterface interface {
 		LoadUser(context.Context, bob.Executor, ...bob.Mod[*dialect.SelectQuery]) error
 	}
 
-	return orderThenLoader[Q]{
+	return appOrderThenLoader[Q]{
 		User: thenLoadBuilder[Q](
 			"User",
 			func(ctx context.Context, exec bob.Executor, retrieved UserLoadInterface, mods ...bob.Mod[*dialect.SelectQuery]) error {
@@ -691,8 +691,8 @@ func buildOrderThenLoader[Q orm.Loadable]() orderThenLoader[Q] {
 	}
 }
 
-// LoadUser loads the order's User into the .R struct
-func (o *Order) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadUser loads the appOrder's User into the .R struct
+func (o *AppOrder) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -706,20 +706,20 @@ func (o *Order) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod
 		return err
 	}
 
-	related.R.Orders = OrderSlice{o}
+	related.R.Orders = AppOrderSlice{o}
 
 	o.R.User = related
 	o.R.Loaded.User = true
 	return nil
 }
 
-// LoadUser loads the order's User into the .R struct
-func (os OrderSlice) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadUser loads the appOrder's User into the .R struct
+func (os AppOrderSlice) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
 
-	users, err := os.User(mods...).All(ctx, exec)
+	appUsers, err := os.User(mods...).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -738,7 +738,7 @@ func (os OrderSlice) LoadUser(ctx context.Context, exec bob.Executor, mods ...bo
 			continue
 		}
 
-		for _, rel := range users {
+		for _, rel := range appUsers {
 
 			if !(o.UserID == rel.ID) {
 				continue
@@ -754,25 +754,25 @@ func (os OrderSlice) LoadUser(ctx context.Context, exec bob.Executor, mods ...bo
 	return nil
 }
 
-type orderJoins[Q dialect.Joinable] struct {
+type appOrderJoins[Q dialect.Joinable] struct {
 	typ  string
-	User modAs[Q, userColumns]
+	User modAs[Q, appUserColumns]
 }
 
-func (j orderJoins[Q]) aliasedAs(alias string) orderJoins[Q] {
-	return buildOrderJoins[Q](buildOrderColumns(alias), j.typ)
+func (j appOrderJoins[Q]) aliasedAs(alias string) appOrderJoins[Q] {
+	return buildAppOrderJoins[Q](buildAppOrderColumns(alias), j.typ)
 }
 
-func buildOrderJoins[Q dialect.Joinable](cols orderColumns, typ string) orderJoins[Q] {
-	return orderJoins[Q]{
+func buildAppOrderJoins[Q dialect.Joinable](cols appOrderColumns, typ string) appOrderJoins[Q] {
+	return appOrderJoins[Q]{
 		typ: typ,
-		User: modAs[Q, userColumns]{
-			c: Users.Columns,
-			f: func(to userColumns) bob.Mod[Q] {
+		User: modAs[Q, appUserColumns]{
+			c: AppUsers.Columns,
+			f: func(to appUserColumns) bob.Mod[Q] {
 				mods := make(mods.QueryMods[Q], 0, 1)
 
 				{
-					mods = append(mods, dialect.Join[Q](typ, Users.Name().As(to.Alias())).On(
+					mods = append(mods, dialect.Join[Q](typ, AppUsers.Name().As(to.Alias())).On(
 						to.ID.EQ(cols.UserID),
 					))
 				}

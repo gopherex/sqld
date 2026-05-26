@@ -17,20 +17,20 @@ import (
 var Preload = getPreloaders()
 
 type preloaders struct {
-	User     userPreloader
-	Profile  profilePreloader
-	Order    orderPreloader
-	Role     rolePreloader
-	UserRole userRolePreloader
+	AppUser     appUserPreloader
+	AppProfile  appProfilePreloader
+	AppOrder    appOrderPreloader
+	AppRole     appRolePreloader
+	AppUserRole appUserRolePreloader
 }
 
 func getPreloaders() preloaders {
 	return preloaders{
-		User:     buildUserPreloader(),
-		Profile:  buildProfilePreloader(),
-		Order:    buildOrderPreloader(),
-		Role:     buildRolePreloader(),
-		UserRole: buildUserRolePreloader(),
+		AppUser:     buildAppUserPreloader(),
+		AppProfile:  buildAppProfilePreloader(),
+		AppOrder:    buildAppOrderPreloader(),
+		AppRole:     buildAppRolePreloader(),
+		AppUserRole: buildAppUserRolePreloader(),
 	}
 }
 
@@ -41,20 +41,20 @@ var (
 )
 
 type thenLoaders[Q orm.Loadable] struct {
-	User     userThenLoader[Q]
-	Profile  profileThenLoader[Q]
-	Order    orderThenLoader[Q]
-	Role     roleThenLoader[Q]
-	UserRole userRoleThenLoader[Q]
+	AppUser     appUserThenLoader[Q]
+	AppProfile  appProfileThenLoader[Q]
+	AppOrder    appOrderThenLoader[Q]
+	AppRole     appRoleThenLoader[Q]
+	AppUserRole appUserRoleThenLoader[Q]
 }
 
 func getThenLoaders[Q orm.Loadable]() thenLoaders[Q] {
 	return thenLoaders[Q]{
-		User:     buildUserThenLoader[Q](),
-		Profile:  buildProfileThenLoader[Q](),
-		Order:    buildOrderThenLoader[Q](),
-		Role:     buildRoleThenLoader[Q](),
-		UserRole: buildUserRoleThenLoader[Q](),
+		AppUser:     buildAppUserThenLoader[Q](),
+		AppProfile:  buildAppProfileThenLoader[Q](),
+		AppOrder:    buildAppOrderThenLoader[Q](),
+		AppRole:     buildAppRoleThenLoader[Q](),
+		AppUserRole: buildAppUserRoleThenLoader[Q](),
 	}
 }
 

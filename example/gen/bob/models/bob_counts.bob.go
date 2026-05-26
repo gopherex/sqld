@@ -21,26 +21,26 @@ var (
 )
 
 type preloadCounts struct {
-	User userCountPreloader
-	Role roleCountPreloader
+	AppUser appUserCountPreloader
+	AppRole appRoleCountPreloader
 }
 
 func getPreloadCount() preloadCounts {
 	return preloadCounts{
-		User: buildUserCountPreloader(),
-		Role: buildRoleCountPreloader(),
+		AppUser: buildAppUserCountPreloader(),
+		AppRole: buildAppRoleCountPreloader(),
 	}
 }
 
 type thenLoadCounts[Q orm.Loadable] struct {
-	User userCountThenLoader[Q]
-	Role roleCountThenLoader[Q]
+	AppUser appUserCountThenLoader[Q]
+	AppRole appRoleCountThenLoader[Q]
 }
 
 func getThenLoadCount[Q orm.Loadable]() thenLoadCounts[Q] {
 	return thenLoadCounts[Q]{
-		User: buildUserCountThenLoader[Q](),
-		Role: buildRoleCountThenLoader[Q](),
+		AppUser: buildAppUserCountThenLoader[Q](),
+		AppRole: buildAppRoleCountThenLoader[Q](),
 	}
 }
 

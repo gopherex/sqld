@@ -100,9 +100,12 @@ _ = row.Status == user.Status              // both db.AppUserStatus
   types (composites, `uuid.UUID`, `pgtype.*`). Enable `factories: true` only for
   schemas whose column types all have a known random expression.
 - **Null-wrapper alignment.** The shared *non-null* leaf types are identical
-  across both generators. Nullable fields may differ in wrapper (`sqld-gen-go`
-  uses `*T` in `pointer` mode; bob may use `null.Val[T]`). The `opt` null mode
-  narrows this; full alignment of nullable wrappers is ongoing.
+  across both generators. Nullable *model* fields differ in wrapper: `sqld-gen-go`
+  uses `*T`, while bob uses `null.Val[T]` for a nullable field regardless of
+  `nullMode` (the mode only changes bob's *setter*/optional wrapper — `*T` for
+  `pointer`, `omit.Val[T]` for `opt`). Full alignment of nullable model-field
+  wrappers between the two generators is ongoing; the non-null leaf types (the
+  symbiosis keystone) already match exactly.
 - **No wasm.** Unlike `sqld-gen-go`, `sqld-gen-bob` ships only as a native binary
   (bob's generator is not a wasip1 target).
 - **Queries stay with `sqld-gen-go`.** bob's query-folder codegen is not used —

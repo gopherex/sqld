@@ -16,7 +16,7 @@ func TestBobSqldShareLeafTypes(t *testing.T) {
 	var s db.AppUserStatus = db.AppUserStatusActive
 
 	// bob ORM model field is db.AppUserStatus.
-	var bobModel models.User
+	var bobModel models.AppUser
 	bobModel.Status = s
 
 	// sqld-gen-go model field is db.AppUserStatus.

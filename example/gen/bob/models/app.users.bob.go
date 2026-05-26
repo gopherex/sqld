@@ -25,44 +25,44 @@ import (
 	"github.com/yaroher/sqld/example/gen/db"
 )
 
-// User is an object representing the database table.
-type User struct {
+// AppUser is an object representing the database table.
+type AppUser struct {
 	ID        int64            `db:"id,pk" `
 	Email     string           `db:"email" `
 	Status    db.AppUserStatus `db:"status" `
 	ManagerID null.Val[int64]  `db:"manager_id" `
 	CreatedAt time.Time        `db:"created_at" `
 
-	R userR `db:"-" `
+	R appUserR `db:"-" `
 
-	C userC `db:"-" `
+	C appUserC `db:"-" `
 }
 
-// UserSlice is an alias for a slice of pointers to User.
-// This should almost always be used instead of []*User.
-type UserSlice []*User
+// AppUserSlice is an alias for a slice of pointers to AppUser.
+// This should almost always be used instead of []*AppUser.
+type AppUserSlice []*AppUser
 
-// Users contains methods to work with the users table
-var Users = psql.NewTablex[*User, UserSlice, *UserSetter]("app", "users", buildUserColumns("users"))
+// AppUsers contains methods to work with the users table
+var AppUsers = psql.NewTablex[*AppUser, AppUserSlice, *AppUserSetter]("app", "users", buildAppUserColumns("app.users"))
 
-// UsersQuery is a query on the users table
-type UsersQuery = *psql.ViewQuery[*User, UserSlice]
+// AppUsersQuery is a query on the users table
+type AppUsersQuery = *psql.ViewQuery[*AppUser, AppUserSlice]
 
-// userR is where relationships are stored.
-type userR struct {
-	Orders          OrderSlice // orders_fkey_0
-	Profile         *Profile   // profiles_fkey_0
-	Roles           RoleSlice  // user_roles_fkey_0user_roles_fkey_1
-	Manager         *User      // users_fkey_0
-	ReverseManagers UserSlice  // users_fkey_0__self_join_reverse
+// appUserR is where relationships are stored.
+type appUserR struct {
+	Orders          AppOrderSlice // orders_fkey_0
+	Profile         *AppProfile   // profiles_fkey_0
+	Roles           AppRoleSlice  // user_roles_fkey_0user_roles_fkey_1
+	Manager         *AppUser      // users_fkey_0
+	ReverseManagers AppUserSlice  // users_fkey_0__self_join_reverse
 	// Loaded reports whether each relationship has been loaded.
 	// A relationship's bool is set by Load*, Preload, ThenLoad, factory builds,
 	// and to-one Attach/Insert operations. To-many Attach/Insert operations leave it unchanged.
-	Loaded userRLoaded `db:"-" `
+	Loaded appUserRLoaded `db:"-" `
 }
 
-// userRLoaded tracks which relationships on User have been loaded.
-type userRLoaded struct {
+// appUserRLoaded tracks which relationships on AppUser have been loaded.
+type appUserRLoaded struct {
 	Orders          bool // orders_fkey_0
 	Profile         bool // profiles_fkey_0
 	Roles           bool // user_roles_fkey_0user_roles_fkey_1
@@ -70,7 +70,7 @@ type userRLoaded struct {
 	ReverseManagers bool // users_fkey_0__self_join_reverse
 }
 
-func buildUserColumns(tableName string) userColumns {
+func buildAppUserColumns(tableName string) appUserColumns {
 	columnsExpr := expr.NewColumnsExpr(
 		"id", "email", "status", "manager_id", "created_at",
 	)
@@ -79,70 +79,70 @@ func buildUserColumns(tableName string) userColumns {
 		columnsExpr = columnsExpr.WithParent(tableName)
 	}
 
-	return userColumns{
+	return appUserColumns{
 		ColumnsExpr: columnsExpr,
 		tableAlias:  tableName,
-		ID:          buildUserColumn(tableName, "id"),
-		Email:       buildUserColumn(tableName, "email"),
-		Status:      buildUserColumn(tableName, "status"),
-		ManagerID:   buildUserColumn(tableName, "manager_id"),
-		CreatedAt:   buildUserColumn(tableName, "created_at"),
+		ID:          buildAppUserColumn(tableName, "id"),
+		Email:       buildAppUserColumn(tableName, "email"),
+		Status:      buildAppUserColumn(tableName, "status"),
+		ManagerID:   buildAppUserColumn(tableName, "manager_id"),
+		CreatedAt:   buildAppUserColumn(tableName, "created_at"),
 	}
 }
 
-type userColumns struct {
+type appUserColumns struct {
 	expr.ColumnsExpr
 	tableAlias string
-	ID         userColumn
-	Email      userColumn
-	Status     userColumn
-	ManagerID  userColumn
-	CreatedAt  userColumn
+	ID         appUserColumn
+	Email      appUserColumn
+	Status     appUserColumn
+	ManagerID  appUserColumn
+	CreatedAt  appUserColumn
 }
 
 // Alias returns the current table alias for the columns set.
-func (c userColumns) Alias() string {
+func (c appUserColumns) Alias() string {
 	return c.tableAlias
 }
 
 // AliasedAs returns a copy of the columns set qualified by tableName.
-func (userColumns) AliasedAs(tableName string) userColumns {
-	return buildUserColumns(tableName)
+func (appUserColumns) AliasedAs(tableName string) appUserColumns {
+	return buildAppUserColumns(tableName)
 }
 
 // Unqualified returns a copy of the columns set without table qualification.
-func (c userColumns) Unqualified() userColumns {
-	return buildUserColumns("")
+func (c appUserColumns) Unqualified() appUserColumns {
+	return buildAppUserColumns("")
 }
 
-func buildUserColumn(alias, name string) userColumn {
-	return userColumn{
+func buildAppUserColumn(alias, name string) appUserColumn {
+	return appUserColumn{
 		Expression: psql.Quote(alias, name),
 		alias:      alias,
 		name:       name,
 	}
 }
 
-type userColumn struct {
+type appUserColumn struct {
 	psql.Expression
 	alias string
 	name  string
 }
 
 // Name returns the unqualified column name.
-func (c userColumn) Name() string {
+func (c appUserColumn) Name() string {
 	return c.name
 }
 
 // ShouldOmitParens prevents automatic parenthesis wrapping in expression builders.
-func (c userColumn) ShouldOmitParens() bool {
+func (c appUserColumn) ShouldOmitParens() bool {
 	return true
 }
 
-// UserSetter is used for insert/upsert/update operations
+// AppUserSetter is used for insert/upsert/update operations
 // All values are optional, and do not have to be set
 // Generated columns are not included
-type UserSetter struct {
+type AppUserSetter struct {
 	ID        *int64            `db:"id,pk" `
 	Email     *string           `db:"email" `
 	Status    *db.AppUserStatus `db:"status" `
@@ -150,7 +150,7 @@ type UserSetter struct {
 	CreatedAt *time.Time        `db:"created_at" `
 }
 
-func (s UserSetter) SetColumns() []string {
+func (s AppUserSetter) SetColumns() []string {
 	vals := make([]string, 0, 5)
 	if s.ID != nil {
 		vals = append(vals, "id")
@@ -170,7 +170,7 @@ func (s UserSetter) SetColumns() []string {
 	return vals
 }
 
-func (s UserSetter) Overwrite(t *User) {
+func (s AppUserSetter) Overwrite(t *AppUser) {
 	if s.ID != nil {
 		t.ID = func() int64 {
 			if s.ID == nil {
@@ -214,9 +214,9 @@ func (s UserSetter) Overwrite(t *User) {
 	}
 }
 
-func (s *UserSetter) Apply(q *dialect.InsertQuery) {
+func (s *AppUserSetter) Apply(q *dialect.InsertQuery) {
 	q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-		return Users.BeforeInsertHooks.RunHooks(ctx, exec, s)
+		return AppUsers.BeforeInsertHooks.RunHooks(ctx, exec, s)
 	})
 
 	q.AppendValues(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
@@ -281,11 +281,11 @@ func (s *UserSetter) Apply(q *dialect.InsertQuery) {
 	}))
 }
 
-func (s UserSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (s AppUserSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return um.Set(s.Expressions()...)
 }
 
-func (s UserSetter) Expressions(prefix ...string) []bob.Expression {
+func (s AppUserSetter) Expressions(prefix ...string) []bob.Expression {
 	exprs := make([]bob.Expression, 0, 5)
 
 	if s.ID != nil {
@@ -326,62 +326,62 @@ func (s UserSetter) Expressions(prefix ...string) []bob.Expression {
 	return exprs
 }
 
-// FindUser retrieves a single record by primary key
+// FindAppUser retrieves a single record by primary key
 // If cols is empty Find will return all columns.
-func FindUser(ctx context.Context, exec bob.Executor, IDPK int64, cols ...string) (*User, error) {
+func FindAppUser(ctx context.Context, exec bob.Executor, IDPK int64, cols ...string) (*AppUser, error) {
 	if len(cols) == 0 {
-		return Users.Query(
-			sm.Where(Users.Columns.ID.EQ(psql.Arg(IDPK))),
+		return AppUsers.Query(
+			sm.Where(AppUsers.Columns.ID.EQ(psql.Arg(IDPK))),
 		).One(ctx, exec)
 	}
 
-	return Users.Query(
-		sm.Where(Users.Columns.ID.EQ(psql.Arg(IDPK))),
-		sm.Columns(Users.Columns.Only(cols...)),
+	return AppUsers.Query(
+		sm.Where(AppUsers.Columns.ID.EQ(psql.Arg(IDPK))),
+		sm.Columns(AppUsers.Columns.Only(cols...)),
 	).One(ctx, exec)
 }
 
-// UserExists checks the presence of a single record by primary key
-func UserExists(ctx context.Context, exec bob.Executor, IDPK int64) (bool, error) {
-	return Users.Query(
-		sm.Where(Users.Columns.ID.EQ(psql.Arg(IDPK))),
+// AppUserExists checks the presence of a single record by primary key
+func AppUserExists(ctx context.Context, exec bob.Executor, IDPK int64) (bool, error) {
+	return AppUsers.Query(
+		sm.Where(AppUsers.Columns.ID.EQ(psql.Arg(IDPK))),
 	).Exists(ctx, exec)
 }
 
-// AfterQueryHook is called after User is retrieved from the database
-func (o *User) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppUser is retrieved from the database
+func (o *AppUser) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Users.AfterSelectHooks.RunHooks(ctx, exec, UserSlice{o})
+		ctx, err = AppUsers.AfterSelectHooks.RunHooks(ctx, exec, AppUserSlice{o})
 	case bob.QueryTypeInsert:
-		ctx, err = Users.AfterInsertHooks.RunHooks(ctx, exec, UserSlice{o})
+		ctx, err = AppUsers.AfterInsertHooks.RunHooks(ctx, exec, AppUserSlice{o})
 	case bob.QueryTypeUpdate:
-		ctx, err = Users.AfterUpdateHooks.RunHooks(ctx, exec, UserSlice{o})
+		ctx, err = AppUsers.AfterUpdateHooks.RunHooks(ctx, exec, AppUserSlice{o})
 	case bob.QueryTypeDelete:
-		ctx, err = Users.AfterDeleteHooks.RunHooks(ctx, exec, UserSlice{o})
+		ctx, err = AppUsers.AfterDeleteHooks.RunHooks(ctx, exec, AppUserSlice{o})
 	case bob.QueryTypeMerge:
-		ctx, err = Users.AfterMergeHooks.RunHooks(ctx, exec, UserSlice{o})
+		ctx, err = AppUsers.AfterMergeHooks.RunHooks(ctx, exec, AppUserSlice{o})
 	}
 
 	return err
 }
 
-// primaryKeyVals returns the primary key values of the User
-func (o *User) primaryKeyVals() bob.Expression {
+// primaryKeyVals returns the primary key values of the AppUser
+func (o *AppUser) primaryKeyVals() bob.Expression {
 	return psql.Arg(o.ID)
 }
 
-func (o *User) pkEQ() dialect.Expression {
-	return psql.Quote("users", "id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+func (o *AppUser) pkEQ() dialect.Expression {
+	return psql.Quote("app.users", "id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		return o.primaryKeyVals().WriteSQL(ctx, w, d, start)
 	}))
 }
 
-// Update uses an executor to update the User
-func (o *User) Update(ctx context.Context, exec bob.Executor, s *UserSetter) error {
-	v, err := Users.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
+// Update uses an executor to update the AppUser
+func (o *AppUser) Update(ctx context.Context, exec bob.Executor, s *AppUserSetter) error {
+	v, err := AppUsers.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -392,16 +392,16 @@ func (o *User) Update(ctx context.Context, exec bob.Executor, s *UserSetter) err
 	return nil
 }
 
-// Delete deletes a single User record with an executor
-func (o *User) Delete(ctx context.Context, exec bob.Executor) error {
-	_, err := Users.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
+// Delete deletes a single AppUser record with an executor
+func (o *AppUser) Delete(ctx context.Context, exec bob.Executor) error {
+	_, err := AppUsers.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
 	return err
 }
 
-// Reload refreshes the User using the executor
-func (o *User) Reload(ctx context.Context, exec bob.Executor) error {
-	o2, err := Users.Query(
-		sm.Where(Users.Columns.ID.EQ(psql.Arg(o.ID))),
+// Reload refreshes the AppUser using the executor
+func (o *AppUser) Reload(ctx context.Context, exec bob.Executor) error {
+	o2, err := AppUsers.Query(
+		sm.Where(AppUsers.Columns.ID.EQ(psql.Arg(o.ID))),
 	).One(ctx, exec)
 	if err != nil {
 		return err
@@ -412,32 +412,32 @@ func (o *User) Reload(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// AfterQueryHook is called after UserSlice is retrieved from the database
-func (o UserSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppUserSlice is retrieved from the database
+func (o AppUserSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Users.AfterSelectHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppUsers.AfterSelectHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeInsert:
-		ctx, err = Users.AfterInsertHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppUsers.AfterInsertHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeUpdate:
-		ctx, err = Users.AfterUpdateHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppUsers.AfterUpdateHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeDelete:
-		ctx, err = Users.AfterDeleteHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppUsers.AfterDeleteHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeMerge:
-		ctx, err = Users.AfterMergeHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppUsers.AfterMergeHooks.RunHooks(ctx, exec, o)
 	}
 
 	return err
 }
 
-func (o UserSlice) pkIN() dialect.Expression {
+func (o AppUserSlice) pkIN() dialect.Expression {
 	if len(o) == 0 {
 		return psql.Raw("NULL")
 	}
 
-	return psql.Quote("users", "id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+	return psql.Quote("app.users", "id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		pkPairs := make([]bob.Expression, len(o))
 		for i, row := range o {
 			pkPairs[i] = row.primaryKeyVals()
@@ -449,7 +449,7 @@ func (o UserSlice) pkIN() dialect.Expression {
 // copyMatchingRows finds models in the given slice that have the same primary key
 // then it first copies the existing relationships from the old model to the new model
 // and then replaces the old model in the slice with the new model
-func (o UserSlice) copyMatchingRows(from ...*User) {
+func (o AppUserSlice) copyMatchingRows(from ...*AppUser) {
 	for i, old := range o {
 		for _, new := range from {
 			if new.ID != old.ID {
@@ -463,25 +463,25 @@ func (o UserSlice) copyMatchingRows(from ...*User) {
 }
 
 // UpdateMod modifies an update query with "WHERE primary_key IN (o...)"
-func (o UserSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (o AppUserSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return bob.ModFunc[*dialect.UpdateQuery](func(q *dialect.UpdateQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Users.BeforeUpdateHooks.RunHooks(ctx, exec, o)
+			return AppUsers.BeforeUpdateHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *User:
+			case *AppUser:
 				o.copyMatchingRows(retrieved)
-			case []*User:
+			case []*AppUser:
 				o.copyMatchingRows(retrieved...)
-			case UserSlice:
+			case AppUserSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a User or a slice of User
+				// If the retrieved value is not a AppUser or a slice of AppUser
 				// then run the AfterUpdateHooks on the slice
-				_, err = Users.AfterUpdateHooks.RunHooks(ctx, exec, o)
+				_, err = AppUsers.AfterUpdateHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -492,25 +492,25 @@ func (o UserSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 // DeleteMod modifies an delete query with "WHERE primary_key IN (o...)"
-func (o UserSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
+func (o AppUserSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 	return bob.ModFunc[*dialect.DeleteQuery](func(q *dialect.DeleteQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Users.BeforeDeleteHooks.RunHooks(ctx, exec, o)
+			return AppUsers.BeforeDeleteHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *User:
+			case *AppUser:
 				o.copyMatchingRows(retrieved)
-			case []*User:
+			case []*AppUser:
 				o.copyMatchingRows(retrieved...)
-			case UserSlice:
+			case AppUserSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a User or a slice of User
+				// If the retrieved value is not a AppUser or a slice of AppUser
 				// then run the AfterDeleteHooks on the slice
-				_, err = Users.AfterDeleteHooks.RunHooks(ctx, exec, o)
+				_, err = AppUsers.AfterDeleteHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -522,25 +522,25 @@ func (o UserSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 
 // MergeMod modifies a merge query to run BeforeMergeHooks and AfterMergeHooks
 // and updates the slice with the returned rows.
-func (o UserSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
+func (o AppUserSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	return bob.ModFunc[*dialect.MergeQuery](func(q *dialect.MergeQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Users.BeforeMergeHooks.RunHooks(ctx, exec, o)
+			return AppUsers.BeforeMergeHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *User:
+			case *AppUser:
 				o.copyMatchingRows(retrieved)
-			case []*User:
+			case []*AppUser:
 				o.copyMatchingRows(retrieved...)
-			case UserSlice:
+			case AppUserSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a User or a slice of User
+				// If the retrieved value is not a AppUser or a slice of AppUser
 				// then run the AfterMergeHooks on the slice
-				_, err = Users.AfterMergeHooks.RunHooks(ctx, exec, o)
+				_, err = AppUsers.AfterMergeHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -548,30 +548,30 @@ func (o UserSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	})
 }
 
-func (o UserSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals UserSetter) error {
+func (o AppUserSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals AppUserSetter) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Users.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
+	_, err := AppUsers.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
 	return err
 }
 
-func (o UserSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
+func (o AppUserSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Users.Delete(o.DeleteMod()).Exec(ctx, exec)
+	_, err := AppUsers.Delete(o.DeleteMod()).Exec(ctx, exec)
 	return err
 }
 
-func (o UserSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
+func (o AppUserSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	o2, err := Users.Query(sm.Where(o.pkIN())).All(ctx, exec)
+	o2, err := AppUsers.Query(sm.Where(o.pkIN())).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -581,14 +581,14 @@ func (o UserSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// Orders starts a query for related objects on orders
-func (o *User) Orders(mods ...bob.Mod[*dialect.SelectQuery]) OrdersQuery {
-	return Orders.Query(append(mods,
-		sm.Where(Orders.Columns.UserID.EQ(psql.Arg(o.ID))),
+// Orders starts a query for related objects on app.orders
+func (o *AppUser) Orders(mods ...bob.Mod[*dialect.SelectQuery]) AppOrdersQuery {
+	return AppOrders.Query(append(mods,
+		sm.Where(AppOrders.Columns.UserID.EQ(psql.Arg(o.ID))),
 	)...)
 }
 
-func (os UserSlice) Orders(mods ...bob.Mod[*dialect.SelectQuery]) OrdersQuery {
+func (os AppUserSlice) Orders(mods ...bob.Mod[*dialect.SelectQuery]) AppOrdersQuery {
 	pkID := make(pgtypes.Array[int64], 0, len(os))
 	for _, o := range os {
 		if o == nil {
@@ -600,19 +600,19 @@ func (os UserSlice) Orders(mods ...bob.Mod[*dialect.SelectQuery]) OrdersQuery {
 		psql.F("unnest", psql.Cast(psql.Arg(pkID), "bigserial[]")),
 	))
 
-	return Orders.Query(append(mods,
-		sm.Where(psql.Group(Orders.Columns.UserID).OP("IN", PKArgExpr)),
+	return AppOrders.Query(append(mods,
+		sm.Where(psql.Group(AppOrders.Columns.UserID).OP("IN", PKArgExpr)),
 	)...)
 }
 
-// Profile starts a query for related objects on profiles
-func (o *User) Profile(mods ...bob.Mod[*dialect.SelectQuery]) ProfilesQuery {
-	return Profiles.Query(append(mods,
-		sm.Where(Profiles.Columns.UserID.EQ(psql.Arg(o.ID))),
+// Profile starts a query for related objects on app.profiles
+func (o *AppUser) Profile(mods ...bob.Mod[*dialect.SelectQuery]) AppProfilesQuery {
+	return AppProfiles.Query(append(mods,
+		sm.Where(AppProfiles.Columns.UserID.EQ(psql.Arg(o.ID))),
 	)...)
 }
 
-func (os UserSlice) Profile(mods ...bob.Mod[*dialect.SelectQuery]) ProfilesQuery {
+func (os AppUserSlice) Profile(mods ...bob.Mod[*dialect.SelectQuery]) AppProfilesQuery {
 	pkID := make(pgtypes.Array[int64], 0, len(os))
 	for _, o := range os {
 		if o == nil {
@@ -624,21 +624,21 @@ func (os UserSlice) Profile(mods ...bob.Mod[*dialect.SelectQuery]) ProfilesQuery
 		psql.F("unnest", psql.Cast(psql.Arg(pkID), "bigserial[]")),
 	))
 
-	return Profiles.Query(append(mods,
-		sm.Where(psql.Group(Profiles.Columns.UserID).OP("IN", PKArgExpr)),
+	return AppProfiles.Query(append(mods,
+		sm.Where(psql.Group(AppProfiles.Columns.UserID).OP("IN", PKArgExpr)),
 	)...)
 }
 
-// Roles starts a query for related objects on roles
-func (o *User) Roles(mods ...bob.Mod[*dialect.SelectQuery]) RolesQuery {
-	return Roles.Query(append(mods,
-		sm.InnerJoin(UserRoles.NameAs()).On(
-			Roles.Columns.ID.EQ(UserRoles.Columns.RoleID)),
-		sm.Where(UserRoles.Columns.UserID.EQ(psql.Arg(o.ID))),
+// Roles starts a query for related objects on app.roles
+func (o *AppUser) Roles(mods ...bob.Mod[*dialect.SelectQuery]) AppRolesQuery {
+	return AppRoles.Query(append(mods,
+		sm.InnerJoin(AppUserRoles.NameAs()).On(
+			AppRoles.Columns.ID.EQ(AppUserRoles.Columns.RoleID)),
+		sm.Where(AppUserRoles.Columns.UserID.EQ(psql.Arg(o.ID))),
 	)...)
 }
 
-func (os UserSlice) Roles(mods ...bob.Mod[*dialect.SelectQuery]) RolesQuery {
+func (os AppUserSlice) Roles(mods ...bob.Mod[*dialect.SelectQuery]) AppRolesQuery {
 	pkID := make(pgtypes.Array[int64], 0, len(os))
 	for _, o := range os {
 		if o == nil {
@@ -650,22 +650,22 @@ func (os UserSlice) Roles(mods ...bob.Mod[*dialect.SelectQuery]) RolesQuery {
 		psql.F("unnest", psql.Cast(psql.Arg(pkID), "bigserial[]")),
 	))
 
-	return Roles.Query(append(mods,
-		sm.InnerJoin(UserRoles.NameAs()).On(
-			Roles.Columns.ID.EQ(UserRoles.Columns.RoleID),
+	return AppRoles.Query(append(mods,
+		sm.InnerJoin(AppUserRoles.NameAs()).On(
+			AppRoles.Columns.ID.EQ(AppUserRoles.Columns.RoleID),
 		),
-		sm.Where(psql.Group(UserRoles.Columns.UserID).OP("IN", PKArgExpr)),
+		sm.Where(psql.Group(AppUserRoles.Columns.UserID).OP("IN", PKArgExpr)),
 	)...)
 }
 
-// Manager starts a query for related objects on users
-func (o *User) Manager(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
-	return Users.Query(append(mods,
-		sm.Where(Users.Columns.ID.EQ(psql.Arg(o.ManagerID))),
+// Manager starts a query for related objects on app.users
+func (o *AppUser) Manager(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
+	return AppUsers.Query(append(mods,
+		sm.Where(AppUsers.Columns.ID.EQ(psql.Arg(o.ManagerID))),
 	)...)
 }
 
-func (os UserSlice) Manager(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
+func (os AppUserSlice) Manager(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
 	pkManagerID := make(pgtypes.Array[null.Val[int64]], 0, len(os))
 	for _, o := range os {
 		if o == nil {
@@ -677,19 +677,19 @@ func (os UserSlice) Manager(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
 		psql.F("unnest", psql.Cast(psql.Arg(pkManagerID), "int8[]")),
 	))
 
-	return Users.Query(append(mods,
-		sm.Where(psql.Group(Users.Columns.ID).OP("IN", PKArgExpr)),
+	return AppUsers.Query(append(mods,
+		sm.Where(psql.Group(AppUsers.Columns.ID).OP("IN", PKArgExpr)),
 	)...)
 }
 
-// ReverseManagers starts a query for related objects on users
-func (o *User) ReverseManagers(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
-	return Users.Query(append(mods,
-		sm.Where(Users.Columns.ManagerID.EQ(psql.Arg(o.ID))),
+// ReverseManagers starts a query for related objects on app.users
+func (o *AppUser) ReverseManagers(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
+	return AppUsers.Query(append(mods,
+		sm.Where(AppUsers.Columns.ManagerID.EQ(psql.Arg(o.ID))),
 	)...)
 }
 
-func (os UserSlice) ReverseManagers(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
+func (os AppUserSlice) ReverseManagers(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
 	pkID := make(pgtypes.Array[int64], 0, len(os))
 	for _, o := range os {
 		if o == nil {
@@ -701,325 +701,325 @@ func (os UserSlice) ReverseManagers(mods ...bob.Mod[*dialect.SelectQuery]) Users
 		psql.F("unnest", psql.Cast(psql.Arg(pkID), "bigserial[]")),
 	))
 
-	return Users.Query(append(mods,
-		sm.Where(psql.Group(Users.Columns.ManagerID).OP("IN", PKArgExpr)),
+	return AppUsers.Query(append(mods,
+		sm.Where(psql.Group(AppUsers.Columns.ManagerID).OP("IN", PKArgExpr)),
 	)...)
 }
 
-func insertUserOrders0(ctx context.Context, exec bob.Executor, orders1 []*OrderSetter, user0 *User) (OrderSlice, error) {
-	for i := range orders1 {
-		orders1[i].UserID = func() *int64 { return &user0.ID }()
+func insertAppUserOrders0(ctx context.Context, exec bob.Executor, appOrders1 []*AppOrderSetter, appUser0 *AppUser) (AppOrderSlice, error) {
+	for i := range appOrders1 {
+		appOrders1[i].UserID = func() *int64 { return &appUser0.ID }()
 	}
 
-	ret, err := Orders.Insert(bob.ToMods(orders1...)).All(ctx, exec)
+	ret, err := AppOrders.Insert(bob.ToMods(appOrders1...)).All(ctx, exec)
 	if err != nil {
-		return ret, fmt.Errorf("insertUserOrders0: %w", err)
+		return ret, fmt.Errorf("insertAppUserOrders0: %w", err)
 	}
 
 	return ret, nil
 }
 
-func attachUserOrders0(ctx context.Context, exec bob.Executor, count int, orders1 OrderSlice, user0 *User) (OrderSlice, error) {
-	setter := &OrderSetter{
-		UserID: func() *int64 { return &user0.ID }(),
+func attachAppUserOrders0(ctx context.Context, exec bob.Executor, count int, appOrders1 AppOrderSlice, appUser0 *AppUser) (AppOrderSlice, error) {
+	setter := &AppOrderSetter{
+		UserID: func() *int64 { return &appUser0.ID }(),
 	}
 
-	err := orders1.UpdateAll(ctx, exec, *setter)
+	err := appOrders1.UpdateAll(ctx, exec, *setter)
 	if err != nil {
-		return nil, fmt.Errorf("attachUserOrders0: %w", err)
+		return nil, fmt.Errorf("attachAppUserOrders0: %w", err)
 	}
 
-	return orders1, nil
+	return appOrders1, nil
 }
 
-func (user0 *User) InsertOrders(ctx context.Context, exec bob.Executor, related ...*OrderSetter) error {
+func (appUser0 *AppUser) InsertOrders(ctx context.Context, exec bob.Executor, related ...*AppOrderSetter) error {
 	if len(related) == 0 {
 		return nil
 	}
 
 	var err error
 
-	orders1, err := insertUserOrders0(ctx, exec, related, user0)
+	appOrders1, err := insertAppUserOrders0(ctx, exec, related, appUser0)
 	if err != nil {
 		return err
 	}
 
-	user0.R.Orders = append(user0.R.Orders, orders1...)
+	appUser0.R.Orders = append(appUser0.R.Orders, appOrders1...)
 
-	for _, rel := range orders1 {
-		rel.R.User = user0
+	for _, rel := range appOrders1 {
+		rel.R.User = appUser0
 		rel.R.Loaded.User = true
 	}
 	return nil
 }
 
-func (user0 *User) AttachOrders(ctx context.Context, exec bob.Executor, related ...*Order) error {
+func (appUser0 *AppUser) AttachOrders(ctx context.Context, exec bob.Executor, related ...*AppOrder) error {
 	if len(related) == 0 {
 		return nil
 	}
 
 	var err error
-	orders1 := OrderSlice(related)
+	appOrders1 := AppOrderSlice(related)
 
-	_, err = attachUserOrders0(ctx, exec, len(related), orders1, user0)
+	_, err = attachAppUserOrders0(ctx, exec, len(related), appOrders1, appUser0)
 	if err != nil {
 		return err
 	}
 
-	user0.R.Orders = append(user0.R.Orders, orders1...)
+	appUser0.R.Orders = append(appUser0.R.Orders, appOrders1...)
 
 	for _, rel := range related {
-		rel.R.User = user0
+		rel.R.User = appUser0
 		rel.R.Loaded.User = true
 	}
 
 	return nil
 }
 
-func insertUserProfile0(ctx context.Context, exec bob.Executor, profile1 *ProfileSetter, user0 *User) (*Profile, error) {
-	profile1.UserID = func() *int64 { return &user0.ID }()
+func insertAppUserProfile0(ctx context.Context, exec bob.Executor, appProfile1 *AppProfileSetter, appUser0 *AppUser) (*AppProfile, error) {
+	appProfile1.UserID = func() *int64 { return &appUser0.ID }()
 
-	ret, err := Profiles.Insert(profile1).One(ctx, exec)
+	ret, err := AppProfiles.Insert(appProfile1).One(ctx, exec)
 	if err != nil {
-		return ret, fmt.Errorf("insertUserProfile0: %w", err)
+		return ret, fmt.Errorf("insertAppUserProfile0: %w", err)
 	}
 
 	return ret, nil
 }
 
-func attachUserProfile0(ctx context.Context, exec bob.Executor, count int, profile1 *Profile, user0 *User) (*Profile, error) {
-	setter := &ProfileSetter{
-		UserID: func() *int64 { return &user0.ID }(),
+func attachAppUserProfile0(ctx context.Context, exec bob.Executor, count int, appProfile1 *AppProfile, appUser0 *AppUser) (*AppProfile, error) {
+	setter := &AppProfileSetter{
+		UserID: func() *int64 { return &appUser0.ID }(),
 	}
 
-	err := profile1.Update(ctx, exec, setter)
+	err := appProfile1.Update(ctx, exec, setter)
 	if err != nil {
-		return nil, fmt.Errorf("attachUserProfile0: %w", err)
+		return nil, fmt.Errorf("attachAppUserProfile0: %w", err)
 	}
 
-	return profile1, nil
+	return appProfile1, nil
 }
 
-func (user0 *User) InsertProfile(ctx context.Context, exec bob.Executor, related *ProfileSetter) error {
+func (appUser0 *AppUser) InsertProfile(ctx context.Context, exec bob.Executor, related *AppProfileSetter) error {
 	var err error
 
-	profile1, err := insertUserProfile0(ctx, exec, related, user0)
+	appProfile1, err := insertAppUserProfile0(ctx, exec, related, appUser0)
 	if err != nil {
 		return err
 	}
 
-	user0.R.Profile = profile1
-	user0.R.Loaded.Profile = true
+	appUser0.R.Profile = appProfile1
+	appUser0.R.Loaded.Profile = true
 
-	profile1.R.User = user0
-	profile1.R.Loaded.User = true
+	appProfile1.R.User = appUser0
+	appProfile1.R.Loaded.User = true
 
 	return nil
 }
 
-func (user0 *User) AttachProfile(ctx context.Context, exec bob.Executor, profile1 *Profile) error {
+func (appUser0 *AppUser) AttachProfile(ctx context.Context, exec bob.Executor, appProfile1 *AppProfile) error {
 	var err error
 
-	_, err = attachUserProfile0(ctx, exec, 1, profile1, user0)
+	_, err = attachAppUserProfile0(ctx, exec, 1, appProfile1, appUser0)
 	if err != nil {
 		return err
 	}
 
-	user0.R.Profile = profile1
-	user0.R.Loaded.Profile = true
+	appUser0.R.Profile = appProfile1
+	appUser0.R.Loaded.Profile = true
 
-	profile1.R.User = user0
-	profile1.R.Loaded.User = true
+	appProfile1.R.User = appUser0
+	appProfile1.R.Loaded.User = true
 
 	return nil
 }
 
-func attachUserRoles0(ctx context.Context, exec bob.Executor, count int, user0 *User, roles2 RoleSlice) (UserRoleSlice, error) {
-	setters := make([]*UserRoleSetter, count)
+func attachAppUserRoles0(ctx context.Context, exec bob.Executor, count int, appUser0 *AppUser, appRoles2 AppRoleSlice) (AppUserRoleSlice, error) {
+	setters := make([]*AppUserRoleSetter, count)
 	for i := range count {
-		setters[i] = &UserRoleSetter{
-			UserID: func() *int64 { return &user0.ID }(),
-			RoleID: func() *int64 { return &roles2[i].ID }(),
+		setters[i] = &AppUserRoleSetter{
+			UserID: func() *int64 { return &appUser0.ID }(),
+			RoleID: func() *int64 { return &appRoles2[i].ID }(),
 		}
 	}
 
-	userRoles1, err := UserRoles.Insert(bob.ToMods(setters...)).All(ctx, exec)
+	appUserRoles1, err := AppUserRoles.Insert(bob.ToMods(setters...)).All(ctx, exec)
 	if err != nil {
-		return nil, fmt.Errorf("attachUserRoles0: %w", err)
+		return nil, fmt.Errorf("attachAppUserRoles0: %w", err)
 	}
 
-	return userRoles1, nil
+	return appUserRoles1, nil
 }
 
-func (user0 *User) InsertRoles(ctx context.Context, exec bob.Executor, related ...*RoleSetter) error {
+func (appUser0 *AppUser) InsertRoles(ctx context.Context, exec bob.Executor, related ...*AppRoleSetter) error {
 	if len(related) == 0 {
 		return nil
 	}
 
 	var err error
 
-	inserted, err := Roles.Insert(bob.ToMods(related...)).All(ctx, exec)
+	inserted, err := AppRoles.Insert(bob.ToMods(related...)).All(ctx, exec)
 	if err != nil {
 		return fmt.Errorf("inserting related objects: %w", err)
 	}
-	roles2 := RoleSlice(inserted)
+	appRoles2 := AppRoleSlice(inserted)
 
-	_, err = attachUserRoles0(ctx, exec, len(related), user0, roles2)
+	_, err = attachAppUserRoles0(ctx, exec, len(related), appUser0, appRoles2)
 	if err != nil {
 		return err
 	}
 
-	user0.R.Roles = append(user0.R.Roles, roles2...)
+	appUser0.R.Roles = append(appUser0.R.Roles, appRoles2...)
 
-	for _, rel := range roles2 {
-		rel.R.Users = append(rel.R.Users, user0)
+	for _, rel := range appRoles2 {
+		rel.R.Users = append(rel.R.Users, appUser0)
 	}
 	return nil
 }
 
-func (user0 *User) AttachRoles(ctx context.Context, exec bob.Executor, related ...*Role) error {
+func (appUser0 *AppUser) AttachRoles(ctx context.Context, exec bob.Executor, related ...*AppRole) error {
 	if len(related) == 0 {
 		return nil
 	}
 
 	var err error
-	roles2 := RoleSlice(related)
+	appRoles2 := AppRoleSlice(related)
 
-	_, err = attachUserRoles0(ctx, exec, len(related), user0, roles2)
+	_, err = attachAppUserRoles0(ctx, exec, len(related), appUser0, appRoles2)
 	if err != nil {
 		return err
 	}
 
-	user0.R.Roles = append(user0.R.Roles, roles2...)
+	appUser0.R.Roles = append(appUser0.R.Roles, appRoles2...)
 
 	for _, rel := range related {
-		rel.R.Users = append(rel.R.Users, user0)
+		rel.R.Users = append(rel.R.Users, appUser0)
 	}
 
 	return nil
 }
 
-func attachUserManager0(ctx context.Context, exec bob.Executor, count int, user0 *User, user1 *User) (*User, error) {
-	setter := &UserSetter{
-		ManagerID: func() *null.Val[int64] { v := null.From(user1.ID); return &v }(),
+func attachAppUserManager0(ctx context.Context, exec bob.Executor, count int, appUser0 *AppUser, appUser1 *AppUser) (*AppUser, error) {
+	setter := &AppUserSetter{
+		ManagerID: func() *null.Val[int64] { v := null.From(appUser1.ID); return &v }(),
 	}
 
-	err := user0.Update(ctx, exec, setter)
+	err := appUser0.Update(ctx, exec, setter)
 	if err != nil {
-		return nil, fmt.Errorf("attachUserManager0: %w", err)
+		return nil, fmt.Errorf("attachAppUserManager0: %w", err)
 	}
 
-	return user0, nil
+	return appUser0, nil
 }
 
-func (user0 *User) InsertManager(ctx context.Context, exec bob.Executor, related *UserSetter) error {
+func (appUser0 *AppUser) InsertManager(ctx context.Context, exec bob.Executor, related *AppUserSetter) error {
 	var err error
 
-	user1, err := Users.Insert(related).One(ctx, exec)
+	appUser1, err := AppUsers.Insert(related).One(ctx, exec)
 	if err != nil {
 		return fmt.Errorf("inserting related objects: %w", err)
 	}
 
-	_, err = attachUserManager0(ctx, exec, 1, user0, user1)
+	_, err = attachAppUserManager0(ctx, exec, 1, appUser0, appUser1)
 	if err != nil {
 		return err
 	}
 
-	user0.R.Manager = user1
-	user0.R.Loaded.Manager = true
+	appUser0.R.Manager = appUser1
+	appUser0.R.Loaded.Manager = true
 
-	user1.R.ReverseManagers = append(user1.R.ReverseManagers, user0)
+	appUser1.R.ReverseManagers = append(appUser1.R.ReverseManagers, appUser0)
 
 	return nil
 }
 
-func (user0 *User) AttachManager(ctx context.Context, exec bob.Executor, user1 *User) error {
+func (appUser0 *AppUser) AttachManager(ctx context.Context, exec bob.Executor, appUser1 *AppUser) error {
 	var err error
 
-	_, err = attachUserManager0(ctx, exec, 1, user0, user1)
+	_, err = attachAppUserManager0(ctx, exec, 1, appUser0, appUser1)
 	if err != nil {
 		return err
 	}
 
-	user0.R.Manager = user1
-	user0.R.Loaded.Manager = true
+	appUser0.R.Manager = appUser1
+	appUser0.R.Loaded.Manager = true
 
-	user1.R.ReverseManagers = append(user1.R.ReverseManagers, user0)
+	appUser1.R.ReverseManagers = append(appUser1.R.ReverseManagers, appUser0)
 
 	return nil
 }
 
-func insertUserReverseManagers0(ctx context.Context, exec bob.Executor, users1 []*UserSetter, user0 *User) (UserSlice, error) {
-	for i := range users1 {
-		users1[i].ManagerID = func() *null.Val[int64] { v := null.From(user0.ID); return &v }()
+func insertAppUserReverseManagers0(ctx context.Context, exec bob.Executor, appUsers1 []*AppUserSetter, appUser0 *AppUser) (AppUserSlice, error) {
+	for i := range appUsers1 {
+		appUsers1[i].ManagerID = func() *null.Val[int64] { v := null.From(appUser0.ID); return &v }()
 	}
 
-	ret, err := Users.Insert(bob.ToMods(users1...)).All(ctx, exec)
+	ret, err := AppUsers.Insert(bob.ToMods(appUsers1...)).All(ctx, exec)
 	if err != nil {
-		return ret, fmt.Errorf("insertUserReverseManagers0: %w", err)
+		return ret, fmt.Errorf("insertAppUserReverseManagers0: %w", err)
 	}
 
 	return ret, nil
 }
 
-func attachUserReverseManagers0(ctx context.Context, exec bob.Executor, count int, users1 UserSlice, user0 *User) (UserSlice, error) {
-	setter := &UserSetter{
-		ManagerID: func() *null.Val[int64] { v := null.From(user0.ID); return &v }(),
+func attachAppUserReverseManagers0(ctx context.Context, exec bob.Executor, count int, appUsers1 AppUserSlice, appUser0 *AppUser) (AppUserSlice, error) {
+	setter := &AppUserSetter{
+		ManagerID: func() *null.Val[int64] { v := null.From(appUser0.ID); return &v }(),
 	}
 
-	err := users1.UpdateAll(ctx, exec, *setter)
+	err := appUsers1.UpdateAll(ctx, exec, *setter)
 	if err != nil {
-		return nil, fmt.Errorf("attachUserReverseManagers0: %w", err)
+		return nil, fmt.Errorf("attachAppUserReverseManagers0: %w", err)
 	}
 
-	return users1, nil
+	return appUsers1, nil
 }
 
-func (user0 *User) InsertReverseManagers(ctx context.Context, exec bob.Executor, related ...*UserSetter) error {
+func (appUser0 *AppUser) InsertReverseManagers(ctx context.Context, exec bob.Executor, related ...*AppUserSetter) error {
 	if len(related) == 0 {
 		return nil
 	}
 
 	var err error
 
-	users1, err := insertUserReverseManagers0(ctx, exec, related, user0)
+	appUsers1, err := insertAppUserReverseManagers0(ctx, exec, related, appUser0)
 	if err != nil {
 		return err
 	}
 
-	user0.R.ReverseManagers = append(user0.R.ReverseManagers, users1...)
+	appUser0.R.ReverseManagers = append(appUser0.R.ReverseManagers, appUsers1...)
 
-	for _, rel := range users1 {
-		rel.R.Manager = user0
+	for _, rel := range appUsers1 {
+		rel.R.Manager = appUser0
 		rel.R.Loaded.Manager = true
 	}
 	return nil
 }
 
-func (user0 *User) AttachReverseManagers(ctx context.Context, exec bob.Executor, related ...*User) error {
+func (appUser0 *AppUser) AttachReverseManagers(ctx context.Context, exec bob.Executor, related ...*AppUser) error {
 	if len(related) == 0 {
 		return nil
 	}
 
 	var err error
-	users1 := UserSlice(related)
+	appUsers1 := AppUserSlice(related)
 
-	_, err = attachUserReverseManagers0(ctx, exec, len(related), users1, user0)
+	_, err = attachAppUserReverseManagers0(ctx, exec, len(related), appUsers1, appUser0)
 	if err != nil {
 		return err
 	}
 
-	user0.R.ReverseManagers = append(user0.R.ReverseManagers, users1...)
+	appUser0.R.ReverseManagers = append(appUser0.R.ReverseManagers, appUsers1...)
 
 	for _, rel := range related {
-		rel.R.Manager = user0
+		rel.R.Manager = appUser0
 		rel.R.Loaded.Manager = true
 	}
 
 	return nil
 }
 
-type userWhere[Q psql.Filterable] struct {
+type appUserWhere[Q psql.Filterable] struct {
 	ID        psql.WhereMod[Q, int64]
 	Email     psql.WhereMod[Q, string]
 	Status    psql.WhereMod[Q, db.AppUserStatus]
@@ -1027,12 +1027,12 @@ type userWhere[Q psql.Filterable] struct {
 	CreatedAt psql.WhereMod[Q, time.Time]
 }
 
-func (userWhere[Q]) AliasedAs(alias string) userWhere[Q] {
-	return buildUserWhere[Q](buildUserColumns(alias))
+func (appUserWhere[Q]) AliasedAs(alias string) appUserWhere[Q] {
+	return buildAppUserWhere[Q](buildAppUserColumns(alias))
 }
 
-func buildUserWhere[Q psql.Filterable](cols userColumns) userWhere[Q] {
-	return userWhere[Q]{
+func buildAppUserWhere[Q psql.Filterable](cols appUserColumns) appUserWhere[Q] {
+	return appUserWhere[Q]{
 		ID:        psql.Where[Q, int64](cols.ID.Expression),
 		Email:     psql.Where[Q, string](cols.Email.Expression),
 		Status:    psql.Where[Q, db.AppUserStatus](cols.Status.Expression),
@@ -1041,16 +1041,16 @@ func buildUserWhere[Q psql.Filterable](cols userColumns) userWhere[Q] {
 	}
 }
 
-func (o *User) Preload(name string, retrieved any) error {
+func (o *AppUser) Preload(name string, retrieved any) error {
 	if o == nil {
 		return nil
 	}
 
 	switch name {
 	case "Orders":
-		rels, ok := retrieved.(OrderSlice)
+		rels, ok := retrieved.(AppOrderSlice)
 		if !ok {
-			return fmt.Errorf("user cannot load %T as %q", retrieved, name)
+			return fmt.Errorf("appUser cannot load %T as %q", retrieved, name)
 		}
 
 		o.R.Orders = rels
@@ -1064,9 +1064,9 @@ func (o *User) Preload(name string, retrieved any) error {
 		}
 		return nil
 	case "Profile":
-		rel, ok := retrieved.(*Profile)
+		rel, ok := retrieved.(*AppProfile)
 		if !ok {
-			return fmt.Errorf("user cannot load %T as %q", retrieved, name)
+			return fmt.Errorf("appUser cannot load %T as %q", retrieved, name)
 		}
 
 		o.R.Profile = rel
@@ -1078,9 +1078,9 @@ func (o *User) Preload(name string, retrieved any) error {
 		}
 		return nil
 	case "Roles":
-		rels, ok := retrieved.(RoleSlice)
+		rels, ok := retrieved.(AppRoleSlice)
 		if !ok {
-			return fmt.Errorf("user cannot load %T as %q", retrieved, name)
+			return fmt.Errorf("appUser cannot load %T as %q", retrieved, name)
 		}
 
 		o.R.Roles = rels
@@ -1088,27 +1088,27 @@ func (o *User) Preload(name string, retrieved any) error {
 
 		for _, rel := range rels {
 			if rel != nil {
-				rel.R.Users = UserSlice{o}
+				rel.R.Users = AppUserSlice{o}
 			}
 		}
 		return nil
 	case "Manager":
-		rel, ok := retrieved.(*User)
+		rel, ok := retrieved.(*AppUser)
 		if !ok {
-			return fmt.Errorf("user cannot load %T as %q", retrieved, name)
+			return fmt.Errorf("appUser cannot load %T as %q", retrieved, name)
 		}
 
 		o.R.Manager = rel
 		o.R.Loaded.Manager = true
 
 		if rel != nil {
-			rel.R.ReverseManagers = UserSlice{o}
+			rel.R.ReverseManagers = AppUserSlice{o}
 		}
 		return nil
 	case "ReverseManagers":
-		rels, ok := retrieved.(UserSlice)
+		rels, ok := retrieved.(AppUserSlice)
 		if !ok {
-			return fmt.Errorf("user cannot load %T as %q", retrieved, name)
+			return fmt.Errorf("appUser cannot load %T as %q", retrieved, name)
 		}
 
 		o.R.ReverseManagers = rels
@@ -1122,47 +1122,47 @@ func (o *User) Preload(name string, retrieved any) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("user has no relationship %q", name)
+		return fmt.Errorf("appUser has no relationship %q", name)
 	}
 }
 
-type userPreloader struct {
+type appUserPreloader struct {
 	Profile func(...psql.PreloadOption) psql.Preloader
 	Manager func(...psql.PreloadOption) psql.Preloader
 }
 
-func buildUserPreloader() userPreloader {
-	return userPreloader{
+func buildAppUserPreloader() appUserPreloader {
+	return appUserPreloader{
 		Profile: func(opts ...psql.PreloadOption) psql.Preloader {
-			return psql.Preload[*Profile, ProfileSlice](psql.PreloadRel{
+			return psql.Preload[*AppProfile, AppProfileSlice](psql.PreloadRel{
 				Name: "Profile",
 				Sides: []psql.PreloadSide{
 					{
-						From:        Users,
-						To:          Profiles,
+						From:        AppUsers,
+						To:          AppProfiles,
 						FromColumns: []string{"id"},
 						ToColumns:   []string{"user_id"},
 					},
 				},
-			}, Profiles.Columns.Names(), opts...)
+			}, AppProfiles.Columns.Names(), opts...)
 		},
 		Manager: func(opts ...psql.PreloadOption) psql.Preloader {
-			return psql.Preload[*User, UserSlice](psql.PreloadRel{
+			return psql.Preload[*AppUser, AppUserSlice](psql.PreloadRel{
 				Name: "Manager",
 				Sides: []psql.PreloadSide{
 					{
-						From:        Users,
-						To:          Users,
+						From:        AppUsers,
+						To:          AppUsers,
 						FromColumns: []string{"manager_id"},
 						ToColumns:   []string{"id"},
 					},
 				},
-			}, Users.Columns.Names(), opts...)
+			}, AppUsers.Columns.Names(), opts...)
 		},
 	}
 }
 
-type userThenLoader[Q orm.Loadable] struct {
+type appUserThenLoader[Q orm.Loadable] struct {
 	Orders          func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 	Profile         func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 	Roles           func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
@@ -1170,7 +1170,7 @@ type userThenLoader[Q orm.Loadable] struct {
 	ReverseManagers func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 }
 
-func buildUserThenLoader[Q orm.Loadable]() userThenLoader[Q] {
+func buildAppUserThenLoader[Q orm.Loadable]() appUserThenLoader[Q] {
 	type OrdersLoadInterface interface {
 		LoadOrders(context.Context, bob.Executor, ...bob.Mod[*dialect.SelectQuery]) error
 	}
@@ -1187,7 +1187,7 @@ func buildUserThenLoader[Q orm.Loadable]() userThenLoader[Q] {
 		LoadReverseManagers(context.Context, bob.Executor, ...bob.Mod[*dialect.SelectQuery]) error
 	}
 
-	return userThenLoader[Q]{
+	return appUserThenLoader[Q]{
 		Orders: thenLoadBuilder[Q](
 			"Orders",
 			func(ctx context.Context, exec bob.Executor, retrieved OrdersLoadInterface, mods ...bob.Mod[*dialect.SelectQuery]) error {
@@ -1221,8 +1221,8 @@ func buildUserThenLoader[Q orm.Loadable]() userThenLoader[Q] {
 	}
 }
 
-// LoadOrders loads the user's Orders into the .R struct
-func (o *User) LoadOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadOrders loads the appUser's Orders into the .R struct
+func (o *AppUser) LoadOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -1246,13 +1246,13 @@ func (o *User) LoadOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mo
 	return nil
 }
 
-// LoadOrders loads the user's Orders into the .R struct
-func (os UserSlice) LoadOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadOrders loads the appUser's Orders into the .R struct
+func (os AppUserSlice) LoadOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
 
-	orders, err := os.Orders(mods...).All(ctx, exec)
+	appOrders, err := os.Orders(mods...).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -1271,7 +1271,7 @@ func (os UserSlice) LoadOrders(ctx context.Context, exec bob.Executor, mods ...b
 			continue
 		}
 
-		for _, rel := range orders {
+		for _, rel := range appOrders {
 
 			if !(o.ID == rel.UserID) {
 				continue
@@ -1287,8 +1287,8 @@ func (os UserSlice) LoadOrders(ctx context.Context, exec bob.Executor, mods ...b
 	return nil
 }
 
-// LoadProfile loads the user's Profile into the .R struct
-func (o *User) LoadProfile(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadProfile loads the appUser's Profile into the .R struct
+func (o *AppUser) LoadProfile(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -1310,13 +1310,13 @@ func (o *User) LoadProfile(ctx context.Context, exec bob.Executor, mods ...bob.M
 	return nil
 }
 
-// LoadProfile loads the user's Profile into the .R struct
-func (os UserSlice) LoadProfile(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadProfile loads the appUser's Profile into the .R struct
+func (os AppUserSlice) LoadProfile(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
 
-	profiles, err := os.Profile(mods...).All(ctx, exec)
+	appProfiles, err := os.Profile(mods...).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -1335,7 +1335,7 @@ func (os UserSlice) LoadProfile(ctx context.Context, exec bob.Executor, mods ...
 			continue
 		}
 
-		for _, rel := range profiles {
+		for _, rel := range appProfiles {
 
 			if !(o.ID == rel.UserID) {
 				continue
@@ -1352,8 +1352,8 @@ func (os UserSlice) LoadProfile(ctx context.Context, exec bob.Executor, mods ...
 	return nil
 }
 
-// LoadRoles loads the user's Roles into the .R struct
-func (o *User) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadRoles loads the appUser's Roles into the .R struct
+func (o *AppUser) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -1368,7 +1368,7 @@ func (o *User) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod
 	}
 
 	for _, rel := range related {
-		rel.R.Users = UserSlice{o}
+		rel.R.Users = AppUserSlice{o}
 	}
 
 	o.R.Roles = related
@@ -1376,8 +1376,8 @@ func (o *User) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod
 	return nil
 }
 
-// LoadRoles loads the user's Roles into the .R struct
-func (os UserSlice) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadRoles loads the appUser's Roles into the .R struct
+func (os AppUserSlice) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
@@ -1389,20 +1389,20 @@ func (os UserSlice) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bo
 	}
 
 	if len(sq.SelectList.Columns) == 0 {
-		mods = append(mods, sm.Columns(Roles.Columns))
+		mods = append(mods, sm.Columns(AppRoles.Columns))
 	}
 
 	q := os.Roles(append(
 		mods,
-		sm.Columns(UserRoles.Columns.UserID.As("related_users.ID")),
+		sm.Columns(AppUserRoles.Columns.UserID.As("related_app.users.ID")),
 	)...)
 
 	IDSlice := []int64{}
 
-	mapper := scan.Mod(scan.StructMapper[*Role](), func(ctx context.Context, cols []string) (scan.BeforeFunc, func(any, any) error) {
+	mapper := scan.Mod(scan.StructMapper[*AppRole](), func(ctx context.Context, cols []string) (scan.BeforeFunc, func(any, any) error) {
 		return func(row *scan.Row) (any, error) {
 				IDSlice = append(IDSlice, *new(int64))
-				row.ScheduleScanByName("related_users.ID", &IDSlice[len(IDSlice)-1])
+				row.ScheduleScanByName("related_app.users.ID", &IDSlice[len(IDSlice)-1])
 
 				return nil, nil
 			},
@@ -1411,7 +1411,7 @@ func (os UserSlice) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bo
 			}
 	})
 
-	roles, err := bob.Allx[bob.SliceTransformer[*Role, RoleSlice]](ctx, exec, q, mapper)
+	appRoles, err := bob.Allx[bob.SliceTransformer[*AppRole, AppRoleSlice]](ctx, exec, q, mapper)
 	if err != nil {
 		return err
 	}
@@ -1422,7 +1422,7 @@ func (os UserSlice) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bo
 	}
 
 	for _, o := range os {
-		for i, rel := range roles {
+		for i, rel := range appRoles {
 			if !(o.ID == IDSlice[i]) {
 				continue
 			}
@@ -1436,8 +1436,8 @@ func (os UserSlice) LoadRoles(ctx context.Context, exec bob.Executor, mods ...bo
 	return nil
 }
 
-// LoadManager loads the user's Manager into the .R struct
-func (o *User) LoadManager(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadManager loads the appUser's Manager into the .R struct
+func (o *AppUser) LoadManager(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -1451,20 +1451,20 @@ func (o *User) LoadManager(ctx context.Context, exec bob.Executor, mods ...bob.M
 		return err
 	}
 
-	related.R.ReverseManagers = UserSlice{o}
+	related.R.ReverseManagers = AppUserSlice{o}
 
 	o.R.Manager = related
 	o.R.Loaded.Manager = true
 	return nil
 }
 
-// LoadManager loads the user's Manager into the .R struct
-func (os UserSlice) LoadManager(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadManager loads the appUser's Manager into the .R struct
+func (os AppUserSlice) LoadManager(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
 
-	users, err := os.Manager(mods...).All(ctx, exec)
+	appUsers, err := os.Manager(mods...).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -1483,7 +1483,7 @@ func (os UserSlice) LoadManager(ctx context.Context, exec bob.Executor, mods ...
 			continue
 		}
 
-		for _, rel := range users {
+		for _, rel := range appUsers {
 			if !o.ManagerID.IsValue() {
 				continue
 			}
@@ -1502,8 +1502,8 @@ func (os UserSlice) LoadManager(ctx context.Context, exec bob.Executor, mods ...
 	return nil
 }
 
-// LoadReverseManagers loads the user's ReverseManagers into the .R struct
-func (o *User) LoadReverseManagers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadReverseManagers loads the appUser's ReverseManagers into the .R struct
+func (o *AppUser) LoadReverseManagers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -1527,13 +1527,13 @@ func (o *User) LoadReverseManagers(ctx context.Context, exec bob.Executor, mods 
 	return nil
 }
 
-// LoadReverseManagers loads the user's ReverseManagers into the .R struct
-func (os UserSlice) LoadReverseManagers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadReverseManagers loads the appUser's ReverseManagers into the .R struct
+func (os AppUserSlice) LoadReverseManagers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
 
-	users, err := os.ReverseManagers(mods...).All(ctx, exec)
+	appUsers, err := os.ReverseManagers(mods...).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -1552,7 +1552,7 @@ func (os UserSlice) LoadReverseManagers(ctx context.Context, exec bob.Executor, 
 			continue
 		}
 
-		for _, rel := range users {
+		for _, rel := range appUsers {
 
 			if !rel.ManagerID.IsValue() {
 				continue
@@ -1571,15 +1571,15 @@ func (os UserSlice) LoadReverseManagers(ctx context.Context, exec bob.Executor, 
 	return nil
 }
 
-// userC is where relationship counts are stored.
-type userC struct {
+// appUserC is where relationship counts are stored.
+type appUserC struct {
 	Orders          *int64
 	Roles           *int64
 	ReverseManagers *int64
 }
 
 // PreloadCount sets a count in the C struct by name
-func (o *User) PreloadCount(name string, count int64) error {
+func (o *AppUser) PreloadCount(name string, count int64) error {
 	if o == nil {
 		return nil
 	}
@@ -1595,45 +1595,45 @@ func (o *User) PreloadCount(name string, count int64) error {
 	return nil
 }
 
-type userCountPreloader struct {
+type appUserCountPreloader struct {
 	Orders          func(...bob.Mod[*dialect.SelectQuery]) psql.Preloader
 	Roles           func(...bob.Mod[*dialect.SelectQuery]) psql.Preloader
 	ReverseManagers func(...bob.Mod[*dialect.SelectQuery]) psql.Preloader
 }
 
-func buildUserCountPreloader() userCountPreloader {
-	return userCountPreloader{
+func buildAppUserCountPreloader() appUserCountPreloader {
+	return appUserCountPreloader{
 		Orders: func(mods ...bob.Mod[*dialect.SelectQuery]) psql.Preloader {
-			return countPreloader[*User]("Orders", func(parent string) bob.Expression {
+			return countPreloader[*AppUser]("Orders", func(parent string) bob.Expression {
 				// Build a correlated subquery: (SELECT COUNT(*) FROM related WHERE fk = parent.pk)
 				if parent == "" {
-					parent = Users.Alias()
+					parent = AppUsers.Alias()
 				}
 
 				subqueryMods := []bob.Mod[*dialect.SelectQuery]{
 					sm.Columns(psql.Raw("count(*)")),
 
-					sm.From(Orders.Name()),
-					sm.Where(psql.Quote(Orders.Alias(), "user_id").EQ(psql.Quote(parent, "id"))),
+					sm.From(AppOrders.Name()),
+					sm.Where(psql.Quote(AppOrders.Alias(), "user_id").EQ(psql.Quote(parent, "id"))),
 				}
 				subqueryMods = append(subqueryMods, mods...)
 				return psql.Group(psql.Select(subqueryMods...).Expression)
 			})
 		},
 		Roles: func(mods ...bob.Mod[*dialect.SelectQuery]) psql.Preloader {
-			return countPreloader[*User]("Roles", func(parent string) bob.Expression {
+			return countPreloader[*AppUser]("Roles", func(parent string) bob.Expression {
 				// Build a correlated subquery: (SELECT COUNT(*) FROM related WHERE fk = parent.pk)
 				if parent == "" {
-					parent = Users.Alias()
+					parent = AppUsers.Alias()
 				}
 
 				subqueryMods := []bob.Mod[*dialect.SelectQuery]{
 					sm.Columns(psql.Raw("count(*)")),
 
-					sm.From(UserRoles.Name()),
-					sm.Where(psql.Quote(UserRoles.Alias(), "user_id").EQ(psql.Quote(parent, "id"))),
-					sm.InnerJoin(Roles.Name()).On(
-						psql.Quote(Roles.Alias(), "id").EQ(psql.Quote(UserRoles.Alias(), "role_id")),
+					sm.From(AppUserRoles.Name()),
+					sm.Where(psql.Quote(AppUserRoles.Alias(), "user_id").EQ(psql.Quote(parent, "id"))),
+					sm.InnerJoin(AppRoles.Name()).On(
+						psql.Quote(AppRoles.Alias(), "id").EQ(psql.Quote(AppUserRoles.Alias(), "role_id")),
 					),
 				}
 				subqueryMods = append(subqueryMods, mods...)
@@ -1641,17 +1641,17 @@ func buildUserCountPreloader() userCountPreloader {
 			})
 		},
 		ReverseManagers: func(mods ...bob.Mod[*dialect.SelectQuery]) psql.Preloader {
-			return countPreloader[*User]("ReverseManagers", func(parent string) bob.Expression {
+			return countPreloader[*AppUser]("ReverseManagers", func(parent string) bob.Expression {
 				// Build a correlated subquery: (SELECT COUNT(*) FROM related WHERE fk = parent.pk)
 				if parent == "" {
-					parent = Users.Alias()
+					parent = AppUsers.Alias()
 				}
 
 				subqueryMods := []bob.Mod[*dialect.SelectQuery]{
 					sm.Columns(psql.Raw("count(*)")),
 
-					sm.From(Users.Name()),
-					sm.Where(psql.Quote(Users.Alias(), "manager_id").EQ(psql.Quote(parent, "id"))),
+					sm.From(AppUsers.Name()),
+					sm.Where(psql.Quote(AppUsers.Alias(), "manager_id").EQ(psql.Quote(parent, "id"))),
 				}
 				subqueryMods = append(subqueryMods, mods...)
 				return psql.Group(psql.Select(subqueryMods...).Expression)
@@ -1660,13 +1660,13 @@ func buildUserCountPreloader() userCountPreloader {
 	}
 }
 
-type userCountThenLoader[Q orm.Loadable] struct {
+type appUserCountThenLoader[Q orm.Loadable] struct {
 	Orders          func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 	Roles           func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 	ReverseManagers func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 }
 
-func buildUserCountThenLoader[Q orm.Loadable]() userCountThenLoader[Q] {
+func buildAppUserCountThenLoader[Q orm.Loadable]() appUserCountThenLoader[Q] {
 	type OrdersCountInterface interface {
 		LoadCountOrders(context.Context, bob.Executor, ...bob.Mod[*dialect.SelectQuery]) error
 	}
@@ -1677,7 +1677,7 @@ func buildUserCountThenLoader[Q orm.Loadable]() userCountThenLoader[Q] {
 		LoadCountReverseManagers(context.Context, bob.Executor, ...bob.Mod[*dialect.SelectQuery]) error
 	}
 
-	return userCountThenLoader[Q]{
+	return appUserCountThenLoader[Q]{
 		Orders: countThenLoadBuilder[Q](
 			"Orders",
 			func(ctx context.Context, exec bob.Executor, retrieved OrdersCountInterface, mods ...bob.Mod[*dialect.SelectQuery]) error {
@@ -1700,7 +1700,7 @@ func buildUserCountThenLoader[Q orm.Loadable]() userCountThenLoader[Q] {
 }
 
 // LoadCountOrders loads the count of Orders into the C struct
-func (o *User) LoadCountOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+func (o *AppUser) LoadCountOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -1715,7 +1715,7 @@ func (o *User) LoadCountOrders(ctx context.Context, exec bob.Executor, mods ...b
 }
 
 // LoadCountOrders loads the count of Orders for a slice in a single batch query
-func (os UserSlice) LoadCountOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+func (os AppUserSlice) LoadCountOrders(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
@@ -1743,16 +1743,16 @@ func (os UserSlice) LoadCountOrders(ctx context.Context, exec bob.Executor, mods
 	batchMods := []bob.Mod[*dialect.SelectQuery]{
 		// SELECT fk AS parent_pk, count(*)
 		sm.Columns(
-			Orders.Columns.UserID.As("id"),
+			AppOrders.Columns.UserID.As("id"),
 			psql.Raw("count(*) as count"),
 		),
 		// Single-hop: FROM related table directly
-		sm.From(Orders.NameAs()),
+		sm.From(AppOrders.NameAs()),
 
 		// WHERE fk IN (parent PKs)
-		sm.Where(Orders.Columns.UserID.OP("IN", PKArgExpr)),
+		sm.Where(AppOrders.Columns.UserID.OP("IN", PKArgExpr)),
 		// GROUP BY fk columns
-		sm.GroupBy(Orders.Columns.UserID),
+		sm.GroupBy(AppOrders.Columns.UserID),
 	}
 	batchMods = append(batchMods, mods...)
 
@@ -1781,7 +1781,7 @@ func (os UserSlice) LoadCountOrders(ctx context.Context, exec bob.Executor, mods
 }
 
 // LoadCountRoles loads the count of Roles into the C struct
-func (o *User) LoadCountRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+func (o *AppUser) LoadCountRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -1796,7 +1796,7 @@ func (o *User) LoadCountRoles(ctx context.Context, exec bob.Executor, mods ...bo
 }
 
 // LoadCountRoles loads the count of Roles for a slice in a single batch query
-func (os UserSlice) LoadCountRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+func (os AppUserSlice) LoadCountRoles(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
@@ -1824,19 +1824,19 @@ func (os UserSlice) LoadCountRoles(ctx context.Context, exec bob.Executor, mods 
 	batchMods := []bob.Mod[*dialect.SelectQuery]{
 		// SELECT fk AS parent_pk, count(*)
 		sm.Columns(
-			UserRoles.Columns.UserID.As("id"),
+			AppUserRoles.Columns.UserID.As("id"),
 			psql.Raw("count(*) as count"),
 		),
 		// Multi-hop: FROM first join table, JOIN through to final related table
-		sm.From(UserRoles.NameAs()),
-		sm.InnerJoin(Roles.NameAs()).On(
-			Roles.Columns.ID.EQ(UserRoles.Columns.RoleID),
+		sm.From(AppUserRoles.NameAs()),
+		sm.InnerJoin(AppRoles.NameAs()).On(
+			AppRoles.Columns.ID.EQ(AppUserRoles.Columns.RoleID),
 		),
 
 		// WHERE fk IN (parent PKs)
-		sm.Where(UserRoles.Columns.UserID.OP("IN", PKArgExpr)),
+		sm.Where(AppUserRoles.Columns.UserID.OP("IN", PKArgExpr)),
 		// GROUP BY fk columns
-		sm.GroupBy(UserRoles.Columns.UserID),
+		sm.GroupBy(AppUserRoles.Columns.UserID),
 	}
 	batchMods = append(batchMods, mods...)
 
@@ -1865,7 +1865,7 @@ func (os UserSlice) LoadCountRoles(ctx context.Context, exec bob.Executor, mods 
 }
 
 // LoadCountReverseManagers loads the count of ReverseManagers into the C struct
-func (o *User) LoadCountReverseManagers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+func (o *AppUser) LoadCountReverseManagers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -1880,7 +1880,7 @@ func (o *User) LoadCountReverseManagers(ctx context.Context, exec bob.Executor, 
 }
 
 // LoadCountReverseManagers loads the count of ReverseManagers for a slice in a single batch query
-func (os UserSlice) LoadCountReverseManagers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+func (os AppUserSlice) LoadCountReverseManagers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
@@ -1908,16 +1908,16 @@ func (os UserSlice) LoadCountReverseManagers(ctx context.Context, exec bob.Execu
 	batchMods := []bob.Mod[*dialect.SelectQuery]{
 		// SELECT fk AS parent_pk, count(*)
 		sm.Columns(
-			Users.Columns.ManagerID.As("id"),
+			AppUsers.Columns.ManagerID.As("id"),
 			psql.Raw("count(*) as count"),
 		),
 		// Single-hop: FROM related table directly
-		sm.From(Users.NameAs()),
+		sm.From(AppUsers.NameAs()),
 
 		// WHERE fk IN (parent PKs)
-		sm.Where(Users.Columns.ManagerID.OP("IN", PKArgExpr)),
+		sm.Where(AppUsers.Columns.ManagerID.OP("IN", PKArgExpr)),
 		// GROUP BY fk columns
-		sm.GroupBy(Users.Columns.ManagerID),
+		sm.GroupBy(AppUsers.Columns.ManagerID),
 	}
 	batchMods = append(batchMods, mods...)
 
@@ -1945,29 +1945,29 @@ func (os UserSlice) LoadCountReverseManagers(ctx context.Context, exec bob.Execu
 	return nil
 }
 
-type userJoins[Q dialect.Joinable] struct {
+type appUserJoins[Q dialect.Joinable] struct {
 	typ             string
-	Orders          modAs[Q, orderColumns]
-	Profile         modAs[Q, profileColumns]
-	Roles           modAs[Q, roleColumns]
-	Manager         modAs[Q, userColumns]
-	ReverseManagers modAs[Q, userColumns]
+	Orders          modAs[Q, appOrderColumns]
+	Profile         modAs[Q, appProfileColumns]
+	Roles           modAs[Q, appRoleColumns]
+	Manager         modAs[Q, appUserColumns]
+	ReverseManagers modAs[Q, appUserColumns]
 }
 
-func (j userJoins[Q]) aliasedAs(alias string) userJoins[Q] {
-	return buildUserJoins[Q](buildUserColumns(alias), j.typ)
+func (j appUserJoins[Q]) aliasedAs(alias string) appUserJoins[Q] {
+	return buildAppUserJoins[Q](buildAppUserColumns(alias), j.typ)
 }
 
-func buildUserJoins[Q dialect.Joinable](cols userColumns, typ string) userJoins[Q] {
-	return userJoins[Q]{
+func buildAppUserJoins[Q dialect.Joinable](cols appUserColumns, typ string) appUserJoins[Q] {
+	return appUserJoins[Q]{
 		typ: typ,
-		Orders: modAs[Q, orderColumns]{
-			c: Orders.Columns,
-			f: func(to orderColumns) bob.Mod[Q] {
+		Orders: modAs[Q, appOrderColumns]{
+			c: AppOrders.Columns,
+			f: func(to appOrderColumns) bob.Mod[Q] {
 				mods := make(mods.QueryMods[Q], 0, 1)
 
 				{
-					mods = append(mods, dialect.Join[Q](typ, Orders.Name().As(to.Alias())).On(
+					mods = append(mods, dialect.Join[Q](typ, AppOrders.Name().As(to.Alias())).On(
 						to.UserID.EQ(cols.ID),
 					))
 				}
@@ -1975,13 +1975,13 @@ func buildUserJoins[Q dialect.Joinable](cols userColumns, typ string) userJoins[
 				return mods
 			},
 		},
-		Profile: modAs[Q, profileColumns]{
-			c: Profiles.Columns,
-			f: func(to profileColumns) bob.Mod[Q] {
+		Profile: modAs[Q, appProfileColumns]{
+			c: AppProfiles.Columns,
+			f: func(to appProfileColumns) bob.Mod[Q] {
 				mods := make(mods.QueryMods[Q], 0, 1)
 
 				{
-					mods = append(mods, dialect.Join[Q](typ, Profiles.Name().As(to.Alias())).On(
+					mods = append(mods, dialect.Join[Q](typ, AppProfiles.Name().As(to.Alias())).On(
 						to.UserID.EQ(cols.ID),
 					))
 				}
@@ -1989,21 +1989,21 @@ func buildUserJoins[Q dialect.Joinable](cols userColumns, typ string) userJoins[
 				return mods
 			},
 		},
-		Roles: modAs[Q, roleColumns]{
-			c: Roles.Columns,
-			f: func(to roleColumns) bob.Mod[Q] {
+		Roles: modAs[Q, appRoleColumns]{
+			c: AppRoles.Columns,
+			f: func(to appRoleColumns) bob.Mod[Q] {
 				random := strconv.FormatInt(randInt(), 10)
 				mods := make(mods.QueryMods[Q], 0, 2)
 
 				{
-					to := UserRoles.Columns.AliasedAs(UserRoles.Columns.Alias() + random)
-					mods = append(mods, dialect.Join[Q](typ, UserRoles.Name().As(to.Alias())).On(
+					to := AppUserRoles.Columns.AliasedAs(AppUserRoles.Columns.Alias() + random)
+					mods = append(mods, dialect.Join[Q](typ, AppUserRoles.Name().As(to.Alias())).On(
 						to.UserID.EQ(cols.ID),
 					))
 				}
 				{
-					cols := UserRoles.Columns.AliasedAs(UserRoles.Columns.Alias() + random)
-					mods = append(mods, dialect.Join[Q](typ, Roles.Name().As(to.Alias())).On(
+					cols := AppUserRoles.Columns.AliasedAs(AppUserRoles.Columns.Alias() + random)
+					mods = append(mods, dialect.Join[Q](typ, AppRoles.Name().As(to.Alias())).On(
 						to.ID.EQ(cols.RoleID),
 					))
 				}
@@ -2011,13 +2011,13 @@ func buildUserJoins[Q dialect.Joinable](cols userColumns, typ string) userJoins[
 				return mods
 			},
 		},
-		Manager: modAs[Q, userColumns]{
-			c: Users.Columns,
-			f: func(to userColumns) bob.Mod[Q] {
+		Manager: modAs[Q, appUserColumns]{
+			c: AppUsers.Columns,
+			f: func(to appUserColumns) bob.Mod[Q] {
 				mods := make(mods.QueryMods[Q], 0, 1)
 
 				{
-					mods = append(mods, dialect.Join[Q](typ, Users.Name().As(to.Alias())).On(
+					mods = append(mods, dialect.Join[Q](typ, AppUsers.Name().As(to.Alias())).On(
 						to.ID.EQ(cols.ManagerID),
 					))
 				}
@@ -2025,13 +2025,13 @@ func buildUserJoins[Q dialect.Joinable](cols userColumns, typ string) userJoins[
 				return mods
 			},
 		},
-		ReverseManagers: modAs[Q, userColumns]{
-			c: Users.Columns,
-			f: func(to userColumns) bob.Mod[Q] {
+		ReverseManagers: modAs[Q, appUserColumns]{
+			c: AppUsers.Columns,
+			f: func(to appUserColumns) bob.Mod[Q] {
 				mods := make(mods.QueryMods[Q], 0, 1)
 
 				{
-					mods = append(mods, dialect.Join[Q](typ, Users.Name().As(to.Alias())).On(
+					mods = append(mods, dialect.Join[Q](typ, AppUsers.Name().As(to.Alias())).On(
 						to.ManagerID.EQ(cols.ID),
 					))
 				}

@@ -17,8 +17,8 @@ import (
 	"github.com/yaroher/sqld/example/gen/db"
 )
 
-// KitchenSink is an object representing the database table.
-type KitchenSink struct {
+// AppKitchenSink is an object representing the database table.
+type AppKitchenSink struct {
 	CInt2          null.Val[int16]                                           `db:"c_int2" `
 	CInt4          null.Val[int32]                                           `db:"c_int4" `
 	CInt8          null.Val[int64]                                           `db:"c_int8" `
@@ -54,17 +54,17 @@ type KitchenSink struct {
 	CIdentity      int32                                                     `db:"c_identity" `
 }
 
-// KitchenSinkSlice is an alias for a slice of pointers to KitchenSink.
-// This should almost always be used instead of []*KitchenSink.
-type KitchenSinkSlice []*KitchenSink
+// AppKitchenSinkSlice is an alias for a slice of pointers to AppKitchenSink.
+// This should almost always be used instead of []*AppKitchenSink.
+type AppKitchenSinkSlice []*AppKitchenSink
 
-// KitchenSinks contains methods to work with the kitchen_sink view
-var KitchenSinks = psql.NewViewx[*KitchenSink, KitchenSinkSlice]("app", "kitchen_sink", buildKitchenSinkColumns("kitchen_sink"))
+// AppKitchenSinks contains methods to work with the kitchen_sink view
+var AppKitchenSinks = psql.NewViewx[*AppKitchenSink, AppKitchenSinkSlice]("app", "kitchen_sink", buildAppKitchenSinkColumns("app.kitchen_sink"))
 
-// KitchenSinksQuery is a query on the kitchen_sink view
-type KitchenSinksQuery = *psql.ViewQuery[*KitchenSink, KitchenSinkSlice]
+// AppKitchenSinksQuery is a query on the kitchen_sink view
+type AppKitchenSinksQuery = *psql.ViewQuery[*AppKitchenSink, AppKitchenSinkSlice]
 
-func buildKitchenSinkColumns(tableName string) kitchenSinkColumns {
+func buildAppKitchenSinkColumns(tableName string) appKitchenSinkColumns {
 	columnsExpr := expr.NewColumnsExpr(
 		"c_int2", "c_int4", "c_int8", "c_serial", "c_numeric", "c_float4", "c_float8", "c_bool", "c_text", "c_varchar", "c_char", "c_uuid", "c_bytea", "c_jsonb", "c_json", "c_inet", "c_date", "c_time", "c_timestamp", "c_timestamptz", "c_interval", "c_point", "c_tags", "c_ltree", "c_int_array", "c_text_array", "c_status", "c_address", "c_email", "c_int4range", "c_nummultirange", "c_generated", "c_identity",
 	)
@@ -73,147 +73,147 @@ func buildKitchenSinkColumns(tableName string) kitchenSinkColumns {
 		columnsExpr = columnsExpr.WithParent(tableName)
 	}
 
-	return kitchenSinkColumns{
+	return appKitchenSinkColumns{
 		ColumnsExpr:    columnsExpr,
 		tableAlias:     tableName,
-		CInt2:          buildKitchenSinkColumn(tableName, "c_int2"),
-		CInt4:          buildKitchenSinkColumn(tableName, "c_int4"),
-		CInt8:          buildKitchenSinkColumn(tableName, "c_int8"),
-		CSerial:        buildKitchenSinkColumn(tableName, "c_serial"),
-		CNumeric:       buildKitchenSinkColumn(tableName, "c_numeric"),
-		CFloat4:        buildKitchenSinkColumn(tableName, "c_float4"),
-		CFloat8:        buildKitchenSinkColumn(tableName, "c_float8"),
-		CBool:          buildKitchenSinkColumn(tableName, "c_bool"),
-		CText:          buildKitchenSinkColumn(tableName, "c_text"),
-		CVarchar:       buildKitchenSinkColumn(tableName, "c_varchar"),
-		CChar:          buildKitchenSinkColumn(tableName, "c_char"),
-		CUUID:          buildKitchenSinkColumn(tableName, "c_uuid"),
-		CBytea:         buildKitchenSinkColumn(tableName, "c_bytea"),
-		CJsonb:         buildKitchenSinkColumn(tableName, "c_jsonb"),
-		CJSON:          buildKitchenSinkColumn(tableName, "c_json"),
-		CInet:          buildKitchenSinkColumn(tableName, "c_inet"),
-		CDate:          buildKitchenSinkColumn(tableName, "c_date"),
-		CTime:          buildKitchenSinkColumn(tableName, "c_time"),
-		CTimestamp:     buildKitchenSinkColumn(tableName, "c_timestamp"),
-		CTimestamptz:   buildKitchenSinkColumn(tableName, "c_timestamptz"),
-		CInterval:      buildKitchenSinkColumn(tableName, "c_interval"),
-		CPoint:         buildKitchenSinkColumn(tableName, "c_point"),
-		CTags:          buildKitchenSinkColumn(tableName, "c_tags"),
-		CLtree:         buildKitchenSinkColumn(tableName, "c_ltree"),
-		CIntArray:      buildKitchenSinkColumn(tableName, "c_int_array"),
-		CTextArray:     buildKitchenSinkColumn(tableName, "c_text_array"),
-		CStatus:        buildKitchenSinkColumn(tableName, "c_status"),
-		CAddress:       buildKitchenSinkColumn(tableName, "c_address"),
-		CEmail:         buildKitchenSinkColumn(tableName, "c_email"),
-		CInt4range:     buildKitchenSinkColumn(tableName, "c_int4range"),
-		CNummultirange: buildKitchenSinkColumn(tableName, "c_nummultirange"),
-		CGenerated:     buildKitchenSinkColumn(tableName, "c_generated"),
-		CIdentity:      buildKitchenSinkColumn(tableName, "c_identity"),
+		CInt2:          buildAppKitchenSinkColumn(tableName, "c_int2"),
+		CInt4:          buildAppKitchenSinkColumn(tableName, "c_int4"),
+		CInt8:          buildAppKitchenSinkColumn(tableName, "c_int8"),
+		CSerial:        buildAppKitchenSinkColumn(tableName, "c_serial"),
+		CNumeric:       buildAppKitchenSinkColumn(tableName, "c_numeric"),
+		CFloat4:        buildAppKitchenSinkColumn(tableName, "c_float4"),
+		CFloat8:        buildAppKitchenSinkColumn(tableName, "c_float8"),
+		CBool:          buildAppKitchenSinkColumn(tableName, "c_bool"),
+		CText:          buildAppKitchenSinkColumn(tableName, "c_text"),
+		CVarchar:       buildAppKitchenSinkColumn(tableName, "c_varchar"),
+		CChar:          buildAppKitchenSinkColumn(tableName, "c_char"),
+		CUUID:          buildAppKitchenSinkColumn(tableName, "c_uuid"),
+		CBytea:         buildAppKitchenSinkColumn(tableName, "c_bytea"),
+		CJsonb:         buildAppKitchenSinkColumn(tableName, "c_jsonb"),
+		CJSON:          buildAppKitchenSinkColumn(tableName, "c_json"),
+		CInet:          buildAppKitchenSinkColumn(tableName, "c_inet"),
+		CDate:          buildAppKitchenSinkColumn(tableName, "c_date"),
+		CTime:          buildAppKitchenSinkColumn(tableName, "c_time"),
+		CTimestamp:     buildAppKitchenSinkColumn(tableName, "c_timestamp"),
+		CTimestamptz:   buildAppKitchenSinkColumn(tableName, "c_timestamptz"),
+		CInterval:      buildAppKitchenSinkColumn(tableName, "c_interval"),
+		CPoint:         buildAppKitchenSinkColumn(tableName, "c_point"),
+		CTags:          buildAppKitchenSinkColumn(tableName, "c_tags"),
+		CLtree:         buildAppKitchenSinkColumn(tableName, "c_ltree"),
+		CIntArray:      buildAppKitchenSinkColumn(tableName, "c_int_array"),
+		CTextArray:     buildAppKitchenSinkColumn(tableName, "c_text_array"),
+		CStatus:        buildAppKitchenSinkColumn(tableName, "c_status"),
+		CAddress:       buildAppKitchenSinkColumn(tableName, "c_address"),
+		CEmail:         buildAppKitchenSinkColumn(tableName, "c_email"),
+		CInt4range:     buildAppKitchenSinkColumn(tableName, "c_int4range"),
+		CNummultirange: buildAppKitchenSinkColumn(tableName, "c_nummultirange"),
+		CGenerated:     buildAppKitchenSinkColumn(tableName, "c_generated"),
+		CIdentity:      buildAppKitchenSinkColumn(tableName, "c_identity"),
 	}
 }
 
-type kitchenSinkColumns struct {
+type appKitchenSinkColumns struct {
 	expr.ColumnsExpr
 	tableAlias     string
-	CInt2          kitchenSinkColumn
-	CInt4          kitchenSinkColumn
-	CInt8          kitchenSinkColumn
-	CSerial        kitchenSinkColumn
-	CNumeric       kitchenSinkColumn
-	CFloat4        kitchenSinkColumn
-	CFloat8        kitchenSinkColumn
-	CBool          kitchenSinkColumn
-	CText          kitchenSinkColumn
-	CVarchar       kitchenSinkColumn
-	CChar          kitchenSinkColumn
-	CUUID          kitchenSinkColumn
-	CBytea         kitchenSinkColumn
-	CJsonb         kitchenSinkColumn
-	CJSON          kitchenSinkColumn
-	CInet          kitchenSinkColumn
-	CDate          kitchenSinkColumn
-	CTime          kitchenSinkColumn
-	CTimestamp     kitchenSinkColumn
-	CTimestamptz   kitchenSinkColumn
-	CInterval      kitchenSinkColumn
-	CPoint         kitchenSinkColumn
-	CTags          kitchenSinkColumn
-	CLtree         kitchenSinkColumn
-	CIntArray      kitchenSinkColumn
-	CTextArray     kitchenSinkColumn
-	CStatus        kitchenSinkColumn
-	CAddress       kitchenSinkColumn
-	CEmail         kitchenSinkColumn
-	CInt4range     kitchenSinkColumn
-	CNummultirange kitchenSinkColumn
-	CGenerated     kitchenSinkColumn
-	CIdentity      kitchenSinkColumn
+	CInt2          appKitchenSinkColumn
+	CInt4          appKitchenSinkColumn
+	CInt8          appKitchenSinkColumn
+	CSerial        appKitchenSinkColumn
+	CNumeric       appKitchenSinkColumn
+	CFloat4        appKitchenSinkColumn
+	CFloat8        appKitchenSinkColumn
+	CBool          appKitchenSinkColumn
+	CText          appKitchenSinkColumn
+	CVarchar       appKitchenSinkColumn
+	CChar          appKitchenSinkColumn
+	CUUID          appKitchenSinkColumn
+	CBytea         appKitchenSinkColumn
+	CJsonb         appKitchenSinkColumn
+	CJSON          appKitchenSinkColumn
+	CInet          appKitchenSinkColumn
+	CDate          appKitchenSinkColumn
+	CTime          appKitchenSinkColumn
+	CTimestamp     appKitchenSinkColumn
+	CTimestamptz   appKitchenSinkColumn
+	CInterval      appKitchenSinkColumn
+	CPoint         appKitchenSinkColumn
+	CTags          appKitchenSinkColumn
+	CLtree         appKitchenSinkColumn
+	CIntArray      appKitchenSinkColumn
+	CTextArray     appKitchenSinkColumn
+	CStatus        appKitchenSinkColumn
+	CAddress       appKitchenSinkColumn
+	CEmail         appKitchenSinkColumn
+	CInt4range     appKitchenSinkColumn
+	CNummultirange appKitchenSinkColumn
+	CGenerated     appKitchenSinkColumn
+	CIdentity      appKitchenSinkColumn
 }
 
 // Alias returns the current table alias for the columns set.
-func (c kitchenSinkColumns) Alias() string {
+func (c appKitchenSinkColumns) Alias() string {
 	return c.tableAlias
 }
 
 // AliasedAs returns a copy of the columns set qualified by tableName.
-func (kitchenSinkColumns) AliasedAs(tableName string) kitchenSinkColumns {
-	return buildKitchenSinkColumns(tableName)
+func (appKitchenSinkColumns) AliasedAs(tableName string) appKitchenSinkColumns {
+	return buildAppKitchenSinkColumns(tableName)
 }
 
 // Unqualified returns a copy of the columns set without table qualification.
-func (c kitchenSinkColumns) Unqualified() kitchenSinkColumns {
-	return buildKitchenSinkColumns("")
+func (c appKitchenSinkColumns) Unqualified() appKitchenSinkColumns {
+	return buildAppKitchenSinkColumns("")
 }
 
-func buildKitchenSinkColumn(alias, name string) kitchenSinkColumn {
-	return kitchenSinkColumn{
+func buildAppKitchenSinkColumn(alias, name string) appKitchenSinkColumn {
+	return appKitchenSinkColumn{
 		Expression: psql.Quote(alias, name),
 		alias:      alias,
 		name:       name,
 	}
 }
 
-type kitchenSinkColumn struct {
+type appKitchenSinkColumn struct {
 	psql.Expression
 	alias string
 	name  string
 }
 
 // Name returns the unqualified column name.
-func (c kitchenSinkColumn) Name() string {
+func (c appKitchenSinkColumn) Name() string {
 	return c.name
 }
 
 // ShouldOmitParens prevents automatic parenthesis wrapping in expression builders.
-func (c kitchenSinkColumn) ShouldOmitParens() bool {
+func (c appKitchenSinkColumn) ShouldOmitParens() bool {
 	return true
 }
 
-// AfterQueryHook is called after KitchenSink is retrieved from the database
-func (o *KitchenSink) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppKitchenSink is retrieved from the database
+func (o *AppKitchenSink) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = KitchenSinks.AfterSelectHooks.RunHooks(ctx, exec, KitchenSinkSlice{o})
+		ctx, err = AppKitchenSinks.AfterSelectHooks.RunHooks(ctx, exec, AppKitchenSinkSlice{o})
 	}
 
 	return err
 }
 
-// AfterQueryHook is called after KitchenSinkSlice is retrieved from the database
-func (o KitchenSinkSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppKitchenSinkSlice is retrieved from the database
+func (o AppKitchenSinkSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = KitchenSinks.AfterSelectHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppKitchenSinks.AfterSelectHooks.RunHooks(ctx, exec, o)
 	}
 
 	return err
 }
 
-type kitchenSinkWhere[Q psql.Filterable] struct {
+type appKitchenSinkWhere[Q psql.Filterable] struct {
 	CInt2          psql.WhereNullMod[Q, int16]
 	CInt4          psql.WhereNullMod[Q, int32]
 	CInt8          psql.WhereNullMod[Q, int64]
@@ -249,12 +249,12 @@ type kitchenSinkWhere[Q psql.Filterable] struct {
 	CIdentity      psql.WhereMod[Q, int32]
 }
 
-func (kitchenSinkWhere[Q]) AliasedAs(alias string) kitchenSinkWhere[Q] {
-	return buildKitchenSinkWhere[Q](buildKitchenSinkColumns(alias))
+func (appKitchenSinkWhere[Q]) AliasedAs(alias string) appKitchenSinkWhere[Q] {
+	return buildAppKitchenSinkWhere[Q](buildAppKitchenSinkColumns(alias))
 }
 
-func buildKitchenSinkWhere[Q psql.Filterable](cols kitchenSinkColumns) kitchenSinkWhere[Q] {
-	return kitchenSinkWhere[Q]{
+func buildAppKitchenSinkWhere[Q psql.Filterable](cols appKitchenSinkColumns) appKitchenSinkWhere[Q] {
+	return appKitchenSinkWhere[Q]{
 		CInt2:          psql.WhereNull[Q, int16](cols.CInt2.Expression),
 		CInt4:          psql.WhereNull[Q, int32](cols.CInt4.Expression),
 		CInt8:          psql.WhereNull[Q, int64](cols.CInt8.Expression),

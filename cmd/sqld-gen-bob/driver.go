@@ -31,14 +31,16 @@ type sqldDriver struct {
 // newDriver builds a driver. typesPackage is the import path of the package that
 // holds the shared enum/composite Go types (sqld-gen-go's output); it may be
 // empty for schemas with no UDTs. ov is the (must-match-sqld-gen-go) override
-// table; nullMode selects bob's null wrapping.
-func newDriver(cat *irv1.Catalog, typesPackage string, ov gotypes.Overrides, null gotypes.NullMode) *sqldDriver {
+// table. The driver always resolves the non-null base type (bob applies its own
+// nullability via Column.Nullable + TypeSystem), so the mapper's null mode is
+// irrelevant here and fixed to Pointer.
+func newDriver(cat *irv1.Catalog, typesPackage string, ov gotypes.Overrides) *sqldDriver {
 	defaultSchema := cat.GetDefaultSchema()
 	if defaultSchema == "" {
 		defaultSchema = "public"
 	}
 
-	mapper := gotypes.NewMapper(cat, ov, null)
+	mapper := gotypes.NewMapper(cat, ov, gotypes.Pointer)
 	if typesPackage != "" {
 		mapper.SetUDTPackage(path.Base(typesPackage), typesPackage)
 	}
@@ -77,7 +79,7 @@ func (d *sqldDriver) Assemble(ctx context.Context) (*drivers.DBInfo[any, any, an
 
 func (d *sqldDriver) table(schema string, tbl *irv1.Table) drivers.Table[any, any] {
 	t := drivers.Table[any, any]{
-		Key:    tbl.GetName().GetName(),
+		Key:    d.tableKey(schema, tbl.GetName().GetName()),
 		Name:   tbl.GetName().GetName(),
 		Schema: d.bobSchema(schema),
 	}
@@ -95,8 +97,44 @@ func (d *sqldDriver) table(schema string, tbl *irv1.Table) drivers.Table[any, an
 			Generated: col.GetGenerated() != nil,
 		})
 	}
-	t.Constraints = buildConstraints(tbl)
+	t.Constraints = d.buildConstraints(tbl)
+	t.Indexes = indexes(tbl)
 	return t
+}
+
+// tableKey is the key bob uses to match foreign keys to tables. It must be
+// stable across the table definition and any FK that references it, and unique
+// across schemas — so non-default-schema tables are schema-qualified (mirroring
+// bob's own psql driver), preventing same-bare-name tables in different schemas
+// from colliding in bob's table map.
+func (d *sqldDriver) tableKey(schema, name string) string {
+	if schema == "" || schema == d.defaultSchema {
+		return name
+	}
+	return schema + "." + name
+}
+
+// indexes maps the table's IR indexes onto bob's indexes (name, uniqueness, and
+// column references). The primary-key index is skipped (the PK is mapped as a
+// constraint). Expression elements are marked IsExpression; bob ignores them
+// when matching relationships.
+func indexes(tbl *irv1.Table) []drivers.Index[any] {
+	var out []drivers.Index[any]
+	for _, idx := range tbl.GetIndexes() {
+		if idx.GetPrimary() {
+			continue
+		}
+		bi := drivers.Index[any]{Name: idx.GetName(), Unique: idx.GetUnique()}
+		for _, el := range idx.GetElements() {
+			if col := el.GetColumn(); col != "" {
+				bi.Columns = append(bi.Columns, drivers.IndexColumn{Name: col})
+			} else {
+				bi.Columns = append(bi.Columns, drivers.IndexColumn{IsExpression: true})
+			}
+		}
+		out = append(out, bi)
+	}
+	return out
 }
 
 // registerType records a Go type expression in bob's Types registry with its
@@ -125,8 +163,10 @@ func quoteImports(imps []string) []string {
 // buildConstraints maps sqld's PK/unique/FK constraints onto bob's Constraints,
 // so bob derives relationships and eager loaders. NOT NULL / CHECK / EXCLUSION
 // constraints are skipped (they do not drive relationships). Constraint names
-// are synthesized when the IR leaves them empty.
-func buildConstraints(tbl *irv1.Table) drivers.Constraints[any] {
+// are synthesized when the IR leaves them empty. The FK's foreign table is
+// schema-qualified the same way as Table.Key (see tableKey) so cross-schema
+// references resolve to the right table.
+func (d *sqldDriver) buildConstraints(tbl *irv1.Table) drivers.Constraints[any] {
 	var cons drivers.Constraints[any]
 	table := tbl.GetName().GetName()
 	for _, c := range tbl.GetConstraints() {
@@ -149,9 +189,10 @@ func buildConstraints(tbl *irv1.Table) drivers.Constraints[any] {
 			if name == "" {
 				name = fmt.Sprintf("%s_fkey_%d", table, len(cons.Foreign))
 			}
+			ref := fk.GetReferencedTable().GetName()
 			cons.Foreign = append(cons.Foreign, drivers.ForeignKey[any]{
 				Constraint:     drivers.Constraint[any]{Name: name, Columns: fk.GetColumns()},
-				ForeignTable:   fk.GetReferencedTable().GetName().GetName(),
+				ForeignTable:   d.tableKey(ref.GetSchema(), ref.GetName()),
 				ForeignColumns: fk.GetReferencedColumns(),
 			})
 		}

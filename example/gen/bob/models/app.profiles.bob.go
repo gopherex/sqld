@@ -23,8 +23,8 @@ import (
 	"github.com/yaroher/sqld/example/gen/db"
 )
 
-// Profile is an object representing the database table.
-type Profile struct {
+// AppProfile is an object representing the database table.
+type AppProfile struct {
 	UserID        int64                                                         `db:"user_id,pk" `
 	Bio           null.Val[string]                                              `db:"bio" `
 	Address       null.Val[db.AppAddress]                                       `db:"address" `
@@ -35,34 +35,34 @@ type Profile struct {
 	ValidWindow   null.Val[pgtype.Range[pgtype.Timestamptz]]                    `db:"valid_window" `
 	Windows       null.Val[pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]]] `db:"windows" `
 
-	R profileR `db:"-" `
+	R appProfileR `db:"-" `
 }
 
-// ProfileSlice is an alias for a slice of pointers to Profile.
-// This should almost always be used instead of []*Profile.
-type ProfileSlice []*Profile
+// AppProfileSlice is an alias for a slice of pointers to AppProfile.
+// This should almost always be used instead of []*AppProfile.
+type AppProfileSlice []*AppProfile
 
-// Profiles contains methods to work with the profiles table
-var Profiles = psql.NewTablex[*Profile, ProfileSlice, *ProfileSetter]("app", "profiles", buildProfileColumns("profiles"))
+// AppProfiles contains methods to work with the profiles table
+var AppProfiles = psql.NewTablex[*AppProfile, AppProfileSlice, *AppProfileSetter]("app", "profiles", buildAppProfileColumns("app.profiles"))
 
-// ProfilesQuery is a query on the profiles table
-type ProfilesQuery = *psql.ViewQuery[*Profile, ProfileSlice]
+// AppProfilesQuery is a query on the profiles table
+type AppProfilesQuery = *psql.ViewQuery[*AppProfile, AppProfileSlice]
 
-// profileR is where relationships are stored.
-type profileR struct {
-	User *User // profiles_fkey_0
+// appProfileR is where relationships are stored.
+type appProfileR struct {
+	User *AppUser // profiles_fkey_0
 	// Loaded reports whether each relationship has been loaded.
 	// A relationship's bool is set by Load*, Preload, ThenLoad, factory builds,
 	// and to-one Attach/Insert operations. To-many Attach/Insert operations leave it unchanged.
-	Loaded profileRLoaded `db:"-" `
+	Loaded appProfileRLoaded `db:"-" `
 }
 
-// profileRLoaded tracks which relationships on Profile have been loaded.
-type profileRLoaded struct {
+// appProfileRLoaded tracks which relationships on AppProfile have been loaded.
+type appProfileRLoaded struct {
 	User bool // profiles_fkey_0
 }
 
-func buildProfileColumns(tableName string) profileColumns {
+func buildAppProfileColumns(tableName string) appProfileColumns {
 	columnsExpr := expr.NewColumnsExpr(
 		"user_id", "bio", "address", "prev_addresses", "status_history", "owner", "active_during", "valid_window", "windows",
 	)
@@ -71,78 +71,78 @@ func buildProfileColumns(tableName string) profileColumns {
 		columnsExpr = columnsExpr.WithParent(tableName)
 	}
 
-	return profileColumns{
+	return appProfileColumns{
 		ColumnsExpr:   columnsExpr,
 		tableAlias:    tableName,
-		UserID:        buildProfileColumn(tableName, "user_id"),
-		Bio:           buildProfileColumn(tableName, "bio"),
-		Address:       buildProfileColumn(tableName, "address"),
-		PrevAddresses: buildProfileColumn(tableName, "prev_addresses"),
-		StatusHistory: buildProfileColumn(tableName, "status_history"),
-		Owner:         buildProfileColumn(tableName, "owner"),
-		ActiveDuring:  buildProfileColumn(tableName, "active_during"),
-		ValidWindow:   buildProfileColumn(tableName, "valid_window"),
-		Windows:       buildProfileColumn(tableName, "windows"),
+		UserID:        buildAppProfileColumn(tableName, "user_id"),
+		Bio:           buildAppProfileColumn(tableName, "bio"),
+		Address:       buildAppProfileColumn(tableName, "address"),
+		PrevAddresses: buildAppProfileColumn(tableName, "prev_addresses"),
+		StatusHistory: buildAppProfileColumn(tableName, "status_history"),
+		Owner:         buildAppProfileColumn(tableName, "owner"),
+		ActiveDuring:  buildAppProfileColumn(tableName, "active_during"),
+		ValidWindow:   buildAppProfileColumn(tableName, "valid_window"),
+		Windows:       buildAppProfileColumn(tableName, "windows"),
 	}
 }
 
-type profileColumns struct {
+type appProfileColumns struct {
 	expr.ColumnsExpr
 	tableAlias    string
-	UserID        profileColumn
-	Bio           profileColumn
-	Address       profileColumn
-	PrevAddresses profileColumn
-	StatusHistory profileColumn
-	Owner         profileColumn
-	ActiveDuring  profileColumn
-	ValidWindow   profileColumn
-	Windows       profileColumn
+	UserID        appProfileColumn
+	Bio           appProfileColumn
+	Address       appProfileColumn
+	PrevAddresses appProfileColumn
+	StatusHistory appProfileColumn
+	Owner         appProfileColumn
+	ActiveDuring  appProfileColumn
+	ValidWindow   appProfileColumn
+	Windows       appProfileColumn
 }
 
 // Alias returns the current table alias for the columns set.
-func (c profileColumns) Alias() string {
+func (c appProfileColumns) Alias() string {
 	return c.tableAlias
 }
 
 // AliasedAs returns a copy of the columns set qualified by tableName.
-func (profileColumns) AliasedAs(tableName string) profileColumns {
-	return buildProfileColumns(tableName)
+func (appProfileColumns) AliasedAs(tableName string) appProfileColumns {
+	return buildAppProfileColumns(tableName)
 }
 
 // Unqualified returns a copy of the columns set without table qualification.
-func (c profileColumns) Unqualified() profileColumns {
-	return buildProfileColumns("")
+func (c appProfileColumns) Unqualified() appProfileColumns {
+	return buildAppProfileColumns("")
 }
 
-func buildProfileColumn(alias, name string) profileColumn {
-	return profileColumn{
+func buildAppProfileColumn(alias, name string) appProfileColumn {
+	return appProfileColumn{
 		Expression: psql.Quote(alias, name),
 		alias:      alias,
 		name:       name,
 	}
 }
 
-type profileColumn struct {
+type appProfileColumn struct {
 	psql.Expression
 	alias string
 	name  string
 }
 
 // Name returns the unqualified column name.
-func (c profileColumn) Name() string {
+func (c appProfileColumn) Name() string {
 	return c.name
 }
 
 // ShouldOmitParens prevents automatic parenthesis wrapping in expression builders.
-func (c profileColumn) ShouldOmitParens() bool {
+func (c appProfileColumn) ShouldOmitParens() bool {
 	return true
 }
 
-// ProfileSetter is used for insert/upsert/update operations
+// AppProfileSetter is used for insert/upsert/update operations
 // All values are optional, and do not have to be set
 // Generated columns are not included
-type ProfileSetter struct {
+type AppProfileSetter struct {
 	UserID        *int64                                                         `db:"user_id,pk" `
 	Bio           *null.Val[string]                                              `db:"bio" `
 	Address       *null.Val[db.AppAddress]                                       `db:"address" `
@@ -154,7 +154,7 @@ type ProfileSetter struct {
 	Windows       *null.Val[pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]]] `db:"windows" `
 }
 
-func (s ProfileSetter) SetColumns() []string {
+func (s AppProfileSetter) SetColumns() []string {
 	vals := make([]string, 0, 9)
 	if s.UserID != nil {
 		vals = append(vals, "user_id")
@@ -186,7 +186,7 @@ func (s ProfileSetter) SetColumns() []string {
 	return vals
 }
 
-func (s ProfileSetter) Overwrite(t *Profile) {
+func (s AppProfileSetter) Overwrite(t *AppProfile) {
 	if s.UserID != nil {
 		t.UserID = func() int64 {
 			if s.UserID == nil {
@@ -268,9 +268,9 @@ func (s ProfileSetter) Overwrite(t *Profile) {
 	}
 }
 
-func (s *ProfileSetter) Apply(q *dialect.InsertQuery) {
+func (s *AppProfileSetter) Apply(q *dialect.InsertQuery) {
 	q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-		return Profiles.BeforeInsertHooks.RunHooks(ctx, exec, s)
+		return AppProfiles.BeforeInsertHooks.RunHooks(ctx, exec, s)
 	})
 
 	q.AppendValues(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
@@ -385,11 +385,11 @@ func (s *ProfileSetter) Apply(q *dialect.InsertQuery) {
 	}))
 }
 
-func (s ProfileSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (s AppProfileSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return um.Set(s.Expressions()...)
 }
 
-func (s ProfileSetter) Expressions(prefix ...string) []bob.Expression {
+func (s AppProfileSetter) Expressions(prefix ...string) []bob.Expression {
 	exprs := make([]bob.Expression, 0, 9)
 
 	if s.UserID != nil {
@@ -458,62 +458,62 @@ func (s ProfileSetter) Expressions(prefix ...string) []bob.Expression {
 	return exprs
 }
 
-// FindProfile retrieves a single record by primary key
+// FindAppProfile retrieves a single record by primary key
 // If cols is empty Find will return all columns.
-func FindProfile(ctx context.Context, exec bob.Executor, UserIDPK int64, cols ...string) (*Profile, error) {
+func FindAppProfile(ctx context.Context, exec bob.Executor, UserIDPK int64, cols ...string) (*AppProfile, error) {
 	if len(cols) == 0 {
-		return Profiles.Query(
-			sm.Where(Profiles.Columns.UserID.EQ(psql.Arg(UserIDPK))),
+		return AppProfiles.Query(
+			sm.Where(AppProfiles.Columns.UserID.EQ(psql.Arg(UserIDPK))),
 		).One(ctx, exec)
 	}
 
-	return Profiles.Query(
-		sm.Where(Profiles.Columns.UserID.EQ(psql.Arg(UserIDPK))),
-		sm.Columns(Profiles.Columns.Only(cols...)),
+	return AppProfiles.Query(
+		sm.Where(AppProfiles.Columns.UserID.EQ(psql.Arg(UserIDPK))),
+		sm.Columns(AppProfiles.Columns.Only(cols...)),
 	).One(ctx, exec)
 }
 
-// ProfileExists checks the presence of a single record by primary key
-func ProfileExists(ctx context.Context, exec bob.Executor, UserIDPK int64) (bool, error) {
-	return Profiles.Query(
-		sm.Where(Profiles.Columns.UserID.EQ(psql.Arg(UserIDPK))),
+// AppProfileExists checks the presence of a single record by primary key
+func AppProfileExists(ctx context.Context, exec bob.Executor, UserIDPK int64) (bool, error) {
+	return AppProfiles.Query(
+		sm.Where(AppProfiles.Columns.UserID.EQ(psql.Arg(UserIDPK))),
 	).Exists(ctx, exec)
 }
 
-// AfterQueryHook is called after Profile is retrieved from the database
-func (o *Profile) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppProfile is retrieved from the database
+func (o *AppProfile) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Profiles.AfterSelectHooks.RunHooks(ctx, exec, ProfileSlice{o})
+		ctx, err = AppProfiles.AfterSelectHooks.RunHooks(ctx, exec, AppProfileSlice{o})
 	case bob.QueryTypeInsert:
-		ctx, err = Profiles.AfterInsertHooks.RunHooks(ctx, exec, ProfileSlice{o})
+		ctx, err = AppProfiles.AfterInsertHooks.RunHooks(ctx, exec, AppProfileSlice{o})
 	case bob.QueryTypeUpdate:
-		ctx, err = Profiles.AfterUpdateHooks.RunHooks(ctx, exec, ProfileSlice{o})
+		ctx, err = AppProfiles.AfterUpdateHooks.RunHooks(ctx, exec, AppProfileSlice{o})
 	case bob.QueryTypeDelete:
-		ctx, err = Profiles.AfterDeleteHooks.RunHooks(ctx, exec, ProfileSlice{o})
+		ctx, err = AppProfiles.AfterDeleteHooks.RunHooks(ctx, exec, AppProfileSlice{o})
 	case bob.QueryTypeMerge:
-		ctx, err = Profiles.AfterMergeHooks.RunHooks(ctx, exec, ProfileSlice{o})
+		ctx, err = AppProfiles.AfterMergeHooks.RunHooks(ctx, exec, AppProfileSlice{o})
 	}
 
 	return err
 }
 
-// primaryKeyVals returns the primary key values of the Profile
-func (o *Profile) primaryKeyVals() bob.Expression {
+// primaryKeyVals returns the primary key values of the AppProfile
+func (o *AppProfile) primaryKeyVals() bob.Expression {
 	return psql.Arg(o.UserID)
 }
 
-func (o *Profile) pkEQ() dialect.Expression {
-	return psql.Quote("profiles", "user_id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+func (o *AppProfile) pkEQ() dialect.Expression {
+	return psql.Quote("app.profiles", "user_id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		return o.primaryKeyVals().WriteSQL(ctx, w, d, start)
 	}))
 }
 
-// Update uses an executor to update the Profile
-func (o *Profile) Update(ctx context.Context, exec bob.Executor, s *ProfileSetter) error {
-	v, err := Profiles.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
+// Update uses an executor to update the AppProfile
+func (o *AppProfile) Update(ctx context.Context, exec bob.Executor, s *AppProfileSetter) error {
+	v, err := AppProfiles.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -524,16 +524,16 @@ func (o *Profile) Update(ctx context.Context, exec bob.Executor, s *ProfileSette
 	return nil
 }
 
-// Delete deletes a single Profile record with an executor
-func (o *Profile) Delete(ctx context.Context, exec bob.Executor) error {
-	_, err := Profiles.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
+// Delete deletes a single AppProfile record with an executor
+func (o *AppProfile) Delete(ctx context.Context, exec bob.Executor) error {
+	_, err := AppProfiles.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
 	return err
 }
 
-// Reload refreshes the Profile using the executor
-func (o *Profile) Reload(ctx context.Context, exec bob.Executor) error {
-	o2, err := Profiles.Query(
-		sm.Where(Profiles.Columns.UserID.EQ(psql.Arg(o.UserID))),
+// Reload refreshes the AppProfile using the executor
+func (o *AppProfile) Reload(ctx context.Context, exec bob.Executor) error {
+	o2, err := AppProfiles.Query(
+		sm.Where(AppProfiles.Columns.UserID.EQ(psql.Arg(o.UserID))),
 	).One(ctx, exec)
 	if err != nil {
 		return err
@@ -544,32 +544,32 @@ func (o *Profile) Reload(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// AfterQueryHook is called after ProfileSlice is retrieved from the database
-func (o ProfileSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppProfileSlice is retrieved from the database
+func (o AppProfileSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Profiles.AfterSelectHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppProfiles.AfterSelectHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeInsert:
-		ctx, err = Profiles.AfterInsertHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppProfiles.AfterInsertHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeUpdate:
-		ctx, err = Profiles.AfterUpdateHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppProfiles.AfterUpdateHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeDelete:
-		ctx, err = Profiles.AfterDeleteHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppProfiles.AfterDeleteHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeMerge:
-		ctx, err = Profiles.AfterMergeHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppProfiles.AfterMergeHooks.RunHooks(ctx, exec, o)
 	}
 
 	return err
 }
 
-func (o ProfileSlice) pkIN() dialect.Expression {
+func (o AppProfileSlice) pkIN() dialect.Expression {
 	if len(o) == 0 {
 		return psql.Raw("NULL")
 	}
 
-	return psql.Quote("profiles", "user_id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+	return psql.Quote("app.profiles", "user_id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		pkPairs := make([]bob.Expression, len(o))
 		for i, row := range o {
 			pkPairs[i] = row.primaryKeyVals()
@@ -581,7 +581,7 @@ func (o ProfileSlice) pkIN() dialect.Expression {
 // copyMatchingRows finds models in the given slice that have the same primary key
 // then it first copies the existing relationships from the old model to the new model
 // and then replaces the old model in the slice with the new model
-func (o ProfileSlice) copyMatchingRows(from ...*Profile) {
+func (o AppProfileSlice) copyMatchingRows(from ...*AppProfile) {
 	for i, old := range o {
 		for _, new := range from {
 			if new.UserID != old.UserID {
@@ -595,25 +595,25 @@ func (o ProfileSlice) copyMatchingRows(from ...*Profile) {
 }
 
 // UpdateMod modifies an update query with "WHERE primary_key IN (o...)"
-func (o ProfileSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (o AppProfileSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return bob.ModFunc[*dialect.UpdateQuery](func(q *dialect.UpdateQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Profiles.BeforeUpdateHooks.RunHooks(ctx, exec, o)
+			return AppProfiles.BeforeUpdateHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Profile:
+			case *AppProfile:
 				o.copyMatchingRows(retrieved)
-			case []*Profile:
+			case []*AppProfile:
 				o.copyMatchingRows(retrieved...)
-			case ProfileSlice:
+			case AppProfileSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Profile or a slice of Profile
+				// If the retrieved value is not a AppProfile or a slice of AppProfile
 				// then run the AfterUpdateHooks on the slice
-				_, err = Profiles.AfterUpdateHooks.RunHooks(ctx, exec, o)
+				_, err = AppProfiles.AfterUpdateHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -624,25 +624,25 @@ func (o ProfileSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 // DeleteMod modifies an delete query with "WHERE primary_key IN (o...)"
-func (o ProfileSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
+func (o AppProfileSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 	return bob.ModFunc[*dialect.DeleteQuery](func(q *dialect.DeleteQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Profiles.BeforeDeleteHooks.RunHooks(ctx, exec, o)
+			return AppProfiles.BeforeDeleteHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Profile:
+			case *AppProfile:
 				o.copyMatchingRows(retrieved)
-			case []*Profile:
+			case []*AppProfile:
 				o.copyMatchingRows(retrieved...)
-			case ProfileSlice:
+			case AppProfileSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Profile or a slice of Profile
+				// If the retrieved value is not a AppProfile or a slice of AppProfile
 				// then run the AfterDeleteHooks on the slice
-				_, err = Profiles.AfterDeleteHooks.RunHooks(ctx, exec, o)
+				_, err = AppProfiles.AfterDeleteHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -654,25 +654,25 @@ func (o ProfileSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 
 // MergeMod modifies a merge query to run BeforeMergeHooks and AfterMergeHooks
 // and updates the slice with the returned rows.
-func (o ProfileSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
+func (o AppProfileSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	return bob.ModFunc[*dialect.MergeQuery](func(q *dialect.MergeQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Profiles.BeforeMergeHooks.RunHooks(ctx, exec, o)
+			return AppProfiles.BeforeMergeHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Profile:
+			case *AppProfile:
 				o.copyMatchingRows(retrieved)
-			case []*Profile:
+			case []*AppProfile:
 				o.copyMatchingRows(retrieved...)
-			case ProfileSlice:
+			case AppProfileSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Profile or a slice of Profile
+				// If the retrieved value is not a AppProfile or a slice of AppProfile
 				// then run the AfterMergeHooks on the slice
-				_, err = Profiles.AfterMergeHooks.RunHooks(ctx, exec, o)
+				_, err = AppProfiles.AfterMergeHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -680,30 +680,30 @@ func (o ProfileSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	})
 }
 
-func (o ProfileSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals ProfileSetter) error {
+func (o AppProfileSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals AppProfileSetter) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Profiles.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
+	_, err := AppProfiles.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
 	return err
 }
 
-func (o ProfileSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
+func (o AppProfileSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Profiles.Delete(o.DeleteMod()).Exec(ctx, exec)
+	_, err := AppProfiles.Delete(o.DeleteMod()).Exec(ctx, exec)
 	return err
 }
 
-func (o ProfileSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
+func (o AppProfileSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	o2, err := Profiles.Query(sm.Where(o.pkIN())).All(ctx, exec)
+	o2, err := AppProfiles.Query(sm.Where(o.pkIN())).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -713,14 +713,14 @@ func (o ProfileSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// User starts a query for related objects on users
-func (o *Profile) User(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
-	return Users.Query(append(mods,
-		sm.Where(Users.Columns.ID.EQ(psql.Arg(o.UserID))),
+// User starts a query for related objects on app.users
+func (o *AppProfile) User(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
+	return AppUsers.Query(append(mods,
+		sm.Where(AppUsers.Columns.ID.EQ(psql.Arg(o.UserID))),
 	)...)
 }
 
-func (os ProfileSlice) User(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
+func (os AppProfileSlice) User(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
 	pkUserID := make(pgtypes.Array[int64], 0, len(os))
 	for _, o := range os {
 		if o == nil {
@@ -732,64 +732,64 @@ func (os ProfileSlice) User(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
 		psql.F("unnest", psql.Cast(psql.Arg(pkUserID), "int8[]")),
 	))
 
-	return Users.Query(append(mods,
-		sm.Where(psql.Group(Users.Columns.ID).OP("IN", PKArgExpr)),
+	return AppUsers.Query(append(mods,
+		sm.Where(psql.Group(AppUsers.Columns.ID).OP("IN", PKArgExpr)),
 	)...)
 }
 
-func attachProfileUser0(ctx context.Context, exec bob.Executor, count int, profile0 *Profile, user1 *User) (*Profile, error) {
-	setter := &ProfileSetter{
-		UserID: func() *int64 { return &user1.ID }(),
+func attachAppProfileUser0(ctx context.Context, exec bob.Executor, count int, appProfile0 *AppProfile, appUser1 *AppUser) (*AppProfile, error) {
+	setter := &AppProfileSetter{
+		UserID: func() *int64 { return &appUser1.ID }(),
 	}
 
-	err := profile0.Update(ctx, exec, setter)
+	err := appProfile0.Update(ctx, exec, setter)
 	if err != nil {
-		return nil, fmt.Errorf("attachProfileUser0: %w", err)
+		return nil, fmt.Errorf("attachAppProfileUser0: %w", err)
 	}
 
-	return profile0, nil
+	return appProfile0, nil
 }
 
-func (profile0 *Profile) InsertUser(ctx context.Context, exec bob.Executor, related *UserSetter) error {
+func (appProfile0 *AppProfile) InsertUser(ctx context.Context, exec bob.Executor, related *AppUserSetter) error {
 	var err error
 
-	user1, err := Users.Insert(related).One(ctx, exec)
+	appUser1, err := AppUsers.Insert(related).One(ctx, exec)
 	if err != nil {
 		return fmt.Errorf("inserting related objects: %w", err)
 	}
 
-	_, err = attachProfileUser0(ctx, exec, 1, profile0, user1)
+	_, err = attachAppProfileUser0(ctx, exec, 1, appProfile0, appUser1)
 	if err != nil {
 		return err
 	}
 
-	profile0.R.User = user1
-	profile0.R.Loaded.User = true
+	appProfile0.R.User = appUser1
+	appProfile0.R.Loaded.User = true
 
-	user1.R.Profile = profile0
-	user1.R.Loaded.Profile = true
+	appUser1.R.Profile = appProfile0
+	appUser1.R.Loaded.Profile = true
 
 	return nil
 }
 
-func (profile0 *Profile) AttachUser(ctx context.Context, exec bob.Executor, user1 *User) error {
+func (appProfile0 *AppProfile) AttachUser(ctx context.Context, exec bob.Executor, appUser1 *AppUser) error {
 	var err error
 
-	_, err = attachProfileUser0(ctx, exec, 1, profile0, user1)
+	_, err = attachAppProfileUser0(ctx, exec, 1, appProfile0, appUser1)
 	if err != nil {
 		return err
 	}
 
-	profile0.R.User = user1
-	profile0.R.Loaded.User = true
+	appProfile0.R.User = appUser1
+	appProfile0.R.Loaded.User = true
 
-	user1.R.Profile = profile0
-	user1.R.Loaded.Profile = true
+	appUser1.R.Profile = appProfile0
+	appUser1.R.Loaded.Profile = true
 
 	return nil
 }
 
-type profileWhere[Q psql.Filterable] struct {
+type appProfileWhere[Q psql.Filterable] struct {
 	UserID        psql.WhereMod[Q, int64]
 	Bio           psql.WhereNullMod[Q, string]
 	Address       psql.WhereNullMod[Q, db.AppAddress]
@@ -801,12 +801,12 @@ type profileWhere[Q psql.Filterable] struct {
 	Windows       psql.WhereNullMod[Q, pgtype.Multirange[pgtype.Range[pgtype.Timestamptz]]]
 }
 
-func (profileWhere[Q]) AliasedAs(alias string) profileWhere[Q] {
-	return buildProfileWhere[Q](buildProfileColumns(alias))
+func (appProfileWhere[Q]) AliasedAs(alias string) appProfileWhere[Q] {
+	return buildAppProfileWhere[Q](buildAppProfileColumns(alias))
 }
 
-func buildProfileWhere[Q psql.Filterable](cols profileColumns) profileWhere[Q] {
-	return profileWhere[Q]{
+func buildAppProfileWhere[Q psql.Filterable](cols appProfileColumns) appProfileWhere[Q] {
+	return appProfileWhere[Q]{
 		UserID:        psql.Where[Q, int64](cols.UserID.Expression),
 		Bio:           psql.WhereNull[Q, string](cols.Bio.Expression),
 		Address:       psql.WhereNull[Q, db.AppAddress](cols.Address.Expression),
@@ -819,16 +819,16 @@ func buildProfileWhere[Q psql.Filterable](cols profileColumns) profileWhere[Q] {
 	}
 }
 
-func (o *Profile) Preload(name string, retrieved any) error {
+func (o *AppProfile) Preload(name string, retrieved any) error {
 	if o == nil {
 		return nil
 	}
 
 	switch name {
 	case "User":
-		rel, ok := retrieved.(*User)
+		rel, ok := retrieved.(*AppUser)
 		if !ok {
-			return fmt.Errorf("profile cannot load %T as %q", retrieved, name)
+			return fmt.Errorf("appProfile cannot load %T as %q", retrieved, name)
 		}
 
 		o.R.User = rel
@@ -840,42 +840,42 @@ func (o *Profile) Preload(name string, retrieved any) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("profile has no relationship %q", name)
+		return fmt.Errorf("appProfile has no relationship %q", name)
 	}
 }
 
-type profilePreloader struct {
+type appProfilePreloader struct {
 	User func(...psql.PreloadOption) psql.Preloader
 }
 
-func buildProfilePreloader() profilePreloader {
-	return profilePreloader{
+func buildAppProfilePreloader() appProfilePreloader {
+	return appProfilePreloader{
 		User: func(opts ...psql.PreloadOption) psql.Preloader {
-			return psql.Preload[*User, UserSlice](psql.PreloadRel{
+			return psql.Preload[*AppUser, AppUserSlice](psql.PreloadRel{
 				Name: "User",
 				Sides: []psql.PreloadSide{
 					{
-						From:        Profiles,
-						To:          Users,
+						From:        AppProfiles,
+						To:          AppUsers,
 						FromColumns: []string{"user_id"},
 						ToColumns:   []string{"id"},
 					},
 				},
-			}, Users.Columns.Names(), opts...)
+			}, AppUsers.Columns.Names(), opts...)
 		},
 	}
 }
 
-type profileThenLoader[Q orm.Loadable] struct {
+type appProfileThenLoader[Q orm.Loadable] struct {
 	User func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 }
 
-func buildProfileThenLoader[Q orm.Loadable]() profileThenLoader[Q] {
+func buildAppProfileThenLoader[Q orm.Loadable]() appProfileThenLoader[Q] {
 	type UserLoadInterface interface {
 		LoadUser(context.Context, bob.Executor, ...bob.Mod[*dialect.SelectQuery]) error
 	}
 
-	return profileThenLoader[Q]{
+	return appProfileThenLoader[Q]{
 		User: thenLoadBuilder[Q](
 			"User",
 			func(ctx context.Context, exec bob.Executor, retrieved UserLoadInterface, mods ...bob.Mod[*dialect.SelectQuery]) error {
@@ -885,8 +885,8 @@ func buildProfileThenLoader[Q orm.Loadable]() profileThenLoader[Q] {
 	}
 }
 
-// LoadUser loads the profile's User into the .R struct
-func (o *Profile) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadUser loads the appProfile's User into the .R struct
+func (o *AppProfile) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -908,13 +908,13 @@ func (o *Profile) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.M
 	return nil
 }
 
-// LoadUser loads the profile's User into the .R struct
-func (os ProfileSlice) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadUser loads the appProfile's User into the .R struct
+func (os AppProfileSlice) LoadUser(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
 
-	users, err := os.User(mods...).All(ctx, exec)
+	appUsers, err := os.User(mods...).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -933,7 +933,7 @@ func (os ProfileSlice) LoadUser(ctx context.Context, exec bob.Executor, mods ...
 			continue
 		}
 
-		for _, rel := range users {
+		for _, rel := range appUsers {
 
 			if !(o.UserID == rel.ID) {
 				continue
@@ -950,25 +950,25 @@ func (os ProfileSlice) LoadUser(ctx context.Context, exec bob.Executor, mods ...
 	return nil
 }
 
-type profileJoins[Q dialect.Joinable] struct {
+type appProfileJoins[Q dialect.Joinable] struct {
 	typ  string
-	User modAs[Q, userColumns]
+	User modAs[Q, appUserColumns]
 }
 
-func (j profileJoins[Q]) aliasedAs(alias string) profileJoins[Q] {
-	return buildProfileJoins[Q](buildProfileColumns(alias), j.typ)
+func (j appProfileJoins[Q]) aliasedAs(alias string) appProfileJoins[Q] {
+	return buildAppProfileJoins[Q](buildAppProfileColumns(alias), j.typ)
 }
 
-func buildProfileJoins[Q dialect.Joinable](cols profileColumns, typ string) profileJoins[Q] {
-	return profileJoins[Q]{
+func buildAppProfileJoins[Q dialect.Joinable](cols appProfileColumns, typ string) appProfileJoins[Q] {
+	return appProfileJoins[Q]{
 		typ: typ,
-		User: modAs[Q, userColumns]{
-			c: Users.Columns,
-			f: func(to userColumns) bob.Mod[Q] {
+		User: modAs[Q, appUserColumns]{
+			c: AppUsers.Columns,
+			f: func(to appUserColumns) bob.Mod[Q] {
 				mods := make(mods.QueryMods[Q], 0, 1)
 
 				{
-					mods = append(mods, dialect.Join[Q](typ, Users.Name().As(to.Alias())).On(
+					mods = append(mods, dialect.Join[Q](typ, AppUsers.Name().As(to.Alias())).On(
 						to.ID.EQ(cols.UserID),
 					))
 				}

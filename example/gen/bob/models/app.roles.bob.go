@@ -22,41 +22,41 @@ import (
 	"github.com/stephenafamo/scan"
 )
 
-// Role is an object representing the database table.
-type Role struct {
+// AppRole is an object representing the database table.
+type AppRole struct {
 	ID   int64  `db:"id,pk" `
 	Name string `db:"name" `
 
-	R roleR `db:"-" `
+	R appRoleR `db:"-" `
 
-	C roleC `db:"-" `
+	C appRoleC `db:"-" `
 }
 
-// RoleSlice is an alias for a slice of pointers to Role.
-// This should almost always be used instead of []*Role.
-type RoleSlice []*Role
+// AppRoleSlice is an alias for a slice of pointers to AppRole.
+// This should almost always be used instead of []*AppRole.
+type AppRoleSlice []*AppRole
 
-// Roles contains methods to work with the roles table
-var Roles = psql.NewTablex[*Role, RoleSlice, *RoleSetter]("app", "roles", buildRoleColumns("roles"))
+// AppRoles contains methods to work with the roles table
+var AppRoles = psql.NewTablex[*AppRole, AppRoleSlice, *AppRoleSetter]("app", "roles", buildAppRoleColumns("app.roles"))
 
-// RolesQuery is a query on the roles table
-type RolesQuery = *psql.ViewQuery[*Role, RoleSlice]
+// AppRolesQuery is a query on the roles table
+type AppRolesQuery = *psql.ViewQuery[*AppRole, AppRoleSlice]
 
-// roleR is where relationships are stored.
-type roleR struct {
-	Users UserSlice // user_roles_fkey_0user_roles_fkey_1
+// appRoleR is where relationships are stored.
+type appRoleR struct {
+	Users AppUserSlice // user_roles_fkey_0user_roles_fkey_1
 	// Loaded reports whether each relationship has been loaded.
 	// A relationship's bool is set by Load*, Preload, ThenLoad, factory builds,
 	// and to-one Attach/Insert operations. To-many Attach/Insert operations leave it unchanged.
-	Loaded roleRLoaded `db:"-" `
+	Loaded appRoleRLoaded `db:"-" `
 }
 
-// roleRLoaded tracks which relationships on Role have been loaded.
-type roleRLoaded struct {
+// appRoleRLoaded tracks which relationships on AppRole have been loaded.
+type appRoleRLoaded struct {
 	Users bool // user_roles_fkey_0user_roles_fkey_1
 }
 
-func buildRoleColumns(tableName string) roleColumns {
+func buildAppRoleColumns(tableName string) appRoleColumns {
 	columnsExpr := expr.NewColumnsExpr(
 		"id", "name",
 	)
@@ -65,69 +65,69 @@ func buildRoleColumns(tableName string) roleColumns {
 		columnsExpr = columnsExpr.WithParent(tableName)
 	}
 
-	return roleColumns{
+	return appRoleColumns{
 		ColumnsExpr: columnsExpr,
 		tableAlias:  tableName,
-		ID:          buildRoleColumn(tableName, "id"),
-		Name:        buildRoleColumn(tableName, "name"),
+		ID:          buildAppRoleColumn(tableName, "id"),
+		Name:        buildAppRoleColumn(tableName, "name"),
 	}
 }
 
-type roleColumns struct {
+type appRoleColumns struct {
 	expr.ColumnsExpr
 	tableAlias string
-	ID         roleColumn
-	Name       roleColumn
+	ID         appRoleColumn
+	Name       appRoleColumn
 }
 
 // Alias returns the current table alias for the columns set.
-func (c roleColumns) Alias() string {
+func (c appRoleColumns) Alias() string {
 	return c.tableAlias
 }
 
 // AliasedAs returns a copy of the columns set qualified by tableName.
-func (roleColumns) AliasedAs(tableName string) roleColumns {
-	return buildRoleColumns(tableName)
+func (appRoleColumns) AliasedAs(tableName string) appRoleColumns {
+	return buildAppRoleColumns(tableName)
 }
 
 // Unqualified returns a copy of the columns set without table qualification.
-func (c roleColumns) Unqualified() roleColumns {
-	return buildRoleColumns("")
+func (c appRoleColumns) Unqualified() appRoleColumns {
+	return buildAppRoleColumns("")
 }
 
-func buildRoleColumn(alias, name string) roleColumn {
-	return roleColumn{
+func buildAppRoleColumn(alias, name string) appRoleColumn {
+	return appRoleColumn{
 		Expression: psql.Quote(alias, name),
 		alias:      alias,
 		name:       name,
 	}
 }
 
-type roleColumn struct {
+type appRoleColumn struct {
 	psql.Expression
 	alias string
 	name  string
 }
 
 // Name returns the unqualified column name.
-func (c roleColumn) Name() string {
+func (c appRoleColumn) Name() string {
 	return c.name
 }
 
 // ShouldOmitParens prevents automatic parenthesis wrapping in expression builders.
-func (c roleColumn) ShouldOmitParens() bool {
+func (c appRoleColumn) ShouldOmitParens() bool {
 	return true
 }
 
-// RoleSetter is used for insert/upsert/update operations
+// AppRoleSetter is used for insert/upsert/update operations
 // All values are optional, and do not have to be set
 // Generated columns are not included
-type RoleSetter struct {
+type AppRoleSetter struct {
 	ID   *int64  `db:"id,pk" `
 	Name *string `db:"name" `
 }
 
-func (s RoleSetter) SetColumns() []string {
+func (s AppRoleSetter) SetColumns() []string {
 	vals := make([]string, 0, 2)
 	if s.ID != nil {
 		vals = append(vals, "id")
@@ -138,7 +138,7 @@ func (s RoleSetter) SetColumns() []string {
 	return vals
 }
 
-func (s RoleSetter) Overwrite(t *Role) {
+func (s AppRoleSetter) Overwrite(t *AppRole) {
 	if s.ID != nil {
 		t.ID = func() int64 {
 			if s.ID == nil {
@@ -157,9 +157,9 @@ func (s RoleSetter) Overwrite(t *Role) {
 	}
 }
 
-func (s *RoleSetter) Apply(q *dialect.InsertQuery) {
+func (s *AppRoleSetter) Apply(q *dialect.InsertQuery) {
 	q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-		return Roles.BeforeInsertHooks.RunHooks(ctx, exec, s)
+		return AppRoles.BeforeInsertHooks.RunHooks(ctx, exec, s)
 	})
 
 	q.AppendValues(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
@@ -190,11 +190,11 @@ func (s *RoleSetter) Apply(q *dialect.InsertQuery) {
 	}))
 }
 
-func (s RoleSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (s AppRoleSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return um.Set(s.Expressions()...)
 }
 
-func (s RoleSetter) Expressions(prefix ...string) []bob.Expression {
+func (s AppRoleSetter) Expressions(prefix ...string) []bob.Expression {
 	exprs := make([]bob.Expression, 0, 2)
 
 	if s.ID != nil {
@@ -214,62 +214,62 @@ func (s RoleSetter) Expressions(prefix ...string) []bob.Expression {
 	return exprs
 }
 
-// FindRole retrieves a single record by primary key
+// FindAppRole retrieves a single record by primary key
 // If cols is empty Find will return all columns.
-func FindRole(ctx context.Context, exec bob.Executor, IDPK int64, cols ...string) (*Role, error) {
+func FindAppRole(ctx context.Context, exec bob.Executor, IDPK int64, cols ...string) (*AppRole, error) {
 	if len(cols) == 0 {
-		return Roles.Query(
-			sm.Where(Roles.Columns.ID.EQ(psql.Arg(IDPK))),
+		return AppRoles.Query(
+			sm.Where(AppRoles.Columns.ID.EQ(psql.Arg(IDPK))),
 		).One(ctx, exec)
 	}
 
-	return Roles.Query(
-		sm.Where(Roles.Columns.ID.EQ(psql.Arg(IDPK))),
-		sm.Columns(Roles.Columns.Only(cols...)),
+	return AppRoles.Query(
+		sm.Where(AppRoles.Columns.ID.EQ(psql.Arg(IDPK))),
+		sm.Columns(AppRoles.Columns.Only(cols...)),
 	).One(ctx, exec)
 }
 
-// RoleExists checks the presence of a single record by primary key
-func RoleExists(ctx context.Context, exec bob.Executor, IDPK int64) (bool, error) {
-	return Roles.Query(
-		sm.Where(Roles.Columns.ID.EQ(psql.Arg(IDPK))),
+// AppRoleExists checks the presence of a single record by primary key
+func AppRoleExists(ctx context.Context, exec bob.Executor, IDPK int64) (bool, error) {
+	return AppRoles.Query(
+		sm.Where(AppRoles.Columns.ID.EQ(psql.Arg(IDPK))),
 	).Exists(ctx, exec)
 }
 
-// AfterQueryHook is called after Role is retrieved from the database
-func (o *Role) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppRole is retrieved from the database
+func (o *AppRole) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Roles.AfterSelectHooks.RunHooks(ctx, exec, RoleSlice{o})
+		ctx, err = AppRoles.AfterSelectHooks.RunHooks(ctx, exec, AppRoleSlice{o})
 	case bob.QueryTypeInsert:
-		ctx, err = Roles.AfterInsertHooks.RunHooks(ctx, exec, RoleSlice{o})
+		ctx, err = AppRoles.AfterInsertHooks.RunHooks(ctx, exec, AppRoleSlice{o})
 	case bob.QueryTypeUpdate:
-		ctx, err = Roles.AfterUpdateHooks.RunHooks(ctx, exec, RoleSlice{o})
+		ctx, err = AppRoles.AfterUpdateHooks.RunHooks(ctx, exec, AppRoleSlice{o})
 	case bob.QueryTypeDelete:
-		ctx, err = Roles.AfterDeleteHooks.RunHooks(ctx, exec, RoleSlice{o})
+		ctx, err = AppRoles.AfterDeleteHooks.RunHooks(ctx, exec, AppRoleSlice{o})
 	case bob.QueryTypeMerge:
-		ctx, err = Roles.AfterMergeHooks.RunHooks(ctx, exec, RoleSlice{o})
+		ctx, err = AppRoles.AfterMergeHooks.RunHooks(ctx, exec, AppRoleSlice{o})
 	}
 
 	return err
 }
 
-// primaryKeyVals returns the primary key values of the Role
-func (o *Role) primaryKeyVals() bob.Expression {
+// primaryKeyVals returns the primary key values of the AppRole
+func (o *AppRole) primaryKeyVals() bob.Expression {
 	return psql.Arg(o.ID)
 }
 
-func (o *Role) pkEQ() dialect.Expression {
-	return psql.Quote("roles", "id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+func (o *AppRole) pkEQ() dialect.Expression {
+	return psql.Quote("app.roles", "id").EQ(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		return o.primaryKeyVals().WriteSQL(ctx, w, d, start)
 	}))
 }
 
-// Update uses an executor to update the Role
-func (o *Role) Update(ctx context.Context, exec bob.Executor, s *RoleSetter) error {
-	v, err := Roles.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
+// Update uses an executor to update the AppRole
+func (o *AppRole) Update(ctx context.Context, exec bob.Executor, s *AppRoleSetter) error {
+	v, err := AppRoles.Update(s.UpdateMod(), um.Where(o.pkEQ())).One(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -280,16 +280,16 @@ func (o *Role) Update(ctx context.Context, exec bob.Executor, s *RoleSetter) err
 	return nil
 }
 
-// Delete deletes a single Role record with an executor
-func (o *Role) Delete(ctx context.Context, exec bob.Executor) error {
-	_, err := Roles.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
+// Delete deletes a single AppRole record with an executor
+func (o *AppRole) Delete(ctx context.Context, exec bob.Executor) error {
+	_, err := AppRoles.Delete(dm.Where(o.pkEQ())).Exec(ctx, exec)
 	return err
 }
 
-// Reload refreshes the Role using the executor
-func (o *Role) Reload(ctx context.Context, exec bob.Executor) error {
-	o2, err := Roles.Query(
-		sm.Where(Roles.Columns.ID.EQ(psql.Arg(o.ID))),
+// Reload refreshes the AppRole using the executor
+func (o *AppRole) Reload(ctx context.Context, exec bob.Executor) error {
+	o2, err := AppRoles.Query(
+		sm.Where(AppRoles.Columns.ID.EQ(psql.Arg(o.ID))),
 	).One(ctx, exec)
 	if err != nil {
 		return err
@@ -300,32 +300,32 @@ func (o *Role) Reload(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// AfterQueryHook is called after RoleSlice is retrieved from the database
-func (o RoleSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
+// AfterQueryHook is called after AppRoleSlice is retrieved from the database
+func (o AppRoleSlice) AfterQueryHook(ctx context.Context, exec bob.Executor, queryType bob.QueryType) error {
 	var err error
 
 	switch queryType {
 	case bob.QueryTypeSelect:
-		ctx, err = Roles.AfterSelectHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppRoles.AfterSelectHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeInsert:
-		ctx, err = Roles.AfterInsertHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppRoles.AfterInsertHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeUpdate:
-		ctx, err = Roles.AfterUpdateHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppRoles.AfterUpdateHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeDelete:
-		ctx, err = Roles.AfterDeleteHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppRoles.AfterDeleteHooks.RunHooks(ctx, exec, o)
 	case bob.QueryTypeMerge:
-		ctx, err = Roles.AfterMergeHooks.RunHooks(ctx, exec, o)
+		ctx, err = AppRoles.AfterMergeHooks.RunHooks(ctx, exec, o)
 	}
 
 	return err
 }
 
-func (o RoleSlice) pkIN() dialect.Expression {
+func (o AppRoleSlice) pkIN() dialect.Expression {
 	if len(o) == 0 {
 		return psql.Raw("NULL")
 	}
 
-	return psql.Quote("roles", "id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+	return psql.Quote("app.roles", "id").In(bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 		pkPairs := make([]bob.Expression, len(o))
 		for i, row := range o {
 			pkPairs[i] = row.primaryKeyVals()
@@ -337,7 +337,7 @@ func (o RoleSlice) pkIN() dialect.Expression {
 // copyMatchingRows finds models in the given slice that have the same primary key
 // then it first copies the existing relationships from the old model to the new model
 // and then replaces the old model in the slice with the new model
-func (o RoleSlice) copyMatchingRows(from ...*Role) {
+func (o AppRoleSlice) copyMatchingRows(from ...*AppRole) {
 	for i, old := range o {
 		for _, new := range from {
 			if new.ID != old.ID {
@@ -351,25 +351,25 @@ func (o RoleSlice) copyMatchingRows(from ...*Role) {
 }
 
 // UpdateMod modifies an update query with "WHERE primary_key IN (o...)"
-func (o RoleSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
+func (o AppRoleSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 	return bob.ModFunc[*dialect.UpdateQuery](func(q *dialect.UpdateQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Roles.BeforeUpdateHooks.RunHooks(ctx, exec, o)
+			return AppRoles.BeforeUpdateHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Role:
+			case *AppRole:
 				o.copyMatchingRows(retrieved)
-			case []*Role:
+			case []*AppRole:
 				o.copyMatchingRows(retrieved...)
-			case RoleSlice:
+			case AppRoleSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Role or a slice of Role
+				// If the retrieved value is not a AppRole or a slice of AppRole
 				// then run the AfterUpdateHooks on the slice
-				_, err = Roles.AfterUpdateHooks.RunHooks(ctx, exec, o)
+				_, err = AppRoles.AfterUpdateHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -380,25 +380,25 @@ func (o RoleSlice) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 // DeleteMod modifies an delete query with "WHERE primary_key IN (o...)"
-func (o RoleSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
+func (o AppRoleSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 	return bob.ModFunc[*dialect.DeleteQuery](func(q *dialect.DeleteQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Roles.BeforeDeleteHooks.RunHooks(ctx, exec, o)
+			return AppRoles.BeforeDeleteHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Role:
+			case *AppRole:
 				o.copyMatchingRows(retrieved)
-			case []*Role:
+			case []*AppRole:
 				o.copyMatchingRows(retrieved...)
-			case RoleSlice:
+			case AppRoleSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Role or a slice of Role
+				// If the retrieved value is not a AppRole or a slice of AppRole
 				// then run the AfterDeleteHooks on the slice
-				_, err = Roles.AfterDeleteHooks.RunHooks(ctx, exec, o)
+				_, err = AppRoles.AfterDeleteHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -410,25 +410,25 @@ func (o RoleSlice) DeleteMod() bob.Mod[*dialect.DeleteQuery] {
 
 // MergeMod modifies a merge query to run BeforeMergeHooks and AfterMergeHooks
 // and updates the slice with the returned rows.
-func (o RoleSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
+func (o AppRoleSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	return bob.ModFunc[*dialect.MergeQuery](func(q *dialect.MergeQuery) {
 		q.AppendHooks(func(ctx context.Context, exec bob.Executor) (context.Context, error) {
-			return Roles.BeforeMergeHooks.RunHooks(ctx, exec, o)
+			return AppRoles.BeforeMergeHooks.RunHooks(ctx, exec, o)
 		})
 
 		q.AppendLoader(bob.LoaderFunc(func(ctx context.Context, exec bob.Executor, retrieved any) error {
 			var err error
 			switch retrieved := retrieved.(type) {
-			case *Role:
+			case *AppRole:
 				o.copyMatchingRows(retrieved)
-			case []*Role:
+			case []*AppRole:
 				o.copyMatchingRows(retrieved...)
-			case RoleSlice:
+			case AppRoleSlice:
 				o.copyMatchingRows(retrieved...)
 			default:
-				// If the retrieved value is not a Role or a slice of Role
+				// If the retrieved value is not a AppRole or a slice of AppRole
 				// then run the AfterMergeHooks on the slice
-				_, err = Roles.AfterMergeHooks.RunHooks(ctx, exec, o)
+				_, err = AppRoles.AfterMergeHooks.RunHooks(ctx, exec, o)
 			}
 
 			return err
@@ -436,30 +436,30 @@ func (o RoleSlice) MergeMod() bob.Mod[*dialect.MergeQuery] {
 	})
 }
 
-func (o RoleSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals RoleSetter) error {
+func (o AppRoleSlice) UpdateAll(ctx context.Context, exec bob.Executor, vals AppRoleSetter) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Roles.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
+	_, err := AppRoles.Update(vals.UpdateMod(), o.UpdateMod()).All(ctx, exec)
 	return err
 }
 
-func (o RoleSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
+func (o AppRoleSlice) DeleteAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	_, err := Roles.Delete(o.DeleteMod()).Exec(ctx, exec)
+	_, err := AppRoles.Delete(o.DeleteMod()).Exec(ctx, exec)
 	return err
 }
 
-func (o RoleSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
+func (o AppRoleSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	if len(o) == 0 {
 		return nil
 	}
 
-	o2, err := Roles.Query(sm.Where(o.pkIN())).All(ctx, exec)
+	o2, err := AppRoles.Query(sm.Where(o.pkIN())).All(ctx, exec)
 	if err != nil {
 		return err
 	}
@@ -469,16 +469,16 @@ func (o RoleSlice) ReloadAll(ctx context.Context, exec bob.Executor) error {
 	return nil
 }
 
-// Users starts a query for related objects on users
-func (o *Role) Users(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
-	return Users.Query(append(mods,
-		sm.InnerJoin(UserRoles.NameAs()).On(
-			Users.Columns.ID.EQ(UserRoles.Columns.UserID)),
-		sm.Where(UserRoles.Columns.RoleID.EQ(psql.Arg(o.ID))),
+// Users starts a query for related objects on app.users
+func (o *AppRole) Users(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
+	return AppUsers.Query(append(mods,
+		sm.InnerJoin(AppUserRoles.NameAs()).On(
+			AppUsers.Columns.ID.EQ(AppUserRoles.Columns.UserID)),
+		sm.Where(AppUserRoles.Columns.RoleID.EQ(psql.Arg(o.ID))),
 	)...)
 }
 
-func (os RoleSlice) Users(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
+func (os AppRoleSlice) Users(mods ...bob.Mod[*dialect.SelectQuery]) AppUsersQuery {
 	pkID := make(pgtypes.Array[int64], 0, len(os))
 	for _, o := range os {
 		if o == nil {
@@ -490,105 +490,105 @@ func (os RoleSlice) Users(mods ...bob.Mod[*dialect.SelectQuery]) UsersQuery {
 		psql.F("unnest", psql.Cast(psql.Arg(pkID), "bigserial[]")),
 	))
 
-	return Users.Query(append(mods,
-		sm.InnerJoin(UserRoles.NameAs()).On(
-			Users.Columns.ID.EQ(UserRoles.Columns.UserID),
+	return AppUsers.Query(append(mods,
+		sm.InnerJoin(AppUserRoles.NameAs()).On(
+			AppUsers.Columns.ID.EQ(AppUserRoles.Columns.UserID),
 		),
-		sm.Where(psql.Group(UserRoles.Columns.RoleID).OP("IN", PKArgExpr)),
+		sm.Where(psql.Group(AppUserRoles.Columns.RoleID).OP("IN", PKArgExpr)),
 	)...)
 }
 
-func attachRoleUsers0(ctx context.Context, exec bob.Executor, count int, role0 *Role, users2 UserSlice) (UserRoleSlice, error) {
-	setters := make([]*UserRoleSetter, count)
+func attachAppRoleUsers0(ctx context.Context, exec bob.Executor, count int, appRole0 *AppRole, appUsers2 AppUserSlice) (AppUserRoleSlice, error) {
+	setters := make([]*AppUserRoleSetter, count)
 	for i := range count {
-		setters[i] = &UserRoleSetter{
-			RoleID: func() *int64 { return &role0.ID }(),
-			UserID: func() *int64 { return &users2[i].ID }(),
+		setters[i] = &AppUserRoleSetter{
+			RoleID: func() *int64 { return &appRole0.ID }(),
+			UserID: func() *int64 { return &appUsers2[i].ID }(),
 		}
 	}
 
-	userRoles1, err := UserRoles.Insert(bob.ToMods(setters...)).All(ctx, exec)
+	appUserRoles1, err := AppUserRoles.Insert(bob.ToMods(setters...)).All(ctx, exec)
 	if err != nil {
-		return nil, fmt.Errorf("attachRoleUsers0: %w", err)
+		return nil, fmt.Errorf("attachAppRoleUsers0: %w", err)
 	}
 
-	return userRoles1, nil
+	return appUserRoles1, nil
 }
 
-func (role0 *Role) InsertUsers(ctx context.Context, exec bob.Executor, related ...*UserSetter) error {
+func (appRole0 *AppRole) InsertUsers(ctx context.Context, exec bob.Executor, related ...*AppUserSetter) error {
 	if len(related) == 0 {
 		return nil
 	}
 
 	var err error
 
-	inserted, err := Users.Insert(bob.ToMods(related...)).All(ctx, exec)
+	inserted, err := AppUsers.Insert(bob.ToMods(related...)).All(ctx, exec)
 	if err != nil {
 		return fmt.Errorf("inserting related objects: %w", err)
 	}
-	users2 := UserSlice(inserted)
+	appUsers2 := AppUserSlice(inserted)
 
-	_, err = attachRoleUsers0(ctx, exec, len(related), role0, users2)
+	_, err = attachAppRoleUsers0(ctx, exec, len(related), appRole0, appUsers2)
 	if err != nil {
 		return err
 	}
 
-	role0.R.Users = append(role0.R.Users, users2...)
+	appRole0.R.Users = append(appRole0.R.Users, appUsers2...)
 
-	for _, rel := range users2 {
-		rel.R.Roles = append(rel.R.Roles, role0)
+	for _, rel := range appUsers2 {
+		rel.R.Roles = append(rel.R.Roles, appRole0)
 	}
 	return nil
 }
 
-func (role0 *Role) AttachUsers(ctx context.Context, exec bob.Executor, related ...*User) error {
+func (appRole0 *AppRole) AttachUsers(ctx context.Context, exec bob.Executor, related ...*AppUser) error {
 	if len(related) == 0 {
 		return nil
 	}
 
 	var err error
-	users2 := UserSlice(related)
+	appUsers2 := AppUserSlice(related)
 
-	_, err = attachRoleUsers0(ctx, exec, len(related), role0, users2)
+	_, err = attachAppRoleUsers0(ctx, exec, len(related), appRole0, appUsers2)
 	if err != nil {
 		return err
 	}
 
-	role0.R.Users = append(role0.R.Users, users2...)
+	appRole0.R.Users = append(appRole0.R.Users, appUsers2...)
 
 	for _, rel := range related {
-		rel.R.Roles = append(rel.R.Roles, role0)
+		rel.R.Roles = append(rel.R.Roles, appRole0)
 	}
 
 	return nil
 }
 
-type roleWhere[Q psql.Filterable] struct {
+type appRoleWhere[Q psql.Filterable] struct {
 	ID   psql.WhereMod[Q, int64]
 	Name psql.WhereMod[Q, string]
 }
 
-func (roleWhere[Q]) AliasedAs(alias string) roleWhere[Q] {
-	return buildRoleWhere[Q](buildRoleColumns(alias))
+func (appRoleWhere[Q]) AliasedAs(alias string) appRoleWhere[Q] {
+	return buildAppRoleWhere[Q](buildAppRoleColumns(alias))
 }
 
-func buildRoleWhere[Q psql.Filterable](cols roleColumns) roleWhere[Q] {
-	return roleWhere[Q]{
+func buildAppRoleWhere[Q psql.Filterable](cols appRoleColumns) appRoleWhere[Q] {
+	return appRoleWhere[Q]{
 		ID:   psql.Where[Q, int64](cols.ID.Expression),
 		Name: psql.Where[Q, string](cols.Name.Expression),
 	}
 }
 
-func (o *Role) Preload(name string, retrieved any) error {
+func (o *AppRole) Preload(name string, retrieved any) error {
 	if o == nil {
 		return nil
 	}
 
 	switch name {
 	case "Users":
-		rels, ok := retrieved.(UserSlice)
+		rels, ok := retrieved.(AppUserSlice)
 		if !ok {
-			return fmt.Errorf("role cannot load %T as %q", retrieved, name)
+			return fmt.Errorf("appRole cannot load %T as %q", retrieved, name)
 		}
 
 		o.R.Users = rels
@@ -596,31 +596,31 @@ func (o *Role) Preload(name string, retrieved any) error {
 
 		for _, rel := range rels {
 			if rel != nil {
-				rel.R.Roles = RoleSlice{o}
+				rel.R.Roles = AppRoleSlice{o}
 			}
 		}
 		return nil
 	default:
-		return fmt.Errorf("role has no relationship %q", name)
+		return fmt.Errorf("appRole has no relationship %q", name)
 	}
 }
 
-type rolePreloader struct{}
+type appRolePreloader struct{}
 
-func buildRolePreloader() rolePreloader {
-	return rolePreloader{}
+func buildAppRolePreloader() appRolePreloader {
+	return appRolePreloader{}
 }
 
-type roleThenLoader[Q orm.Loadable] struct {
+type appRoleThenLoader[Q orm.Loadable] struct {
 	Users func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 }
 
-func buildRoleThenLoader[Q orm.Loadable]() roleThenLoader[Q] {
+func buildAppRoleThenLoader[Q orm.Loadable]() appRoleThenLoader[Q] {
 	type UsersLoadInterface interface {
 		LoadUsers(context.Context, bob.Executor, ...bob.Mod[*dialect.SelectQuery]) error
 	}
 
-	return roleThenLoader[Q]{
+	return appRoleThenLoader[Q]{
 		Users: thenLoadBuilder[Q](
 			"Users",
 			func(ctx context.Context, exec bob.Executor, retrieved UsersLoadInterface, mods ...bob.Mod[*dialect.SelectQuery]) error {
@@ -630,8 +630,8 @@ func buildRoleThenLoader[Q orm.Loadable]() roleThenLoader[Q] {
 	}
 }
 
-// LoadUsers loads the role's Users into the .R struct
-func (o *Role) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadUsers loads the appRole's Users into the .R struct
+func (o *AppRole) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -646,7 +646,7 @@ func (o *Role) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod
 	}
 
 	for _, rel := range related {
-		rel.R.Roles = RoleSlice{o}
+		rel.R.Roles = AppRoleSlice{o}
 	}
 
 	o.R.Users = related
@@ -654,8 +654,8 @@ func (o *Role) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod
 	return nil
 }
 
-// LoadUsers loads the role's Users into the .R struct
-func (os RoleSlice) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+// LoadUsers loads the appRole's Users into the .R struct
+func (os AppRoleSlice) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
@@ -667,20 +667,20 @@ func (os RoleSlice) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bo
 	}
 
 	if len(sq.SelectList.Columns) == 0 {
-		mods = append(mods, sm.Columns(Users.Columns))
+		mods = append(mods, sm.Columns(AppUsers.Columns))
 	}
 
 	q := os.Users(append(
 		mods,
-		sm.Columns(UserRoles.Columns.RoleID.As("related_roles.ID")),
+		sm.Columns(AppUserRoles.Columns.RoleID.As("related_app.roles.ID")),
 	)...)
 
 	IDSlice := []int64{}
 
-	mapper := scan.Mod(scan.StructMapper[*User](), func(ctx context.Context, cols []string) (scan.BeforeFunc, func(any, any) error) {
+	mapper := scan.Mod(scan.StructMapper[*AppUser](), func(ctx context.Context, cols []string) (scan.BeforeFunc, func(any, any) error) {
 		return func(row *scan.Row) (any, error) {
 				IDSlice = append(IDSlice, *new(int64))
-				row.ScheduleScanByName("related_roles.ID", &IDSlice[len(IDSlice)-1])
+				row.ScheduleScanByName("related_app.roles.ID", &IDSlice[len(IDSlice)-1])
 
 				return nil, nil
 			},
@@ -689,7 +689,7 @@ func (os RoleSlice) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bo
 			}
 	})
 
-	users, err := bob.Allx[bob.SliceTransformer[*User, UserSlice]](ctx, exec, q, mapper)
+	appUsers, err := bob.Allx[bob.SliceTransformer[*AppUser, AppUserSlice]](ctx, exec, q, mapper)
 	if err != nil {
 		return err
 	}
@@ -700,7 +700,7 @@ func (os RoleSlice) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bo
 	}
 
 	for _, o := range os {
-		for i, rel := range users {
+		for i, rel := range appUsers {
 			if !(o.ID == IDSlice[i]) {
 				continue
 			}
@@ -714,13 +714,13 @@ func (os RoleSlice) LoadUsers(ctx context.Context, exec bob.Executor, mods ...bo
 	return nil
 }
 
-// roleC is where relationship counts are stored.
-type roleC struct {
+// appRoleC is where relationship counts are stored.
+type appRoleC struct {
 	Users *int64
 }
 
 // PreloadCount sets a count in the C struct by name
-func (o *Role) PreloadCount(name string, count int64) error {
+func (o *AppRole) PreloadCount(name string, count int64) error {
 	if o == nil {
 		return nil
 	}
@@ -732,26 +732,26 @@ func (o *Role) PreloadCount(name string, count int64) error {
 	return nil
 }
 
-type roleCountPreloader struct {
+type appRoleCountPreloader struct {
 	Users func(...bob.Mod[*dialect.SelectQuery]) psql.Preloader
 }
 
-func buildRoleCountPreloader() roleCountPreloader {
-	return roleCountPreloader{
+func buildAppRoleCountPreloader() appRoleCountPreloader {
+	return appRoleCountPreloader{
 		Users: func(mods ...bob.Mod[*dialect.SelectQuery]) psql.Preloader {
-			return countPreloader[*Role]("Users", func(parent string) bob.Expression {
+			return countPreloader[*AppRole]("Users", func(parent string) bob.Expression {
 				// Build a correlated subquery: (SELECT COUNT(*) FROM related WHERE fk = parent.pk)
 				if parent == "" {
-					parent = Roles.Alias()
+					parent = AppRoles.Alias()
 				}
 
 				subqueryMods := []bob.Mod[*dialect.SelectQuery]{
 					sm.Columns(psql.Raw("count(*)")),
 
-					sm.From(UserRoles.Name()),
-					sm.Where(psql.Quote(UserRoles.Alias(), "role_id").EQ(psql.Quote(parent, "id"))),
-					sm.InnerJoin(Users.Name()).On(
-						psql.Quote(Users.Alias(), "id").EQ(psql.Quote(UserRoles.Alias(), "user_id")),
+					sm.From(AppUserRoles.Name()),
+					sm.Where(psql.Quote(AppUserRoles.Alias(), "role_id").EQ(psql.Quote(parent, "id"))),
+					sm.InnerJoin(AppUsers.Name()).On(
+						psql.Quote(AppUsers.Alias(), "id").EQ(psql.Quote(AppUserRoles.Alias(), "user_id")),
 					),
 				}
 				subqueryMods = append(subqueryMods, mods...)
@@ -761,16 +761,16 @@ func buildRoleCountPreloader() roleCountPreloader {
 	}
 }
 
-type roleCountThenLoader[Q orm.Loadable] struct {
+type appRoleCountThenLoader[Q orm.Loadable] struct {
 	Users func(...bob.Mod[*dialect.SelectQuery]) orm.Loader[Q]
 }
 
-func buildRoleCountThenLoader[Q orm.Loadable]() roleCountThenLoader[Q] {
+func buildAppRoleCountThenLoader[Q orm.Loadable]() appRoleCountThenLoader[Q] {
 	type UsersCountInterface interface {
 		LoadCountUsers(context.Context, bob.Executor, ...bob.Mod[*dialect.SelectQuery]) error
 	}
 
-	return roleCountThenLoader[Q]{
+	return appRoleCountThenLoader[Q]{
 		Users: countThenLoadBuilder[Q](
 			"Users",
 			func(ctx context.Context, exec bob.Executor, retrieved UsersCountInterface, mods ...bob.Mod[*dialect.SelectQuery]) error {
@@ -781,7 +781,7 @@ func buildRoleCountThenLoader[Q orm.Loadable]() roleCountThenLoader[Q] {
 }
 
 // LoadCountUsers loads the count of Users into the C struct
-func (o *Role) LoadCountUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+func (o *AppRole) LoadCountUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if o == nil {
 		return nil
 	}
@@ -796,7 +796,7 @@ func (o *Role) LoadCountUsers(ctx context.Context, exec bob.Executor, mods ...bo
 }
 
 // LoadCountUsers loads the count of Users for a slice in a single batch query
-func (os RoleSlice) LoadCountUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
+func (os AppRoleSlice) LoadCountUsers(ctx context.Context, exec bob.Executor, mods ...bob.Mod[*dialect.SelectQuery]) error {
 	if len(os) == 0 {
 		return nil
 	}
@@ -824,19 +824,19 @@ func (os RoleSlice) LoadCountUsers(ctx context.Context, exec bob.Executor, mods 
 	batchMods := []bob.Mod[*dialect.SelectQuery]{
 		// SELECT fk AS parent_pk, count(*)
 		sm.Columns(
-			UserRoles.Columns.RoleID.As("id"),
+			AppUserRoles.Columns.RoleID.As("id"),
 			psql.Raw("count(*) as count"),
 		),
 		// Multi-hop: FROM first join table, JOIN through to final related table
-		sm.From(UserRoles.NameAs()),
-		sm.InnerJoin(Users.NameAs()).On(
-			Users.Columns.ID.EQ(UserRoles.Columns.UserID),
+		sm.From(AppUserRoles.NameAs()),
+		sm.InnerJoin(AppUsers.NameAs()).On(
+			AppUsers.Columns.ID.EQ(AppUserRoles.Columns.UserID),
 		),
 
 		// WHERE fk IN (parent PKs)
-		sm.Where(UserRoles.Columns.RoleID.OP("IN", PKArgExpr)),
+		sm.Where(AppUserRoles.Columns.RoleID.OP("IN", PKArgExpr)),
 		// GROUP BY fk columns
-		sm.GroupBy(UserRoles.Columns.RoleID),
+		sm.GroupBy(AppUserRoles.Columns.RoleID),
 	}
 	batchMods = append(batchMods, mods...)
 
@@ -864,33 +864,33 @@ func (os RoleSlice) LoadCountUsers(ctx context.Context, exec bob.Executor, mods 
 	return nil
 }
 
-type roleJoins[Q dialect.Joinable] struct {
+type appRoleJoins[Q dialect.Joinable] struct {
 	typ   string
-	Users modAs[Q, userColumns]
+	Users modAs[Q, appUserColumns]
 }
 
-func (j roleJoins[Q]) aliasedAs(alias string) roleJoins[Q] {
-	return buildRoleJoins[Q](buildRoleColumns(alias), j.typ)
+func (j appRoleJoins[Q]) aliasedAs(alias string) appRoleJoins[Q] {
+	return buildAppRoleJoins[Q](buildAppRoleColumns(alias), j.typ)
 }
 
-func buildRoleJoins[Q dialect.Joinable](cols roleColumns, typ string) roleJoins[Q] {
-	return roleJoins[Q]{
+func buildAppRoleJoins[Q dialect.Joinable](cols appRoleColumns, typ string) appRoleJoins[Q] {
+	return appRoleJoins[Q]{
 		typ: typ,
-		Users: modAs[Q, userColumns]{
-			c: Users.Columns,
-			f: func(to userColumns) bob.Mod[Q] {
+		Users: modAs[Q, appUserColumns]{
+			c: AppUsers.Columns,
+			f: func(to appUserColumns) bob.Mod[Q] {
 				random := strconv.FormatInt(randInt(), 10)
 				mods := make(mods.QueryMods[Q], 0, 2)
 
 				{
-					to := UserRoles.Columns.AliasedAs(UserRoles.Columns.Alias() + random)
-					mods = append(mods, dialect.Join[Q](typ, UserRoles.Name().As(to.Alias())).On(
+					to := AppUserRoles.Columns.AliasedAs(AppUserRoles.Columns.Alias() + random)
+					mods = append(mods, dialect.Join[Q](typ, AppUserRoles.Name().As(to.Alias())).On(
 						to.RoleID.EQ(cols.ID),
 					))
 				}
 				{
-					cols := UserRoles.Columns.AliasedAs(UserRoles.Columns.Alias() + random)
-					mods = append(mods, dialect.Join[Q](typ, Users.Name().As(to.Alias())).On(
+					cols := AppUserRoles.Columns.AliasedAs(AppUserRoles.Columns.Alias() + random)
+					mods = append(mods, dialect.Join[Q](typ, AppUsers.Name().As(to.Alias())).On(
 						to.ID.EQ(cols.UserID),
 					))
 				}
