@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -25,7 +27,8 @@ type Migration struct {
 	Checksum string // sha256 hex of the raw file bytes
 }
 
-// Load reads all *.sql migrations from dir and returns them sorted by version.
+// Load reads all *.sql migrations from an OS directory and returns them sorted
+// by version. It delegates to LoadFS over os.DirFS(dir).
 //
 // Each filename is parsed as "<version>_<name>.sql": everything up to the first
 // '_' is the version, the remainder (minus the .sql extension) is the name. The
@@ -33,30 +36,45 @@ type Migration struct {
 // markers (case-insensitive, whole-line); with no markers the whole file is up.
 // Checksum is the sha256 hex of the raw file bytes.
 func Load(dir string) ([]Migration, error) {
-	entries, err := os.ReadDir(dir)
+	migs, err := LoadFS(os.DirFS(dir))
 	if err != nil {
-		return nil, fmt.Errorf("migrate: read dir %q: %w", dir, err)
+		return nil, err
 	}
+	return migs, nil
+}
 
+// LoadFS reads all *.sql migrations from an fs.FS (e.g. an embed.FS) and returns
+// them sorted by version.
+//
+// It walks the filesystem recursively, so an `//go:embed migrations` directive
+// (whose files live under "migrations/") works without the caller doing fs.Sub.
+// Each base filename is parsed as "<version>_<name>.sql"; the body is split on
+// the "-- sqld:up" / "-- sqld:down" markers (with no markers the whole file is
+// up); Checksum is the sha256 hex of the raw file bytes. Non-.sql files are
+// skipped.
+func LoadFS(fsys fs.FS) ([]Migration, error) {
 	var migs []Migration
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		name := e.Name()
-		if !strings.HasSuffix(strings.ToLower(name), ".sql") {
-			continue
+		if d.IsDir() {
+			return nil
+		}
+		base := path.Base(p)
+		if !strings.HasSuffix(strings.ToLower(base), ".sql") {
+			return nil
 		}
 
-		path := filepath.Join(dir, name)
-		raw, err := os.ReadFile(path)
+		raw, err := fs.ReadFile(fsys, p)
 		if err != nil {
-			return nil, fmt.Errorf("migrate: read %q: %w", path, err)
+			return fmt.Errorf("migrate: read %q: %w", p, err)
 		}
 
-		version, mname, err := parseFilename(name)
+		version, mname, err := parseFilename(base)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		up, down := splitMigration(string(raw))
@@ -69,6 +87,10 @@ func Load(dir string) ([]Migration, error) {
 			DownSQL:  down,
 			Checksum: hex.EncodeToString(sum[:]),
 		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("migrate: load fs: %w", err)
 	}
 
 	sort.Slice(migs, func(i, j int) bool {
