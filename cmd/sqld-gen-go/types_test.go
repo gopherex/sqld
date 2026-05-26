@@ -795,63 +795,82 @@ func TestExtensionTypeDetection(t *testing.T) {
 		}
 	}
 
-	// RegisterTypes registers used extension types (hstore, ltree) but NOT their
-	// non-existent array companions, and NOT the unused lquery.
-	for _, want := range []string{`"hstore"`, `"ltree"`} {
+	// hstore is registered via the pgtype.Hstore codec with the runtime OID (not
+	// LoadType, which can't load a non-array base type), plus its array.
+	for _, want := range []string{
+		"pgtype.HstoreCodec{}",
+		`where typname = 'hstore'`,
+		`Name: "_hstore"`,
+	} {
 		if !strings.Contains(models, want) {
-			t.Errorf("RegisterTypes missing %s in models.go:\n%s", want, models)
+			t.Errorf("RegisterTypes missing hstore handling %q in models.go:\n%s", want, models)
 		}
 	}
-	for _, notWant := range []string{`"_hstore"`, `"_ltree"`, `"lquery"`} {
+	// ltree/lquery need no registration — their wire form is text, so an
+	// unregistered OID scans into / encodes from a Go string. They must NOT
+	// appear in the LoadType list (which would fail the same way hstore does).
+	for _, notWant := range []string{`"ltree"`, `"_ltree"`, `"lquery"`} {
 		if strings.Contains(models, notWant) {
 			t.Errorf("RegisterTypes should not contain %s in models.go:\n%s", notWant, models)
 		}
 	}
 
-	// Ordering: extension types come before the enum (app.user_status).
-	idxHstore := strings.Index(models, `"hstore"`)
-	idxLtree := strings.Index(models, `"ltree"`)
+	// The hstore codec is registered before the LoadType loop reaches the enum.
+	idxHstore := strings.Index(models, "pgtype.HstoreCodec{}")
 	idxEnum := strings.Index(models, `"app.user_status"`)
-	if idxHstore < 0 || idxLtree < 0 || idxEnum < 0 {
-		t.Fatalf("expected hstore, ltree, and enum entries in RegisterTypes:\n%s", models)
+	if idxHstore < 0 || idxEnum < 0 {
+		t.Fatalf("expected hstore codec and enum entries in RegisterTypes:\n%s", models)
 	}
-	if !(idxHstore < idxEnum && idxLtree < idxEnum) {
-		t.Errorf("extension types (hstore=%d ltree=%d) must come before enum=%d", idxHstore, idxLtree, idxEnum)
+	if idxHstore >= idxEnum {
+		t.Errorf("hstore codec (%d) must be registered before the enum LoadType (%d)", idxHstore, idxEnum)
 	}
 }
 
-// TestExtensionTypeOnlyRegisterTypes verifies that an extension type alone (no
-// enums/composites/ranges) still produces a RegisterTypes function.
+// TestExtensionTypeOnlyRegisterTypes verifies that hstore alone (no
+// enums/composites/ranges) still produces a RegisterTypes function (hstore needs
+// a codec registration), while ltree alone produces NONE — ltree's wire form is
+// text, so an unregistered OID scans into / encodes from a Go string.
 func TestExtensionTypeOnlyRegisterTypes(t *testing.T) {
-	req := &pluginv1.GenerateRequest{
-		OutDir: "gen/db",
-		Catalog: &irv1.Catalog{
-			Schemas: []*irv1.Schema{{
-				Name: "public",
-				Tables: []*irv1.Table{{
-					Name: &irv1.QualifiedName{Name: "docs"},
-					Columns: []*irv1.Column{
-						{Name: "path", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: "ltree"}, Nullable: false},
-					},
+	gen := func(t *testing.T, pgName string) string {
+		t.Helper()
+		req := &pluginv1.GenerateRequest{
+			OutDir: "gen/db",
+			Catalog: &irv1.Catalog{
+				Schemas: []*irv1.Schema{{
+					Name: "public",
+					Tables: []*irv1.Table{{
+						Name: &irv1.QualifiedName{Name: "docs"},
+						Columns: []*irv1.Column{
+							{Name: "c", Type: &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_SCALAR, PgName: pgName}},
+						},
+					}},
 				}},
-			}},
-		},
-	}
-	resp, err := Generate(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var models string
-	for _, f := range resp.GetFiles() {
-		if f.GetPath() == "models.go" {
-			models = string(f.GetContents())
+			},
 		}
+		resp, err := Generate(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range resp.GetFiles() {
+			if f.GetPath() == "models.go" {
+				return string(f.GetContents())
+			}
+		}
+		t.Fatal("models.go not found")
+		return ""
 	}
-	if !strings.Contains(models, "func RegisterTypes(") {
-		t.Errorf("expected RegisterTypes function for an extension-type-only catalog:\n%s", models)
+
+	hstoreModels := gen(t, "hstore")
+	if !strings.Contains(hstoreModels, "func RegisterTypes(") {
+		t.Errorf("expected RegisterTypes for an hstore-only catalog:\n%s", hstoreModels)
 	}
-	if !strings.Contains(models, `"ltree"`) {
-		t.Errorf("expected ltree registration:\n%s", models)
+	if !strings.Contains(hstoreModels, "pgtype.HstoreCodec{}") {
+		t.Errorf("expected hstore codec registration:\n%s", hstoreModels)
+	}
+
+	ltreeModels := gen(t, "ltree")
+	if strings.Contains(ltreeModels, "func RegisterTypes(") {
+		t.Errorf("ltree alone needs no registration, but RegisterTypes was emitted:\n%s", ltreeModels)
 	}
 }
 

@@ -100,21 +100,28 @@ func (a AppPerson) IsNull() bool { return false }
 var _ pgtype.CompositeIndexScanner = (*AppPerson)(nil)
 var _ pgtype.CompositeIndexGetter = AppPerson{}
 
-// RegisterTypes loads and registers the database's extension (hstore/ltree),
-// enum, composite, and custom range types (and their array types) on a
-// connection so those columns/params scan and encode into their Go types.
-// Wire it into pgxpool.Config.AfterConnect (it runs per connection).
+// RegisterTypes registers the database's hstore, enum, composite, and custom
+// range types (and their array types) on a connection so those columns/params
+// scan and encode into their Go types. Wire it into pgxpool.Config.AfterConnect
+// (it runs per connection).
 //
-// The order is dependency-safe: extension types come first (no deps), each
-// enum/composite/range is registered before its array type, a composite is
-// registered after every composite it has a field of (topological order), and
-// custom ranges come last (their subtypes are already registered), because
-// pgx's Conn.LoadType resolves a derived type only once its element/field/
-// subtype types are registered.
+// The LoadType order is dependency-safe: each enum/composite/range is registered
+// before its array type, a composite after every composite it has a field of
+// (topological order), and custom ranges last (their subtypes are already
+// registered) — pgx's Conn.LoadType resolves a derived type only once its
+// element/field/subtype types are registered. hstore is registered separately
+// (LoadType cannot load a non-array base type).
 func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
+	var hstoreOID, hstoreArrayOID uint32
+	if err := conn.QueryRow(ctx, "select oid, typarray from pg_type where typname = 'hstore'").Scan(&hstoreOID, &hstoreArrayOID); err != nil {
+		return fmt.Errorf("look up hstore oid: %w", err)
+	}
+	hstoreType := &pgtype.Type{Name: "hstore", OID: hstoreOID, Codec: pgtype.HstoreCodec{}}
+	conn.TypeMap().RegisterType(hstoreType)
+	if hstoreArrayOID != 0 {
+		conn.TypeMap().RegisterType(&pgtype.Type{Name: "_hstore", OID: hstoreArrayOID, Codec: &pgtype.ArrayCodec{ElementType: hstoreType}})
+	}
 	for _, name := range []string{
-		"hstore",
-		"ltree",
 		"app.user_status",
 		"app._user_status",
 		"app.address",
