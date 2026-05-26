@@ -84,9 +84,34 @@ If there are no changes, `generate` prints `no changes` and writes nothing.
 ## Library use
 
 ```go
-migs, _ := migrate.Load("migrations")
+migs, _ := migrate.Load("migrations")   // from an OS directory
 pool, _ := pgxpool.New(ctx, dsn)
 m := migrate.New(pool, migs)
 if err := m.Up(ctx); err != nil { /* ... */ }
 st, _ := m.Status(ctx)   // st.Applied, st.Pending, st.Drift
 ```
+
+### Embedded migrations + auto-apply on startup
+
+Embed the migration files in the binary and apply pending ones when the service
+boots — no separate migrate step, no files shipped alongside:
+
+```go
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+func main() {
+	pool, _ := pgxpool.New(ctx, dsn)
+	// loads embedded migrations (merged across the given filesystems,
+	// sorted by version) and applies all pending ones.
+	if err := migrate.Migrate(ctx, pool, migrationsFS); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+`migrate.Migrate(ctx, db, sources ...fs.FS)` accepts any `fs.FS` (so `embed.FS`,
+`os.DirFS`, or a test `fstest.MapFS`), walks each recursively for `*.sql`, merges
+them (duplicate versions across sources are an error), and runs `Up`. It is
+idempotent — already-applied migrations are skipped. Use `migrate.LoadFS(fsys)`
+if you want the `[]Migration` without applying.
