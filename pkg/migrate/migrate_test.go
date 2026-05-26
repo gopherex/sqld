@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"testing"
+	"testing/fstest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yaroher/sqld/internal/devdb"
@@ -164,6 +165,66 @@ func TestDrift(t *testing.T) {
 	}
 	if len(st.Drift) != 1 || st.Drift[0] != "0001" {
 		t.Fatalf("expected drift on 0001, got %+v", st.Drift)
+	}
+}
+
+func TestMigrateFS(t *testing.T) {
+	pool, done := newDB(t)
+	defer done()
+	ctx := context.Background()
+
+	// Mirror the //go:embed migrations layout: files under "migrations/".
+	fsys := fstest.MapFS{
+		"migrations/0001_widgets.sql": {Data: []byte("CREATE TABLE widgets(id int);")},
+	}
+
+	if err := Migrate(ctx, pool, fsys); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if !tableExists(t, pool, "widgets") {
+		t.Fatalf("widgets table should exist after Migrate")
+	}
+
+	// Status should show the migration as applied with nothing pending.
+	migs, err := LoadFS(fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := New(pool, migs).Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Applied) != 1 || st.Applied[0].Version != "0001" || len(st.Pending) != 0 {
+		t.Fatalf("after Migrate: %+v", st)
+	}
+
+	// Calling Migrate again must be a no-op (idempotent).
+	if err := Migrate(ctx, pool, fsys); err != nil {
+		t.Fatalf("second Migrate: %v", err)
+	}
+	st, err = New(pool, migs).Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Applied) != 1 || len(st.Pending) != 0 {
+		t.Fatalf("after second Migrate: %+v", st)
+	}
+}
+
+func TestMigrateDuplicateVersion(t *testing.T) {
+	pool, done := newDB(t)
+	defer done()
+	ctx := context.Background()
+
+	a := fstest.MapFS{
+		"migrations/0001_a.sql": {Data: []byte("CREATE TABLE a(id int);")},
+	}
+	b := fstest.MapFS{
+		"migrations/0001_b.sql": {Data: []byte("CREATE TABLE b(id int);")},
+	}
+
+	if err := Migrate(ctx, pool, a, b); err == nil {
+		t.Fatal("expected error for duplicate version across sources")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"time"
 
@@ -77,6 +78,42 @@ func New(db DBTX, migrations []Migration, opts ...Option) *Migrator {
 		opt(m)
 	}
 	return m
+}
+
+// Migrate loads migrations from one or more filesystems (merged, then sorted by
+// version) and applies all pending ones. It is intended for service startup,
+// e.g.:
+//
+//	//go:embed migrations/*.sql
+//	var migrationsFS embed.FS
+//
+//	if err := migrate.Migrate(ctx, pool, migrationsFS); err != nil { ... }
+//
+// *pgxpool.Pool satisfies DBTX. Duplicate versions across the merged sources are
+// an error. With no sources Migrate is a no-op and returns nil.
+func Migrate(ctx context.Context, db DBTX, sources ...fs.FS) error {
+	if len(sources) == 0 {
+		return nil
+	}
+
+	var migs []Migration
+	for _, fsys := range sources {
+		loaded, err := LoadFS(fsys)
+		if err != nil {
+			return err
+		}
+		migs = append(migs, loaded...)
+	}
+
+	seen := make(map[string]struct{}, len(migs))
+	for _, mig := range migs {
+		if _, dup := seen[mig.Version]; dup {
+			return fmt.Errorf("migrate: duplicate migration version %q across sources", mig.Version)
+		}
+		seen[mig.Version] = struct{}{}
+	}
+
+	return New(db, migs).Up(ctx)
 }
 
 func sortedByVersion(in []Migration) []Migration {
