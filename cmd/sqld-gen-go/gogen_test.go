@@ -613,6 +613,193 @@ func TestPackageFromOutDir(t *testing.T) {
 // strPtr is a helper to make a *string from a literal.
 func strPtr(s string) *string { return &s }
 
+// genQueriesFile runs Generate and returns the queries.go contents, failing the
+// test if it is missing or not valid Go.
+func genQueriesFile(t *testing.T, req *pluginv1.GenerateRequest) string {
+	t.Helper()
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var q string
+	for _, f := range resp.GetFiles() {
+		if f.GetPath() == "queries.go" {
+			q = string(f.GetContents())
+			if _, err := format.Source(f.GetContents()); err != nil {
+				t.Fatalf("queries.go not valid Go: %v\n%s", err, q)
+			}
+		}
+	}
+	if q == "" {
+		t.Fatal("queries.go not found in response")
+	}
+	return q
+}
+
+// TestGenerateCopyFrom verifies a :copyfrom INSERT produces a pgx.CopyFrom-based
+// bulk method: the DBTX gains CopyFrom, the method takes []XParams (one field
+// per target column, typed from the catalog) and calls CopyFrom with a
+// pgx.Identifier + pgx.CopyFromSlice. WithTx must also be present.
+func TestGenerateCopyFrom(t *testing.T) {
+	req := &pluginv1.GenerateRequest{
+		OutDir: "gen/db",
+		Catalog: &irv1.Catalog{Schemas: []*irv1.Schema{{Name: "app", Tables: []*irv1.Table{{
+			Name: &irv1.QualifiedName{Schema: "app", Name: "roles"},
+			Columns: []*irv1.Column{
+				{Id: "app.roles.id", Name: "id", Type: &irv1.TypeRef{PgName: "int8"}},
+				{Id: "app.roles.name", Name: "name", Type: &irv1.TypeRef{PgName: "text"}},
+			},
+		}}}}},
+		Queries: []*pluginv1.Query{{
+			Name:    "BulkCreateRoles",
+			Sql:     "INSERT INTO app.roles (name) VALUES ($1);",
+			Command: pluginv1.QueryCommand_QUERY_COMMAND_COPY_FROM,
+			// :copyfrom params are NOT seeded with types by the host; the
+			// generator resolves the column type from the catalog instead.
+			Parameters: []*pluginv1.QueryParameter{{Number: 1, Name: "name"}},
+			Ast: &irv1.Statement{Statement: &irv1.Statement_Insert{Insert: &irv1.InsertStmt{
+				TableName: &irv1.QualifiedName{Schema: "app", Name: "roles"},
+				Columns:   []string{"name"},
+			}}},
+		}},
+	}
+	q := genQueriesFile(t, req)
+
+	for _, want := range []string{
+		// DBTX is extended with CopyFrom.
+		"CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error)",
+		// WithTx is always present.
+		"func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }",
+		// Params struct field typed from the catalog (text → string).
+		"type BulkCreateRolesParams struct",
+		"Name string",
+		// Bulk method using pgx.Identifier + CopyFromSlice.
+		"func (q *Queries) BulkCreateRoles(ctx context.Context, arg []BulkCreateRolesParams) (int64, error)",
+		`q.db.CopyFrom(ctx, pgx.Identifier{"app", "roles"}, []string{"name"}, pgx.CopyFromSlice(len(arg), func(i int) ([]any, error) {`,
+		"return []any{arg[i].Name}, nil",
+	} {
+		if !strings.Contains(q, want) {
+			t.Errorf("queries.go missing %q\n%s", want, q)
+		}
+	}
+	// A query set with no :batchexec must NOT add SendBatch to DBTX.
+	if strings.Contains(q, "SendBatch(ctx context.Context, b *pgx.Batch)") {
+		t.Errorf("DBTX should not gain SendBatch without a :batchexec query\n%s", q)
+	}
+}
+
+// TestGenerateBatchExec verifies a :batchexec DML produces a pgx.Batch-based
+// method: the DBTX gains SendBatch, a typed BatchResults wrapper is emitted with
+// Exec/Close, and the method queues the statement once per params element.
+func TestGenerateBatchExec(t *testing.T) {
+	req := &pluginv1.GenerateRequest{
+		OutDir:  "gen/db",
+		Catalog: &irv1.Catalog{},
+		Queries: []*pluginv1.Query{{
+			Name:    "BulkTouchUsers",
+			Sql:     "UPDATE app.users SET status = $1 WHERE id = $2;",
+			Command: pluginv1.QueryCommand_QUERY_COMMAND_BATCH_EXEC,
+			Parameters: []*pluginv1.QueryParameter{
+				{Number: 1, Name: "status", Type: &irv1.TypeRef{PgName: "text"}},
+				{Number: 2, Name: "id", Type: &irv1.TypeRef{PgName: "int8"}},
+			},
+		}},
+	}
+	q := genQueriesFile(t, req)
+
+	for _, want := range []string{
+		// DBTX is extended with SendBatch.
+		"SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults",
+		"func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }",
+		// SQL const + params struct.
+		"const bulkTouchUsersSQL = `UPDATE app.users SET status = $1 WHERE id = $2;`",
+		"type BulkTouchUsersParams struct",
+		"Status string",
+		"ID     int64",
+		// Typed BatchResults wrapper.
+		"type BulkTouchUsersBatchResults struct",
+		"br     pgx.BatchResults",
+		// Method queues + SendBatch.
+		"func (q *Queries) BulkTouchUsers(ctx context.Context, arg []BulkTouchUsersParams) *BulkTouchUsersBatchResults",
+		"batch := &pgx.Batch{}",
+		"batch.Queue(bulkTouchUsersSQL, arg[i].Status, arg[i].ID)",
+		"q.db.SendBatch(ctx, batch)",
+		// Exec/Close on the wrapper.
+		"func (b *BulkTouchUsersBatchResults) Exec(f func(int, error))",
+		"b.br.Exec()",
+		"func (b *BulkTouchUsersBatchResults) Close() error",
+	} {
+		if !strings.Contains(q, want) {
+			t.Errorf("queries.go missing %q\n%s", want, q)
+		}
+	}
+	// A query set with no :copyfrom must NOT add CopyFrom to DBTX.
+	if strings.Contains(q, "CopyFrom(ctx context.Context, tableName pgx.Identifier") {
+		t.Errorf("DBTX should not gain CopyFrom without a :copyfrom query\n%s", q)
+	}
+}
+
+// TestWithTxAndPlainDBTX verifies WithTx is always emitted and that a plain
+// query set (no :copyfrom/:batchexec) keeps DBTX at Exec/Query/QueryRow only.
+func TestWithTxAndPlainDBTX(t *testing.T) {
+	req := &pluginv1.GenerateRequest{
+		OutDir:  "gen/db",
+		Catalog: &irv1.Catalog{},
+		Queries: []*pluginv1.Query{{
+			Name:       "DeleteUser",
+			Sql:        "DELETE FROM app.users WHERE id = $1",
+			Command:    pluginv1.QueryCommand_QUERY_COMMAND_EXEC,
+			Parameters: []*pluginv1.QueryParameter{{Number: 1, Name: "id", Type: &irv1.TypeRef{PgName: "int8"}}},
+		}},
+	}
+	q := genQueriesFile(t, req)
+
+	if !strings.Contains(q, "func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }") {
+		t.Errorf("WithTx not emitted\n%s", q)
+	}
+	if strings.Contains(q, "CopyFrom(ctx context.Context, tableName pgx.Identifier") {
+		t.Errorf("plain DBTX should not have CopyFrom\n%s", q)
+	}
+	if strings.Contains(q, "SendBatch(ctx context.Context, b *pgx.Batch)") {
+		t.Errorf("plain DBTX should not have SendBatch\n%s", q)
+	}
+}
+
+// TestGenerateExecResultAndLastID verifies :execresult returns pgconn.CommandTag
+// and :execlastid is treated like :exec with a not-supported note.
+func TestGenerateExecResultAndLastID(t *testing.T) {
+	req := &pluginv1.GenerateRequest{
+		OutDir:  "gen/db",
+		Catalog: &irv1.Catalog{},
+		Queries: []*pluginv1.Query{
+			{
+				Name:       "TouchUser",
+				Sql:        "UPDATE app.users SET status = $1 WHERE id = $2",
+				Command:    pluginv1.QueryCommand_QUERY_COMMAND_EXEC_RESULT,
+				Parameters: []*pluginv1.QueryParameter{{Number: 1, Name: "status", Type: &irv1.TypeRef{PgName: "text"}}, {Number: 2, Name: "id", Type: &irv1.TypeRef{PgName: "int8"}}},
+			},
+			{
+				Name:       "InsertThing",
+				Sql:        "INSERT INTO app.things (name) VALUES ($1)",
+				Command:    pluginv1.QueryCommand_QUERY_COMMAND_EXEC_LASTID,
+				Parameters: []*pluginv1.QueryParameter{{Number: 1, Name: "name", Type: &irv1.TypeRef{PgName: "text"}}},
+			},
+		},
+	}
+	q := genQueriesFile(t, req)
+
+	for _, want := range []string{
+		"func (q *Queries) TouchUser(ctx context.Context, arg TouchUserParams) (pgconn.CommandTag, error)",
+		"return q.db.Exec(ctx, touchUserSQL",
+		"note: :execlastid is not supported on PostgreSQL; use RETURNING with :one",
+		"func (q *Queries) InsertThing(ctx context.Context, name string) error",
+	} {
+		if !strings.Contains(q, want) {
+			t.Errorf("queries.go missing %q\n%s", want, q)
+		}
+	}
+}
+
 // normalizeSpaces collapses runs of whitespace to single spaces and trims ends.
 func normalizeSpaces(s string) string {
 	return strings.Join(strings.Fields(s), " ")

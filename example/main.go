@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yaroher/sqld/example/gen/db"
@@ -63,4 +64,24 @@ func main() {
 		OrderBy:  db.SearchUsersOrderByEmail,
 		OrderDir: db.OrderDesc,
 	})
+
+	// WithTx: the same generated methods run inside a transaction. pgx.Tx
+	// satisfies the generated DBTX (Exec/Query/QueryRow + CopyFrom/SendBatch).
+	// Compile-only: a nil pgx.Tx is never executed against here.
+	var tx pgx.Tx
+	qtx := q.WithTx(tx)
+
+	// :copyfrom bulk insert via the COPY protocol → number of rows copied.
+	_, _ = qtx.BulkCreateRoles(ctx, []db.BulkCreateRolesParams{
+		{Name: "admin"},
+		{Name: "user"},
+	})
+
+	// :batchexec batched DML via pgx.Batch → typed BatchResults wrapper.
+	res := qtx.BulkTouchUsers(ctx, []db.BulkTouchUsersParams{
+		{ID: 1, Status: db.AppUserStatusActive},
+		{ID: 2, Status: db.AppUserStatusInactive},
+	})
+	res.Exec(func(i int, err error) { _ = i; _ = err })
+	_ = res.Close()
 }

@@ -74,7 +74,7 @@ func Generate(req *pluginv1.GenerateRequest) (*pluginv1.GenerateResponse, error)
 
 	// queries.go — only when there are queries
 	if qs := req.GetQueries(); len(qs) > 0 {
-		qBytes, qDiags := generateQueries(pkg, qs, req.GetAnnotations(), reg, ov)
+		qBytes, qDiags := generateQueries(pkg, qs, req.GetAnnotations(), req.GetCatalog(), reg, ov)
 		diagnostics = append(diagnostics, qDiags...)
 		files = append(files, &pluginv1.GeneratedFile{
 			Path:     "queries.go",
@@ -696,15 +696,41 @@ type qInfo struct {
 	cols            []qField
 	hasParamStruct  bool
 	paramStructName string
+
+	// copyFrom carries the parsed INSERT target for a :copyfrom query (nil
+	// otherwise): the schema-qualified table identity and the target columns.
+	copyFrom *copyFromInfo
 }
 
-func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.AnnotationValue, reg *udtRegistry, ov overrides) ([]byte, []*pluginv1.Diagnostic) {
+// copyFromInfo describes the INSERT target of a :copyfrom query. tableParts is
+// the pgx.Identifier path (schema + table, or just table when unqualified) and
+// columns are the target column names, with one params field per column.
+type copyFromInfo struct {
+	tableParts []string
+	columns    []string
+}
+
+func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.AnnotationValue, catalog *irv1.Catalog, reg *udtRegistry, ov overrides) ([]byte, []*pluginv1.Diagnostic) {
 	// Index annotations by query name.
 	annotByQuery := make(map[string][]*irv1.AnnotationValue)
 	for _, a := range annotations {
 		if t := a.GetTarget(); t != nil && t.GetQueryName() != "" {
 			qn := t.GetQueryName()
 			annotByQuery[qn] = append(annotByQuery[qn], a)
+		}
+	}
+
+	// Index catalog columns by their fully-qualified id ("schema.table.column")
+	// so :copyfrom can resolve the Go type of each target column from the table
+	// (the host does not seed copyfrom parameter types).
+	colByID := make(map[string]*irv1.Column)
+	for _, schema := range catalog.GetSchemas() {
+		for _, table := range schema.GetTables() {
+			for _, col := range table.GetColumns() {
+				if id := col.GetId(); id != "" {
+					colByID[id] = col
+				}
+			}
 		}
 	}
 
@@ -738,9 +764,21 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 	var staticEntries []staticEntry
 	var dynamicEntries []dynamicEntry
 
+	// Track whether any :copyfrom or :batchexec query exists so the generated
+	// DBTX interface is extended with CopyFrom/SendBatch (only when needed, to
+	// avoid over-constraining the interface for plain query sets).
+	var needCopyFrom, needBatch bool
+
 	for _, q := range queries {
 		qAnns := annotByQuery[q.GetName()]
 		isDynamic := isDynamicQuery(q, qAnns)
+
+		switch q.GetCommand() {
+		case pluginv1.QueryCommand_QUERY_COMMAND_COPY_FROM:
+			needCopyFrom = true
+		case pluginv1.QueryCommand_QUERY_COMMAND_BATCH_EXEC:
+			needBatch = true
+		}
 
 		qCols := q.GetColumns()
 		var cols []qField
@@ -766,6 +804,26 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 		methodName := pascal(q.GetName())
 		constName := lowerCamel(q.GetName()) + "SQL"
 
+		// :copyfrom resolves its params from the INSERT target columns in the
+		// catalog (the host does not seed copyfrom parameter types). One params
+		// field per target column, typed from the table.
+		if q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_COPY_FROM {
+			cf, params, imps := buildCopyFrom(q, colByID, reg, ov)
+			allImports = append(allImports, imps...)
+			staticEntries = append(staticEntries, staticEntry{qi: qInfo{
+				methodName:      methodName,
+				constName:       constName,
+				sql:             q.GetSql(),
+				command:         q.GetCommand(),
+				params:          params,
+				cols:            cols,
+				hasParamStruct:  true, // copyfrom always takes []XParams
+				paramStructName: methodName + "Params",
+				copyFrom:        cf,
+			}})
+			continue
+		}
+
 		var params []qParam
 		for _, p := range q.GetParameters() {
 			pName := p.GetName()
@@ -782,6 +840,12 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 			params = append(params, qParam{goName: lowerCamel(pName), goType: gt})
 		}
 
+		// :batchexec always takes a []XParams slice, regardless of param count.
+		hasParamStruct := len(params) >= 2
+		if q.GetCommand() == pluginv1.QueryCommand_QUERY_COMMAND_BATCH_EXEC {
+			hasParamStruct = len(params) > 0
+		}
+
 		staticEntries = append(staticEntries, staticEntry{qi: qInfo{
 			methodName:      methodName,
 			constName:       constName,
@@ -789,12 +853,17 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 			command:         q.GetCommand(),
 			params:          params,
 			cols:            cols,
-			hasParamStruct:  len(params) >= 2,
+			hasParamStruct:  hasParamStruct,
 			paramStructName: methodName + "Params",
 		}})
 	}
 
 	var sb strings.Builder
+	// :batchexec wrappers reference errors.New for the already-closed guard.
+	if needBatch {
+		allImports = append(allImports, "errors")
+	}
+
 	sb.WriteString("// Code generated by sqld-gen-go. DO NOT EDIT.\n\n")
 	sb.WriteString(fmt.Sprintf("package %s\n\n", pkg))
 
@@ -820,15 +889,29 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 	}
 	sb.WriteString(")\n\n")
 
-	// DBTX interface
+	// DBTX interface. Exec/Query/QueryRow are always present; CopyFrom and
+	// SendBatch are added only when a :copyfrom / :batchexec query exists, so a
+	// plain query set's DBTX is not over-constrained. *pgxpool.Pool, *pgx.Conn,
+	// and pgx.Tx all satisfy the extended interface.
 	sb.WriteString("type DBTX interface {\n")
 	sb.WriteString("\tExec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)\n")
 	sb.WriteString("\tQuery(ctx context.Context, sql string, args ...any) (pgx.Rows, error)\n")
 	sb.WriteString("\tQueryRow(ctx context.Context, sql string, args ...any) pgx.Row\n")
+	if needCopyFrom {
+		sb.WriteString("\tCopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error)\n")
+	}
+	if needBatch {
+		sb.WriteString("\tSendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults\n")
+	}
 	sb.WriteString("}\n\n")
 
 	sb.WriteString("type Queries struct {\n\tdb DBTX\n}\n\n")
 	sb.WriteString("func New(db DBTX) *Queries { return &Queries{db: db} }\n\n")
+
+	// WithTx returns a *Queries that runs against the given transaction. pgx.Tx
+	// satisfies DBTX (it has Exec/Query/QueryRow and, when present, CopyFrom/
+	// SendBatch), so the same generated methods work inside a transaction.
+	sb.WriteString("func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }\n\n")
 
 	// Emit shared OrderDir type once if any query has @orderby.
 	hasAnyOrderBy := false
@@ -863,6 +946,17 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 }
 
 func writeQueryCode(sb *strings.Builder, qi qInfo) {
+	// :copyfrom and :batchexec have a distinct shape (bulk insert via the COPY
+	// protocol, batched DML via pgx.Batch) — dispatch to their dedicated writers.
+	switch qi.command {
+	case pluginv1.QueryCommand_QUERY_COMMAND_COPY_FROM:
+		writeCopyFromCode(sb, qi)
+		return
+	case pluginv1.QueryCommand_QUERY_COMMAND_BATCH_EXEC:
+		writeBatchExecCode(sb, qi)
+		return
+	}
+
 	// SQL const — backtick-safe: escape any backtick in SQL
 	sqlLit := strings.ReplaceAll(qi.sql, "`", "`+\"`\"+`")
 	sb.WriteString(fmt.Sprintf("const %s = `%s`\n\n", qi.constName, sqlLit))
@@ -924,12 +1018,196 @@ func writeQueryCode(sb *strings.Builder, qi qInfo) {
 		sb.WriteString(fmt.Sprintf("\ttag, err := q.db.Exec(ctx, %s%s)\n", qi.constName, buildArgList(qi)))
 		sb.WriteString("\treturn tag.RowsAffected(), err\n}\n\n")
 
+	case qi.command == pluginv1.QueryCommand_QUERY_COMMAND_EXEC_RESULT:
+		// :execresult returns the raw pgconn.CommandTag from Exec.
+		sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context%s) (pgconn.CommandTag, error) {\n",
+			qi.methodName, paramSig))
+		sb.WriteString(fmt.Sprintf("\treturn q.db.Exec(ctx, %s%s)\n", qi.constName, buildArgList(qi)))
+		sb.WriteString("}\n\n")
+
+	case qi.command == pluginv1.QueryCommand_QUERY_COMMAND_EXEC_LASTID:
+		// :execlastid is MySQL-only (LastInsertId). PostgreSQL has no such
+		// concept, so treat it like :exec and leave a note steering users to
+		// RETURNING + :one.
+		sb.WriteString(fmt.Sprintf("// note: :execlastid is not supported on PostgreSQL; use RETURNING with :one\n"))
+		sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context%s) error {\n",
+			qi.methodName, paramSig))
+		sb.WriteString(fmt.Sprintf("\t_, err := q.db.Exec(ctx, %s%s)\n", qi.constName, buildArgList(qi)))
+		sb.WriteString("\treturn err\n}\n\n")
+
 	default: // :exec and others
 		sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context%s) error {\n",
 			qi.methodName, paramSig))
 		sb.WriteString(fmt.Sprintf("\t_, err := q.db.Exec(ctx, %s%s)\n", qi.constName, buildArgList(qi)))
 		sb.WriteString("\treturn err\n}\n\n")
 	}
+}
+
+// buildCopyFrom resolves a :copyfrom query's INSERT target (table identity +
+// target columns) from its parsed AST, and builds one params field per target
+// column typed from the catalog table. The host does not seed copyfrom
+// parameter types, so column types come from colByID (keyed by the column id
+// "schema.table.column"); unresolved columns fall back to `any`.
+func buildCopyFrom(q *pluginv1.Query, colByID map[string]*irv1.Column, reg *udtRegistry, ov overrides) (*copyFromInfo, []qParam, []string) {
+	ins := q.GetAst().GetInsert()
+
+	// Table identity: schema + name (or just name when unqualified). Prefer the
+	// QualifiedName (TableName); fall back to the ObjectRef's name.
+	var schema, table string
+	if tn := ins.GetTableName(); tn != nil {
+		schema, table = tn.GetSchema(), tn.GetName()
+	} else if ref := ins.GetTable().GetName(); ref != nil {
+		schema, table = ref.GetSchema(), ref.GetName()
+	}
+	var tableParts []string
+	if schema != "" {
+		tableParts = append(tableParts, schema)
+	}
+	tableParts = append(tableParts, table)
+
+	columns := ins.GetColumns()
+	cf := &copyFromInfo{tableParts: tableParts, columns: columns}
+
+	var params []qParam
+	var imports []string
+	for _, colName := range columns {
+		// Build the column id from the resolved table identity.
+		colID := table + "." + colName
+		if schema != "" {
+			colID = schema + "." + colID
+		}
+		var gt string
+		if col, ok := colByID[colID]; ok {
+			t, imps := resolveGoParamType(reg, ov, col.GetId(), col.GetType(), col.GetNullable())
+			gt = t
+			imports = append(imports, imps...)
+		} else {
+			// Best-effort: unresolved column → any.
+			gt = "any"
+		}
+		params = append(params, qParam{goName: lowerCamel(colName), goType: gt})
+	}
+	return cf, params, imports
+}
+
+// writeCopyFromCode emits a :copyfrom bulk-insert method backed by pgx.CopyFrom.
+// It takes a slice of params (one element per row) and streams them through the
+// COPY protocol via pgx.CopyFromSlice. Returns the number of rows copied.
+func writeCopyFromCode(sb *strings.Builder, qi qInfo) {
+	cf := qi.copyFrom
+
+	// Params struct: one field per target column.
+	sb.WriteString(fmt.Sprintf("type %s struct {\n", qi.paramStructName))
+	for _, p := range qi.params {
+		sb.WriteString(fmt.Sprintf("\t%s %s\n", pascal(p.goName), p.goType))
+	}
+	sb.WriteString("}\n\n")
+
+	// pgx.Identifier{"schema","table"} (or {"table"} when unqualified).
+	var idParts []string
+	for _, part := range cf.tableParts {
+		idParts = append(idParts, fmt.Sprintf("%q", part))
+	}
+	identLit := "pgx.Identifier{" + strings.Join(idParts, ", ") + "}"
+
+	// []string{"c1","c2",...} of target columns.
+	var colLits []string
+	for _, c := range cf.columns {
+		colLits = append(colLits, fmt.Sprintf("%q", c))
+	}
+	colsLit := "[]string{" + strings.Join(colLits, ", ") + "}"
+
+	// row values: []any{arg[i].C1, arg[i].C2, ...}
+	var valParts []string
+	for _, p := range qi.params {
+		valParts = append(valParts, "arg[i]."+pascal(p.goName))
+	}
+	valsLit := strings.Join(valParts, ", ")
+
+	sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context, arg []%s) (int64, error) {\n",
+		qi.methodName, qi.paramStructName))
+	sb.WriteString(fmt.Sprintf("\treturn q.db.CopyFrom(ctx, %s, %s, pgx.CopyFromSlice(len(arg), func(i int) ([]any, error) {\n",
+		identLit, colsLit))
+	sb.WriteString(fmt.Sprintf("\t\treturn []any{%s}, nil\n", valsLit))
+	sb.WriteString("\t}))\n")
+	sb.WriteString("}\n\n")
+}
+
+// writeBatchExecCode emits a :batchexec method backed by pgx.Batch. It queues
+// the statement once per params element and sends the whole batch via
+// SendBatch, returning a typed BatchResults wrapper whose Exec walks each
+// queued result and Close finishes the batch.
+func writeBatchExecCode(sb *strings.Builder, qi qInfo) {
+	// SQL const — backtick-safe.
+	sqlLit := strings.ReplaceAll(qi.sql, "`", "`+\"`\"+`")
+	sb.WriteString(fmt.Sprintf("const %s = `%s`\n\n", qi.constName, sqlLit))
+
+	// Params struct: one field per query parameter.
+	if len(qi.params) > 0 {
+		sb.WriteString(fmt.Sprintf("type %s struct {\n", qi.paramStructName))
+		for _, p := range qi.params {
+			sb.WriteString(fmt.Sprintf("\t%s %s\n", pascal(p.goName), p.goType))
+		}
+		sb.WriteString("}\n\n")
+	}
+
+	resultsType := qi.methodName + "BatchResults"
+
+	// BatchResults wrapper type.
+	sb.WriteString(fmt.Sprintf("type %s struct {\n", resultsType))
+	sb.WriteString("\tbr     pgx.BatchResults\n")
+	sb.WriteString("\ttot    int\n")
+	sb.WriteString("\tclosed bool\n")
+	sb.WriteString("}\n\n")
+
+	// Queue arguments per element.
+	var queueArgs string
+	if len(qi.params) > 0 {
+		var parts []string
+		for _, p := range qi.params {
+			parts = append(parts, "arg[i]."+pascal(p.goName))
+		}
+		queueArgs = ", " + strings.Join(parts, ", ")
+	}
+
+	argType := "[]" + qi.paramStructName
+	if len(qi.params) == 0 {
+		// No params: queue the bare SQL once per element of a []struct{}.
+		argType = "[]struct{}"
+	}
+
+	sb.WriteString(fmt.Sprintf("func (q *Queries) %s(ctx context.Context, arg %s) *%s {\n",
+		qi.methodName, argType, resultsType))
+	sb.WriteString("\tbatch := &pgx.Batch{}\n")
+	sb.WriteString("\tfor i := range arg {\n")
+	if len(qi.params) > 0 {
+		sb.WriteString(fmt.Sprintf("\t\tbatch.Queue(%s%s)\n", qi.constName, queueArgs))
+	} else {
+		sb.WriteString("\t\t_ = i\n")
+		sb.WriteString(fmt.Sprintf("\t\tbatch.Queue(%s)\n", qi.constName))
+	}
+	sb.WriteString("\t}\n")
+	sb.WriteString(fmt.Sprintf("\treturn &%s{br: q.db.SendBatch(ctx, batch), tot: len(arg)}\n", resultsType))
+	sb.WriteString("}\n\n")
+
+	// Exec walks each queued statement's result, invoking f(i, err) per element.
+	recv := compositeReceiver(resultsType)
+	sb.WriteString(fmt.Sprintf("func (%s *%s) Exec(f func(int, error)) {\n", recv, resultsType))
+	sb.WriteString(fmt.Sprintf("\tdefer %s.br.Close()\n", recv))
+	sb.WriteString(fmt.Sprintf("\tfor i := 0; i < %s.tot; i++ {\n", recv))
+	sb.WriteString(fmt.Sprintf("\t\tif %s.closed {\n", recv))
+	sb.WriteString("\t\t\tif f != nil {\n\t\t\t\tf(i, errors.New(\"batch already closed\"))\n\t\t\t}\n")
+	sb.WriteString("\t\t\tcontinue\n\t\t}\n")
+	sb.WriteString(fmt.Sprintf("\t\t_, err := %s.br.Exec()\n", recv))
+	sb.WriteString("\t\tif f != nil {\n\t\t\tf(i, err)\n\t\t}\n")
+	sb.WriteString("\t}\n")
+	sb.WriteString("}\n\n")
+
+	// Close finishes the batch.
+	sb.WriteString(fmt.Sprintf("func (%s *%s) Close() error {\n", recv, resultsType))
+	sb.WriteString(fmt.Sprintf("\t%s.closed = true\n", recv))
+	sb.WriteString(fmt.Sprintf("\treturn %s.br.Close()\n", recv))
+	sb.WriteString("}\n\n")
 }
 
 func isExecCommand(cmd pluginv1.QueryCommand) bool {
