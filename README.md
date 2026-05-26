@@ -223,20 +223,30 @@ service Generator {
 The host feeds the plugin a `Catalog` (full schema IR) plus typed `Query` objects (parameters + result columns already inferred). Two transports:
 
 - **Binary / command** — the plugin is a native executable; the host communicates via stdio-framed protobuf.
-- **WASM** — the plugin exports `get_info` / `generate` as WASM functions (wazero runtime); same message format.
+- **WASM** — the plugin is a WASI command module (`.wasm`); the host runs it via [wazero](https://wazero.io) with the same stdio-framed protobuf protocol. No external runtime is required — wazero is embedded.
+
+Both transports use an identical wire format: `stdin = [1-byte method tag] [proto-encoded request]`, `stdout = [proto-encoded response]`. A plugin compiled for one transport works on the other without modification.
 
 Configure a plugin in `sqld.yaml`:
 
 ```yaml
 plugins:
   - name: my-gen
-    binary: ./bin/my-gen   # or: wasm: ./bin/my-gen.wasm
+    binary: ./bin/my-gen   # native binary transport
+    # wasm: ./bin/my-gen.wasm  # WASM/wazero transport
     out: gen/
     options:               # opaque bytes, decoded by the plugin
       package: mypackage
 ```
 
-The built-in `sqld-gen-go` is itself a plugin and dogfoods this contract.
+The built-in `sqld-gen-go` is itself a plugin and dogfoods this contract. It can be built as a native binary (`make build`) **or** as a WASM module (`make build-wasm`):
+
+```sh
+make build-wasm          # → bin/sqld-gen-go.wasm  (GOOS=wasip1 GOARCH=wasm)
+make example-wasm        # generate example/gen/dbwasm/ via the WASM transport
+```
+
+`example/sqld.wasm.yaml` is an example config that drives `sqld-gen-go.wasm` through wazero and writes the output to `example/gen/dbwasm/` (package `dbwasm`) — demonstrating the language-agnostic plugin contract: any language that can read/write stdio-framed protobuf and compile to WASI can be used as a sqld plugin.
 
 ---
 

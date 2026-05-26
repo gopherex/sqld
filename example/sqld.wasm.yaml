@@ -1,0 +1,19 @@
+version: "1"
+engine: postgresql
+options:
+  defaultSchema: public
+schema:
+  - file: example/schema.sql
+queries:
+  - dir: example/queries
+migrations:
+  - dir: example/migrations
+plugins:
+  - name: go
+    wasm: ./bin/sqld-gen-go.wasm
+    out: example/gen/dbwasm
+    options:
+      package: dbwasm
+      overrides:
+        "app.kitchen_sink.c_jsonb": map[string]any
+        uuid: github.com/google/uuid.UUID
