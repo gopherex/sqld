@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/aarondl/opt/null"
-	"github.com/yaroher/sqld/bob/example/gen/bob/models"
+	"github.com/yaroher/sqld/cmd/sqld-gen-bob/example/gen/bob/models"
 	"github.com/yaroher/sqld/example/gen/db"
 )
 

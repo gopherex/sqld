@@ -15,7 +15,7 @@ plugins:
   # config only adds the bob layer.
   - name: bob
     binary: ./bin/sqld-gen-bob
-    out: bob/example/gen/bob
+    out: cmd/sqld-gen-bob/example/gen/bob
     options:
       package: models
       typesPackage: github.com/yaroher/sqld/example/gen/db

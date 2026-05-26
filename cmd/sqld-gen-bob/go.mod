@@ -1,8 +1,8 @@
-module github.com/yaroher/sqld/bob
+module github.com/yaroher/sqld/cmd/sqld-gen-bob
 
 go 1.25.0
 
-replace github.com/yaroher/sqld => ../
+replace github.com/yaroher/sqld => ../../
 
 require (
 	github.com/aarondl/opt v0.0.0-20250607033636-982744e1bd65
