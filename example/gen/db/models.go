@@ -58,18 +58,64 @@ func (a AppAddress) IsNull() bool { return false }
 var _ pgtype.CompositeIndexScanner = (*AppAddress)(nil)
 var _ pgtype.CompositeIndexGetter = AppAddress{}
 
-// RegisterTypes loads and registers the database's composite types (and their
-// array types) on a connection so composite columns/params scan and encode
-// into their Go structs. Wire it into pgxpool.Config.AfterConnect (it runs
-// per connection).
+type AppPerson struct {
+	Name   string
+	Home   AppAddress
+	Status AppUserStatus
+}
+
+func (a *AppPerson) ScanIndex(i int) any {
+	switch i {
+	case 0:
+		return &a.Name
+	case 1:
+		return &a.Home
+	case 2:
+		return &a.Status
+	}
+	return nil
+}
+
+func (a *AppPerson) ScanNull() error {
+	*a = AppPerson{}
+	return nil
+}
+
+func (a AppPerson) Index(i int) any {
+	switch i {
+	case 0:
+		return a.Name
+	case 1:
+		return a.Home
+	case 2:
+		return a.Status
+	}
+	return nil
+}
+
+func (a AppPerson) IsNull() bool { return false }
+
+var _ pgtype.CompositeIndexScanner = (*AppPerson)(nil)
+var _ pgtype.CompositeIndexGetter = AppPerson{}
+
+// RegisterTypes loads and registers the database's enum and composite types
+// (and their array types) on a connection so enum-array and composite
+// columns/params scan and encode into their Go types. Wire it into
+// pgxpool.Config.AfterConnect (it runs per connection).
 //
-// Each composite is registered before its array type because pgx's
-// Conn.LoadType resolves an array type (e.g. "app._address") only once its
-// element type ("app.address") is already registered on the connection.
+// The order is dependency-safe: each enum/composite is registered before its
+// array type, and a composite is registered after every composite it has a
+// field of (topological order), because pgx's Conn.LoadType resolves an array
+// type only once its element is registered and a composite only once all of
+// its field types are registered.
 func RegisterTypes(ctx context.Context, conn *pgx.Conn) error {
 	for _, name := range []string{
+		"app.user_status",
+		"app._user_status",
 		"app.address",
 		"app._address",
+		"app.person",
+		"app._person",
 	} {
 		t, err := conn.LoadType(ctx, name)
 		if err != nil {
@@ -93,6 +139,8 @@ type AppProfiles struct {
 	Bio           *string
 	Address       *AppAddress
 	PrevAddresses []AppAddress
+	StatusHistory []AppUserStatus
+	Owner         AppPerson
 }
 
 type AppOrders struct {

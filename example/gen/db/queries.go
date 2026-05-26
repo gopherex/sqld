@@ -151,6 +151,32 @@ func (q *Queries) GetPrevAddresses(ctx context.Context, userID int64) (GetPrevAd
 	return i, err
 }
 
+const getStatusHistorySQL = `SELECT status_history FROM app.profiles WHERE user_id = $1;`
+
+type GetStatusHistoryRow struct {
+	StatusHistory []AppUserStatus
+}
+
+func (q *Queries) GetStatusHistory(ctx context.Context, userID int64) (GetStatusHistoryRow, error) {
+	row := q.db.QueryRow(ctx, getStatusHistorySQL, userID)
+	var i GetStatusHistoryRow
+	err := row.Scan(&i.StatusHistory)
+	return i, err
+}
+
+const getOwnerSQL = `SELECT owner FROM app.profiles WHERE user_id = $1;`
+
+type GetOwnerRow struct {
+	Owner AppPerson
+}
+
+func (q *Queries) GetOwner(ctx context.Context, userID int64) (GetOwnerRow, error) {
+	row := q.db.QueryRow(ctx, getOwnerSQL, userID)
+	var i GetOwnerRow
+	err := row.Scan(&i.Owner)
+	return i, err
+}
+
 const setAddressSQL = `UPDATE app.profiles SET address = $1 WHERE user_id = $2;`
 
 type SetAddressParams struct {

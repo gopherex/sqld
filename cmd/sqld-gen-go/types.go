@@ -138,6 +138,29 @@ func isCompositeType(reg *udtRegistry, t *irv1.TypeRef) bool {
 	return false
 }
 
+// compositeDepName returns the bare name of the composite type that t depends
+// on, or "" if t does not (transitively) resolve to a composite. It follows
+// array element types (a field of `address[]` depends on `address`) and domains
+// (transparently, to their base type). The returned name is the registry key
+// (bare PostgreSQL type name), suitable for building the composite dependency
+// graph used to topologically order RegisterTypes.
+func compositeDepName(reg *udtRegistry, t *irv1.TypeRef) string {
+	if reg == nil || t == nil {
+		return ""
+	}
+	if t.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
+		return compositeDepName(reg, t.GetElement())
+	}
+	pgName := t.GetPgName()
+	if _, ok := reg.composites[pgName]; ok {
+		return pgName
+	}
+	if entry, ok := reg.domains[pgName]; ok {
+		return compositeDepName(reg, entry.d.GetBaseType())
+	}
+	return ""
+}
+
 // goParamType maps a query parameter's TypeRef to a Go type. It matches goType
 // except that a composite parameter is always emitted as a value type (never a
 // pointer): the generated composite codec reports IsNull()==false, so a NULL
