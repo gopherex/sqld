@@ -639,6 +639,16 @@ catalog) to Go, with pgx v5 as the runtime.
   timestamp(tz)/date/time(tz) → `time.Time`; uuid → string; bytea → `[]byte`;
   inet/cidr/macaddr → string; unknown → `any`.
 - **json/jsonb → `json.RawMessage`** (was `[]byte`).
+- **pgx core types** (default-registered, no `RegisterTypes`): `interval` →
+  `pgtype.Interval`, geometry (`point`/`line`/`lseg`/`box`/`path`/`polygon`/
+  `circle`) → `pgtype.X`, `bit`/`varbit` → `pgtype.Bits`, `macaddr` →
+  `net.HardwareAddr`, `tid`/`xid`/`cid` → `pgtype.TID`/`Uint32`. `inet`/`cidr`/
+  `uuid` stay `string` (overridable).
+- **extension types**: `hstore` → `pgtype.Hstore` (`map[string]*string`),
+  `ltree`/`lquery` → `string`. Their runtime OIDs need registration — the
+  generator detects usage across columns/queries and `RegisterTypes` `LoadType`s
+  them first (no element/array). Unsupported extension types (PostGIS, pgvector)
+  → use `overrides`. Full table in `docs/types.md`.
 - **Arrays** → `[]elem` (recursing through the resolver, incl. UDT/array-of-enum
   `[]AppUserStatus`, array-of-composite `[]AppAddress`).
 - **UDTs** (resolved against the catalog by `PgName`, schema-prefixed Go names):
