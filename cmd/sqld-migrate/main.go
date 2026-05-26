@@ -19,6 +19,7 @@ import (
 	"github.com/yaroher/sqld/internal/devdb"
 	"github.com/yaroher/sqld/internal/diff"
 	"github.com/yaroher/sqld/internal/introspect"
+	"github.com/yaroher/sqld/internal/lint"
 	"github.com/yaroher/sqld/internal/parse"
 	"github.com/yaroher/sqld/internal/source"
 	"github.com/yaroher/sqld/pkg/config"
@@ -36,6 +37,7 @@ Subcommands:
   generate <name> [-c f] [--dev-url DSN]         Generate a migration by schema diff
   hash     [-c f]                                Print each migration version + checksum
   validate [-c f]                                Parse each migration's up SQL
+  lint     [-c f] [--strict]                     Report destructive/risky changes
 
 The database DSN comes from --db or $DATABASE_URL. The config path defaults to
 sqld.yaml (override with -c).
@@ -65,6 +67,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runHash(rest, stdout, stderr)
 	case "validate":
 		return runValidate(rest, stdout, stderr)
+	case "lint":
+		return runLint(rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown subcommand %q\n\n%s", sub, usage)
 		return 2
@@ -352,6 +356,69 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	}
 	if failed > 0 {
 		fmt.Fprintf(stderr, "validate: %d migration(s) failed\n", failed)
+		return 1
+	}
+	return 0
+}
+
+// runLint loads the migrations and reports destructive/risky changes. Findings
+// are printed grouped by version. The exit code is non-zero when any
+// error-severity finding is present; with --strict, warnings also fail.
+func runLint(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cfgPath := fs.String("c", "sqld.yaml", "path to sqld.yaml config file")
+	strict := fs.Bool("strict", false, "treat warnings as failures too")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	cfg, ok := loadConfig(*cfgPath, stderr)
+	if !ok {
+		return 1
+	}
+	dir := migrationsDir(cfg)
+	migs, err := migrate.Load(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "load migrations: %v\n", err)
+		return 1
+	}
+
+	findings := lint.Lint(migs)
+	if len(findings) == 0 {
+		fmt.Fprintln(stdout, "lint: no findings")
+		return 0
+	}
+
+	// Print findings grouped by version, in the order versions first appear.
+	var order []string
+	byVersion := map[string][]lint.Finding{}
+	for _, f := range findings {
+		if _, seen := byVersion[f.Version]; !seen {
+			order = append(order, f.Version)
+		}
+		byVersion[f.Version] = append(byVersion[f.Version], f)
+	}
+
+	errors, warnings := 0, 0
+	for _, v := range order {
+		label := v
+		if label == "" {
+			label = "(cross-file)"
+		}
+		for _, f := range byVersion[v] {
+			fmt.Fprintf(stdout, "%s [%s] %s: %s\n", label, f.Severity, f.Rule, f.Message)
+			switch f.Severity {
+			case lint.SeverityError:
+				errors++
+			case lint.SeverityWarning:
+				warnings++
+			}
+		}
+	}
+	fmt.Fprintf(stdout, "lint: %d error(s), %d warning(s)\n", errors, warnings)
+
+	if errors > 0 || (*strict && warnings > 0) {
 		return 1
 	}
 	return 0
