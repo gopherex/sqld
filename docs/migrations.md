@@ -1,4 +1,4 @@
-# Migrations (`sqld-migrate`)
+# Migrations (`sqld migrate`)
 
 A fully-open PostgreSQL migration tool: apply/roll back/inspect migrations, and
 **generate** a new migration from the diff between your declarative `schema.sql`
@@ -7,7 +7,7 @@ and the current migration history. Everything works — nothing is paywalled.
 Two faces:
 
 - **`pkg/migrate`** — import it to run migrations from Go.
-- **`cmd/sqld-migrate`** — the CLI.
+- **`sqld migrate`** — the CLI (a subcommand of the `sqld` binary).
 
 ## Migration files
 
@@ -28,7 +28,7 @@ each file; an applied migration whose file later changes is reported as **drift*
 
 ## Config
 
-`sqld-migrate` reads `sqld.yaml` (the same config as the rest of sqld):
+`sqld migrate` reads `sqld.yaml` (the same config as the rest of sqld):
 
 ```yaml
 schema:                       # declarative source of truth (for `generate`)
@@ -40,13 +40,13 @@ migrations:                   # the versioned history this tool manages
 ## CLI
 
 ```
-sqld-migrate up      [-c sqld.yaml] [--db DSN] [--to VERSION]   # apply pending
-sqld-migrate down    [-c sqld.yaml] [--db DSN] [--steps N | --to VERSION]
-sqld-migrate status  [-c sqld.yaml] [--db DSN]                  # applied / pending / drift
-sqld-migrate apply   [-c sqld.yaml] [--db DSN]                  # alias of up
-sqld-migrate generate <name> [-c sqld.yaml] [--dev-url DSN]     # diff schema.sql -> new migration
-sqld-migrate hash    [-c sqld.yaml]                             # print versions + checksums
-sqld-migrate validate[-c sqld.yaml]                             # parse-check every migration
+sqld migrate up      [-c sqld.yaml] [--db DSN] [--to VERSION]   # apply pending
+sqld migrate down    [-c sqld.yaml] [--db DSN] [--steps N | --to VERSION]
+sqld migrate status  [-c sqld.yaml] [--db DSN]                  # applied / pending / drift
+sqld migrate apply   [-c sqld.yaml] [--db DSN]                  # alias of up
+sqld migrate generate <name> [-c sqld.yaml] [--dev-url DSN]     # diff schema.sql -> new migration
+sqld migrate hash    [-c sqld.yaml]                             # print versions + checksums
+sqld migrate validate[-c sqld.yaml]                             # parse-check every migration
 ```
 
 DSN comes from `--db` or `$DATABASE_URL`. Each migration applies in its own
@@ -70,7 +70,7 @@ default it starts one automatically via **testcontainers** (requires Docker).
 If you already have a scratch database, pass `--dev-url`:
 
 ```
-sqld-migrate generate add_orders --dev-url postgres://localhost:5432/scratch?sslmode=disable
+sqld migrate generate add_orders --dev-url postgres://localhost:5432/scratch?sslmode=disable
 ```
 
 The diff covers schemas, types (enum/domain/composite/range), sequences, tables,

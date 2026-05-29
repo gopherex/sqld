@@ -28,7 +28,7 @@ example configs):
 
 ```bash
 # Native binary
-make build                      # builds sqld, sqld-gen-go, sqld-migrate → bin/
+make build                      # builds sqld (includes migrate), sqld-gen-go → bin/
 
 # WASM module (wasip1)
 make build-wasm                 # GOOS=wasip1 GOARCH=wasm → bin/sqld-gen-go.wasm

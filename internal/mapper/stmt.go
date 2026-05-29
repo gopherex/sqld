@@ -66,6 +66,7 @@ package mapper
 
 import (
 	pg "github.com/pganalyze/pg_query_go/v6"
+	pgquery "github.com/wasilibs/go-pgquery"
 	"github.com/yaroher/sqld/internal/nodeid"
 	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
@@ -823,7 +824,7 @@ func deparseStmt(node *pg.Node) string {
 	tree := &pg.ParseResult{
 		Stmts: []*pg.RawStmt{{Stmt: node}},
 	}
-	sql, err := pg.Deparse(tree)
+	sql, err := pgquery.Deparse(tree)
 	if err != nil {
 		return "<deparse_failed>"
 	}

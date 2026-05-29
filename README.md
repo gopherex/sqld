@@ -11,7 +11,7 @@ sqld is an open alternative to **sqlc + Atlas**. sqlc lacks dynamic queries; Atl
 - **Typed Go codegen** — named queries (`-- name: X :one`) produce typed row structs and `*Queries` methods backed by pgx v5.
 - **Full PostgreSQL type coverage** — scalars, `json`/`jsonb` → `json.RawMessage`, enums → typed string + consts, domains → base type, composites → structs with pgx scan/encode, arrays (including array-of-enum and array-of-composite), builtin and custom range/multirange, `hstore`, `ltree`, `interval`, geometry types, `bit`/`varbit`, and more. Override any type via `overrides` in `sqld.yaml`.
 - **Dynamic queries** — `@name?` optional parameters, `ANY(@ids)` slice parameters, `-- @orderby` typed enum for runtime `ORDER BY`. The builder generates parameterized SQL with no `WHERE true`, no injection surface, and a fixed typed result row.
-- **Open migrator with schema-diff generation** — `sqld-migrate generate <name>` diffs your declarative `schema.sql` against the current migration history via ephemeral Postgres (testcontainers or `--dev-url`) and writes the new migration with up + down DDL. Fully open; nothing is behind a paywall.
+- **Open migrator with schema-diff generation** — `sqld migrate generate <name>` diffs your declarative `schema.sql` against the current migration history via ephemeral Postgres (testcontainers or `--dev-url`) and writes the new migration with up + down DDL. Fully open; nothing is behind a paywall.
 - **`embed.FS` auto-apply** — embed migrations in your binary and call `migrate.Migrate(ctx, pool, migrationsFS)` to apply pending migrations on startup.
 - **Plugin architecture** — code generators implement a `Generator` gRPC service contract; the host invokes them over stdio (binary/command) or as WASM modules (wazero). Plugins depend only on the public proto contract and can be written in any language.
 - **ORM ⊕ sqlc via bob** — `sqld-gen-bob` feeds the same IR into [stephenafamo/bob](https://github.com/stephenafamo/bob) to generate a full Go ORM (models, relationships, eager loading, typed where/loaders/joins) that **shares one canonical Go type per column** with the `sqld-gen-go` query code and runs on one `*pgxpool.Pool`. See [docs/cmd/sqld-gen-bob.md](docs/cmd/sqld-gen-bob.md).
@@ -20,13 +20,15 @@ sqld is an open alternative to **sqlc + Atlas**. sqlc lacks dynamic queries; Atl
 
 ## Install
 
-Install the three core binaries:
+Install the two core binaries:
 
 ```sh
 go install github.com/yaroher/sqld/cmd/sqld@latest
 go install github.com/yaroher/sqld/cmd/sqld-gen-go@latest
-go install github.com/yaroher/sqld/cmd/sqld-migrate@latest
 ```
+
+`sqld` is the host CLI; the migrator is built in as `sqld migrate ...` (no
+separate binary). `sqld-gen-go` is the built-in Go code-generation plugin.
 
 The bob ORM generator is **optional** — it lives in a nested module so its
 dependency stays out of the core `go.mod`. Install it only if you want the ORM:
@@ -173,21 +175,21 @@ DROP TABLE orders;
 **CLI** (DSN from `--db` or `$DATABASE_URL`):
 
 ```sh
-sqld-migrate up       [-c sqld.yaml] [--db DSN] [--to VERSION]
-sqld-migrate down     [-c sqld.yaml] [--db DSN] [--steps N | --to VERSION]
-sqld-migrate status   [-c sqld.yaml] [--db DSN]
-sqld-migrate generate <name> [-c sqld.yaml] [--dev-url DSN]
-sqld-migrate hash     [-c sqld.yaml]
-sqld-migrate validate [-c sqld.yaml]
+sqld migrate up       [-c sqld.yaml] [--db DSN] [--to VERSION]
+sqld migrate down     [-c sqld.yaml] [--db DSN] [--steps N | --to VERSION]
+sqld migrate status   [-c sqld.yaml] [--db DSN]
+sqld migrate generate <name> [-c sqld.yaml] [--dev-url DSN]
+sqld migrate hash     [-c sqld.yaml]
+sqld migrate validate [-c sqld.yaml]
 ```
 
 **Generate a migration from a schema diff:**
 
 ```sh
-sqld-migrate generate add_orders --dev-url postgres://localhost:5432/scratch?sslmode=disable
+sqld migrate generate add_orders --dev-url postgres://localhost:5432/scratch?sslmode=disable
 ```
 
-Without `--dev-url`, sqld-migrate starts an ephemeral Postgres via testcontainers (requires Docker). The diff covers schemas, types, sequences, tables, columns, constraints, indexes, views, materialized views, functions, procedures, and triggers — in dependency order with a reverse `down`.
+Without `--dev-url`, `sqld migrate` starts an ephemeral Postgres via testcontainers (requires Docker). The diff covers schemas, types, sequences, tables, columns, constraints, indexes, views, materialized views, functions, procedures, and triggers — in dependency order with a reverse `down`.
 
 **Embed and auto-apply in your service:**
 
@@ -282,7 +284,7 @@ make example-wasm        # generate example/gen/dbwasm/ via the WASM transport
 - [`docs/cmd/sqld.md`](docs/cmd/sqld.md) — the host CLI (`generate` / `collect` / `init`) + the full `sqld.yaml` reference
 - [`docs/cmd/sqld-gen-go.md`](docs/cmd/sqld-gen-go.md) — the built-in Go generator: query annotations, dynamic queries, type mapping, `RegisterTypes`, copyfrom/batch, WASM
 - [`docs/cmd/sqld-gen-bob.md`](docs/cmd/sqld-gen-bob.md) — the bob ORM generator (nested module): shared types, one pool, the `ToSqld()` bridge
-- [`docs/cmd/sqld-migrate.md`](docs/cmd/sqld-migrate.md) — the migrator CLI: up/down/status/generate/lint + `pkg/migrate`
+- [`docs/cmd/sqld-migrate.md`](docs/cmd/sqld-migrate.md) — `sqld migrate`: up/down/status/generate/lint + `pkg/migrate`
 
 **Reference material:**
 
@@ -297,7 +299,9 @@ make example-wasm        # generate example/gen/dbwasm/ via the WASM transport
 Build all binaries:
 
 ```sh
-make build         # → bin/sqld, bin/sqld-gen-go, bin/sqld-migrate
+make build         # → bin/sqld (incl. migrate), bin/sqld-gen-go
+make build-bob     # → bin/sqld-gen-bob (optional ORM generator)
+make dist          # cross-build all binaries into dist/ (release archives)
 ```
 
 Run the full example (codegen + IR dump + build check):
@@ -318,7 +322,7 @@ Run tests:
 go test ./...
 ```
 
-Integration tests (migration generation, `sqld-migrate generate`) spin up Postgres via testcontainers and require Docker.
+Integration tests (migration generation, `sqld migrate generate`) spin up Postgres via testcontainers and require Docker.
 
 ---
 

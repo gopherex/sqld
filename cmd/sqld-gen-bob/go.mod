@@ -2,15 +2,19 @@ module github.com/yaroher/sqld/cmd/sqld-gen-bob
 
 go 1.25.0
 
-replace github.com/yaroher/sqld => ../../
-
+// No replace directive: `go install .../cmd/sqld-gen-bob@vX` rejects modules
+// whose go.mod carries one, so the root module is a normal versioned dependency
+// here (installs fetch it via the proxy). `make release` keeps the require below
+// pinned to the released root version so an installed bob matches its root.
+// Local dev and CI build against the root source via a replace in ../../go.work
+// (which `go install` ignores).
 require (
 	github.com/aarondl/opt v0.0.0-20250607033636-982744e1bd65
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/stephenafamo/bob v0.44.0
 	github.com/stephenafamo/scan v0.7.0
-	github.com/yaroher/sqld v0.0.0-00010101000000-000000000000
+	github.com/yaroher/sqld v0.1.0
 	google.golang.org/protobuf v1.36.11
 )
 

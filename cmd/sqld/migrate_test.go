@@ -12,9 +12,8 @@ import (
 	"github.com/yaroher/sqld/pkg/devdb"
 )
 
-// TestGenVersionUnique (M1) verifies the version stamp has millisecond
-// resolution, so two generates within the same second produce distinct,
-// sortable versions. The old second-resolution format collided.
+// TestGenVersionUnique verifies the version stamp has millisecond resolution,
+// so two generates within the same second produce distinct, sortable versions.
 func TestGenVersionUnique(t *testing.T) {
 	base := time.Date(2026, 5, 26, 10, 30, 15, 0, time.UTC)
 
@@ -45,22 +44,20 @@ func TestGenVersionUnique(t *testing.T) {
 	}
 }
 
-func TestUsage(t *testing.T) {
+func TestMigrateUsage(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := run(nil, &out, &errb); code != 2 {
-		t.Fatalf("no args: got exit %d, want 2", code)
-	}
-	if !strings.Contains(errb.String(), "Usage") {
-		t.Fatalf("no args: expected usage on stderr, got %q", errb.String())
+	// `sqld migrate` with no subcommand is a usage error.
+	if code := run([]string{"migrate"}, &out, &errb); code != 2 {
+		t.Fatalf("migrate (no subcommand): got exit %d, want 2", code)
 	}
 
 	out.Reset()
 	errb.Reset()
-	if code := run([]string{"frobnicate"}, &out, &errb); code != 2 {
-		t.Fatalf("unknown subcommand: got exit %d, want 2", code)
+	if code := run([]string{"migrate", "frobnicate"}, &out, &errb); code != 2 {
+		t.Fatalf("migrate unknown subcommand: got exit %d, want 2", code)
 	}
-	if !strings.Contains(errb.String(), "unknown subcommand") {
-		t.Fatalf("unknown subcommand: expected error on stderr, got %q", errb.String())
+	if !strings.Contains(errb.String(), "unknown command") {
+		t.Fatalf("migrate unknown subcommand: expected error on stderr, got %q", errb.String())
 	}
 }
 
@@ -81,7 +78,7 @@ func writeConfig(t *testing.T, root, migDir, schemaFile string) string {
 	return cfgPath
 }
 
-func TestValidate(t *testing.T) {
+func TestMigrateValidate(t *testing.T) {
 	root := t.TempDir()
 	migDir := filepath.Join(root, "migrations")
 	if err := os.MkdirAll(migDir, 0o755); err != nil {
@@ -100,7 +97,7 @@ func TestValidate(t *testing.T) {
 	cfgPath := writeConfig(t, root, migDir, "")
 
 	var out, errb bytes.Buffer
-	code := run([]string{"validate", "-c", cfgPath}, &out, &errb)
+	code := run([]string{"migrate", "validate", "-c", cfgPath}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("validate: expected non-zero exit, got 0\nstdout=%q\nstderr=%q", out.String(), errb.String())
 	}
@@ -109,7 +106,7 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestLint(t *testing.T) {
+func TestMigrateLint(t *testing.T) {
 	root := t.TempDir()
 	migDir := filepath.Join(root, "migrations")
 	if err := os.MkdirAll(migDir, 0o755); err != nil {
@@ -125,7 +122,7 @@ func TestLint(t *testing.T) {
 	cfgPath := writeConfig(t, root, migDir, "")
 
 	var out, errb bytes.Buffer
-	code := run([]string{"lint", "-c", cfgPath}, &out, &errb)
+	code := run([]string{"migrate", "lint", "-c", cfgPath}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("lint: expected non-zero exit on destructive migration, got 0\nstdout=%q\nstderr=%q", out.String(), errb.String())
 	}
@@ -141,7 +138,7 @@ func TestLint(t *testing.T) {
 	}
 }
 
-func TestLintClean(t *testing.T) {
+func TestMigrateLintClean(t *testing.T) {
 	root := t.TempDir()
 	migDir := filepath.Join(root, "migrations")
 	if err := os.MkdirAll(migDir, 0o755); err != nil {
@@ -155,13 +152,13 @@ func TestLintClean(t *testing.T) {
 	cfgPath := writeConfig(t, root, migDir, "")
 
 	var out, errb bytes.Buffer
-	code := run([]string{"lint", "-c", cfgPath}, &out, &errb)
+	code := run([]string{"migrate", "lint", "-c", cfgPath}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("lint: expected zero exit on clean migration, got %d\nstdout=%q\nstderr=%q", code, out.String(), errb.String())
 	}
 }
 
-func TestHash(t *testing.T) {
+func TestMigrateHash(t *testing.T) {
 	root := t.TempDir()
 	migDir := filepath.Join(root, "migrations")
 	if err := os.MkdirAll(migDir, 0o755); err != nil {
@@ -177,7 +174,7 @@ func TestHash(t *testing.T) {
 	cfgPath := writeConfig(t, root, migDir, "")
 
 	var out, errb bytes.Buffer
-	code := run([]string{"hash", "-c", cfgPath}, &out, &errb)
+	code := run([]string{"migrate", "hash", "-c", cfgPath}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("hash: got exit %d, want 0\nstderr=%q", code, errb.String())
 	}
@@ -194,7 +191,7 @@ func TestHash(t *testing.T) {
 	}
 }
 
-func TestGenerate(t *testing.T) {
+func TestMigrateGenerate(t *testing.T) {
 	// Docker gate: if a dev container cannot start, skip.
 	ctx := context.Background()
 	probe, err := devdb.Start(ctx)
@@ -217,7 +214,7 @@ func TestGenerate(t *testing.T) {
 	cfgPath := writeConfig(t, root, migDir, schemaFile)
 
 	var out, errb bytes.Buffer
-	code := run([]string{"generate", "add_users", "-c", cfgPath}, &out, &errb)
+	code := run([]string{"migrate", "generate", "add_users", "-c", cfgPath}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("generate: got exit %d, want 0\nstdout=%q\nstderr=%q", code, out.String(), errb.String())
 	}
@@ -229,11 +226,10 @@ func TestGenerate(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("generate: expected 1 migration file, got %d", len(entries))
 	}
-	gen := filepath.Join(migDir, entries[0].Name())
 	if !strings.HasSuffix(entries[0].Name(), "_add_users.sql") {
 		t.Fatalf("generate: unexpected file name %q", entries[0].Name())
 	}
-	body, err := os.ReadFile(gen)
+	body, err := os.ReadFile(filepath.Join(migDir, entries[0].Name()))
 	if err != nil {
 		t.Fatal(err)
 	}

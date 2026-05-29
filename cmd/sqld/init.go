@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/spf13/cobra"
 )
 
 const initSqldYAML = `version: "1"
@@ -41,6 +43,25 @@ SELECT id, name, bio FROM authors WHERE id = @id;
 -- name: ListAuthors :many
 SELECT id, name, bio FROM authors;
 `
+
+func newInitCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init [dir]",
+		Short: "Scaffold a new sqld project (sqld.yaml + schema/queries/migrations)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if code := runInit(args, cmd.OutOrStdout(), cmd.ErrOrStderr()); code != 0 {
+				// runInit already wrote a diagnostic; surface a non-zero exit.
+				return errInit
+			}
+			return nil
+		},
+	}
+}
+
+// errInit carries a runtime (exit 1) failure out of runInit, which reports its
+// own diagnostic to stderr. It is silent so Execute does not print it twice.
+var errInit = &silentError{errors.New("init failed")}
 
 func runInit(args []string, stdout, stderr io.Writer) int {
 	dir := "."

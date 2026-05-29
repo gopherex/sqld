@@ -36,5 +36,7 @@ bin
 # Built binaries (use `make build` -> bin/)
 /sqld
 /sqld-gen-go
-/sqld-migrate
 /sqld-gen-bob
+
+# Release archives (use `make dist` -> dist/)
+/dist

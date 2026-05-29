@@ -1,6 +1,7 @@
-# sqld-migrate — CLI Reference
+# sqld migrate — CLI Reference
 
-`sqld-migrate` is sqld's fully-open PostgreSQL migration tool. It applies,
+`sqld migrate` is the migration subcommand of the main `sqld` binary — sqld's
+fully-open PostgreSQL migration tool. It applies,
 reverts, and inspects versioned SQL migrations, lints them for destructive or
 risky changes, and — uniquely — **generates** a new migration automatically by
 diffing your declarative `schema.sql` against the state produced by the existing
@@ -20,9 +21,11 @@ full `pkg/migrate` API, see [docs/migrations.md](../migrations.md).
 
 ## Install
 
+The migrator ships inside the `sqld` binary — there is no separate install.
+
 ```bash
 # from any module (no local clone required)
-go install github.com/yaroher/sqld/cmd/sqld-migrate@latest
+go install github.com/yaroher/sqld/cmd/sqld@latest
 
 # or build from the repository
 make build
@@ -39,11 +42,11 @@ code 2 and prints a usage hint.
 
 ```bash
 # flag
-sqld-migrate status --db "postgres://user:pass@localhost:5432/mydb?sslmode=disable"
+sqld migrate status --db "postgres://user:pass@localhost:5432/mydb?sslmode=disable"
 
 # environment
 export DATABASE_URL="postgres://user:pass@localhost:5432/mydb?sslmode=disable"
-sqld-migrate status
+sqld migrate status
 ```
 
 **Config file** — every subcommand accepts `-c <path>` (default `sqld.yaml`) to
@@ -68,8 +71,8 @@ all non-system schemas are introspected.
 ### `up` / `apply`
 
 ```
-sqld-migrate up    [-c FILE] [--db DSN] [--to VERSION]
-sqld-migrate apply [-c FILE] [--db DSN] [--to VERSION]
+sqld migrate up    [-c FILE] [--db DSN] [--to VERSION]
+sqld migrate apply [-c FILE] [--db DSN] [--to VERSION]
 ```
 
 `apply` is an alias for `up`; both are identical in behaviour.
@@ -90,10 +93,10 @@ runs against the same database.
 
 ```bash
 # apply all pending
-sqld-migrate up
+sqld migrate up
 
 # migrate to a specific version
-sqld-migrate up --to 20240601120000000
+sqld migrate up --to 20240601120000000
 ```
 
 ---
@@ -101,7 +104,7 @@ sqld-migrate up --to 20240601120000000
 ### `down`
 
 ```
-sqld-migrate down [-c FILE] [--db DSN] [--steps N] [--to VERSION]
+sqld migrate down [-c FILE] [--db DSN] [--steps N] [--to VERSION]
 ```
 
 Reverts applied migrations in descending version order. `--steps` and `--to`
@@ -119,13 +122,13 @@ exits with code 1.
 
 ```bash
 # revert the most recent migration
-sqld-migrate down
+sqld migrate down
 
 # revert the last three migrations
-sqld-migrate down --steps 3
+sqld migrate down --steps 3
 
 # revert everything above a known-good version
-sqld-migrate down --to 20240101000000000
+sqld migrate down --to 20240101000000000
 ```
 
 ---
@@ -133,7 +136,7 @@ sqld-migrate down --to 20240101000000000
 ### `status`
 
 ```
-sqld-migrate status [-c FILE] [--db DSN]
+sqld migrate status [-c FILE] [--db DSN]
 ```
 
 Prints three groups: applied migrations (with UTC timestamp), pending
@@ -161,7 +164,7 @@ Drift (0):
 ### `generate <name>`
 
 ```
-sqld-migrate generate <name> [-c FILE] [--dev-url DSN]
+sqld migrate generate <name> [-c FILE] [--dev-url DSN]
 ```
 
 Generates a new migration file by comparing what `schema.sql` declares to what
@@ -202,10 +205,10 @@ without writing any file.
 
 ```bash
 # auto testcontainers (Docker required)
-sqld-migrate generate add_orders
+sqld migrate generate add_orders
 
 # explicit dev database
-sqld-migrate generate add_orders \
+sqld migrate generate add_orders \
   --dev-url "postgres://localhost:5432/scratch?sslmode=disable"
 ```
 
@@ -218,7 +221,7 @@ tables, constraints, indexes, views, functions, triggers, …) see
 ### `hash`
 
 ```
-sqld-migrate hash [-c FILE]
+sqld migrate hash [-c FILE]
 ```
 
 Prints each migration's version and SHA-256 checksum, one per line. No database
@@ -230,7 +233,7 @@ since they were committed.
 | `-c` | `sqld.yaml` | Config file path |
 
 ```bash
-sqld-migrate hash
+sqld migrate hash
 # 20240101000000000  a3f2...
 # 20240601120000000  7c91...
 ```
@@ -240,7 +243,7 @@ sqld-migrate hash
 ### `validate`
 
 ```
-sqld-migrate validate [-c FILE]
+sqld migrate validate [-c FILE]
 ```
 
 Parses the `up` SQL of every migration using the same PostgreSQL parser that
@@ -253,7 +256,7 @@ No database connection is required.
 | `-c` | `sqld.yaml` | Config file path |
 
 ```bash
-sqld-migrate validate
+sqld migrate validate
 # ok: 20240101000000000_init
 # ok: 20240601120000000_add_users
 ```
@@ -263,7 +266,7 @@ sqld-migrate validate
 ### `lint`
 
 ```
-sqld-migrate lint [-c FILE] [--strict]
+sqld migrate lint [-c FILE] [--strict]
 ```
 
 Analyses each migration's `up` SQL for destructive or risky patterns using a
@@ -285,10 +288,10 @@ with their rule name and severity. No database connection is required.
 
 ```bash
 # advisory check only
-sqld-migrate lint
+sqld migrate lint
 
 # fail CI on any finding
-sqld-migrate lint --strict
+sqld migrate lint --strict
 ```
 
 Sample output:

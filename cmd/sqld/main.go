@@ -1,110 +1,101 @@
+// Command sqld is the PostgreSQL toolkit host CLI: it scaffolds projects,
+// drives code generation through plugins, collects the semantic IR, and applies
+// and generates SQL migrations.
 package main
 
 import (
-	"flag"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
-	"github.com/yaroher/sqld/pkg/sqld"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/encoding/prototext"
+	"github.com/spf13/cobra"
 )
 
-const usage = `Usage: sqld <subcommand> [flags]
+// version is the build version, stamped at release time via
+// -ldflags "-X main.version=<tag>". It is "dev" for local builds.
+var version = "dev"
 
-Subcommands:
-  init      [dir]                                Scaffold a new sqld project (sqld.yaml + schema/queries/migrations)
-  generate  -c <config.yaml>                    Run code generation
-  collect   -c <config.yaml> [-format json|prototext]  Collect IR and print to stdout
-`
+// usageError marks a CLI usage problem (bad or missing args/flags). It maps to
+// exit code 2; ordinary runtime errors map to 1.
+type usageError struct{ err error }
 
-// run is the testable entry point. It parses args, dispatches to subcommands,
-// and writes output to stdout/stderr. It returns an exit code.
-func run(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
+func (e *usageError) Error() string { return e.err.Error() }
+func (e *usageError) Unwrap() error { return e.err }
+
+// errNoSubcommand is returned when sqld is invoked without a subcommand. Help
+// has already been printed, so it carries no message.
+var errNoSubcommand = &usageError{errors.New("")}
+
+// silentError is a runtime error (exit 1) whose diagnostic has already been
+// written by the command itself, so Execute must not print it again.
+type silentError struct{ err error }
+
+func (e *silentError) Error() string { return e.err.Error() }
+func (e *silentError) Unwrap() error { return e.err }
+
+// Execute builds the root command, runs it against args, and returns a process
+// exit code: 0 success, 1 runtime error, 2 usage error.
+func Execute(args []string, stdout, stderr io.Writer) int {
+	root := newRootCmd()
+	root.SetArgs(args)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+
+	err := root.Execute()
+	if err == nil {
+		return 0
+	}
+	var ue *usageError
+	if errors.As(err, &ue) {
 		return 2
 	}
-
-	sub := args[0]
-	rest := args[1:]
-
-	switch sub {
-	case "init":
-		return runInit(rest, stdout, stderr)
-	case "generate":
-		return runGenerate(rest, stderr)
-	case "collect":
-		return runCollect(rest, stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "unknown subcommand %q\n\n%s", sub, usage)
+	var se *silentError
+	if errors.As(err, &se) {
+		return 1
+	}
+	// cobra reports an unknown subcommand as a plain error before any RunE
+	// runs; treat it as a usage error.
+	if strings.HasPrefix(err.Error(), "unknown command") {
+		fmt.Fprintf(stderr, "%v\n", err)
 		return 2
 	}
+	fmt.Fprintf(stderr, "%v\n", err)
+	return 1
 }
 
-func runGenerate(args []string, stderr io.Writer) int {
-	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	cfgPath := fs.String("c", "", "path to sqld.yaml config file (required)")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if *cfgPath == "" {
-		fmt.Fprintf(stderr, "generate: -c is required\n\n%s", usage)
-		return 2
-	}
-	if err := sqld.GenerateFile(*cfgPath); err != nil {
-		fmt.Fprintf(stderr, "generate: %v\n", err)
-		return 1
-	}
-	fmt.Fprintln(stderr, "generated")
-	return 0
-}
+// run is a thin alias kept for the test suite.
+func run(args []string, stdout, stderr io.Writer) int { return Execute(args, stdout, stderr) }
 
-func runCollect(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("collect", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	cfgPath := fs.String("c", "", "path to sqld.yaml config file (required)")
-	format := fs.String("format", "json", "output format: json or prototext")
-	if err := fs.Parse(args); err != nil {
-		return 2
+func newRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "sqld",
+		Short:         "sqld — PostgreSQL toolkit: codegen, IR collection, and migrations",
+		Version:       version,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_ = cmd.Help()
+			return errNoSubcommand
+		},
 	}
-	if *cfgPath == "" {
-		fmt.Fprintf(stderr, "collect: -c is required\n\n%s", usage)
-		return 2
-	}
-	catalog, err := sqld.CollectFile(*cfgPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "collect: %v\n", err)
-		return 1
-	}
-
-	var out []byte
-	switch *format {
-	case "json", "":
-		out, err = protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(catalog)
-	case "prototext":
-		out, err = prototext.MarshalOptions{Multiline: true}.Marshal(catalog)
-	default:
-		fmt.Fprintf(stderr, "collect: unknown format %q; want json or prototext\n", *format)
-		return 2
-	}
-	if err != nil {
-		fmt.Fprintf(stderr, "collect: marshal: %v\n", err)
-		return 1
-	}
-	if _, err := stdout.Write(out); err != nil {
-		fmt.Fprintf(stderr, "collect: write: %v\n", err)
-		return 1
-	}
-	// Ensure trailing newline for readability
-	if len(out) > 0 && out[len(out)-1] != '\n' {
-		fmt.Fprintln(stdout)
-	}
-	return 0
+	// Flag-parsing failures (bad/missing flags) are usage errors. cobra
+	// propagates this func to every subcommand.
+	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%v\n", err)
+		return &usageError{err}
+	})
+	root.AddCommand(
+		newInitCmd(),
+		newGenerateCmd(),
+		newCollectCmd(),
+		newMigrateCmd(),
+	)
+	return root
 }
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(Execute(os.Args[1:], os.Stdout, os.Stderr))
 }

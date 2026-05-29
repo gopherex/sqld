@@ -2,37 +2,74 @@ name: CI
 
 on:
   push:
+    branches: [master]
   pull_request:
+  workflow_call: # reused by release.yml to gate releases on a green build
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: Build, vet, fmt, test
+  # Discover every Go module (root + each nested cmd module) so jobs auto-adapt
+  # when a new module is added — no hardcoded list to maintain.
+  discover:
     runs-on: ubuntu-latest
-
+    outputs:
+      modules: ${{ steps.list.outputs.modules }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: Build
-        run: go build ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Check formatting
+      - uses: actions/checkout@v4
+      - id: list
         run: |
-          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './pkg/proto/*'))
-          if [ -n "$unformatted" ]; then
-            echo "The following files are not gofmt-formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
+          mods=$(find . -name go.mod -not -path '*/vendor/*' -not -path './.git/*' -printf '%h\n' \
+            | sort | jq -R . | jq -cs .)
+          echo "modules=$mods" >> "$GITHUB_OUTPUT"
+          echo "$mods"
 
-      - name: Test
-        run: go test ./...
+  test:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.discover.outputs.modules) }}
+    name: test (${{ matrix.module }})
+    env:
+      MODULE: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: gofmt
+        working-directory: ${{ matrix.module }}
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::gofmt needed:"; echo "$out"; exit 1
+          fi
+      # The root module is the standalone published artifact, so it is built
+      # without the workspace (GOWORK=off) to validate that it has no hidden
+      # workspace-only dependencies. Nested modules (sqld-gen-bob) resolve the
+      # root from source via go.work and so keep the workspace enabled.
+      # Integration tests spin up Postgres via testcontainers; the ubuntu-latest
+      # runner ships Docker, so they run rather than skip.
+      - name: go vet
+        working-directory: ${{ matrix.module }}
+        run: |
+          [ "$MODULE" = "." ] && export GOWORK=off || true
+          go vet ./...
+      - name: go build
+        working-directory: ${{ matrix.module }}
+        run: |
+          [ "$MODULE" = "." ] && export GOWORK=off || true
+          go build ./...
+      - name: go test -race
+        working-directory: ${{ matrix.module }}
+        run: |
+          [ "$MODULE" = "." ] && export GOWORK=off || true
+          go test -race ./...

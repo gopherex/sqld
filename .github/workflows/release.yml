@@ -1,0 +1,42 @@
+name: Release
+
+# Root module tags only (vX.Y.Z). The nested module tag
+# cmd/sqld-gen-bob/vX.Y.Z starts with "cmd/" and does not match "v*", so it
+# does not trigger a second release run.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  # Releases must build green: run the full CI suite over every module.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Ensure zip (windows archives)
+        run: sudo apt-get update && sudo apt-get install -y zip
+      - name: Cross-build all binaries
+        env:
+          TAG: ${{ github.ref_name }}
+        run: make dist VERSION="$TAG"
+      - name: Create GitHub release + upload binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --verify-tag --generate-notes --title "$TAG" \
+            dist/sqld_*.tar.gz dist/sqld_*.zip dist/SHA256SUMS

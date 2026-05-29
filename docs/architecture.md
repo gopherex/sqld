@@ -49,7 +49,7 @@ producers fill and consumers read.
    └───────────────────────────┘           │
                                             ▼
                                    ┌───────────────────┐
-                                   │ sqld-migrate diff  │  Diff(from, to) → migration SQL
+                                   │ sqld migrate diff  │  Diff(from, to) → migration SQL
                                    │   internal/diff    │  (desired IR  vs  actual IR)
                                    └───────────────────┘
 ```
@@ -278,9 +278,8 @@ sqld/                                   module github.com/yaroher/sqld   (core)
 │   ├── lint/                          destructive/risky-change linting
 │   └── core/                          Collect / Gather / Generate orchestration
 ├── cmd/
-│   ├── sqld/                          host CLI (init / generate / collect)
+│   ├── sqld/                          host CLI (init / generate / collect / migrate)
 │   ├── sqld-gen-go/                   built-in Go (sqlc-style) generator plugin
-│   ├── sqld-migrate/                  migrator CLI
 │   └── sqld-gen-bob/                  bob ORM generator   ── NESTED MODULE ──
 │       ├── go.mod                     module github.com/yaroher/sqld/cmd/sqld-gen-bob
 │       │                              replace github.com/yaroher/sqld => ../../
@@ -311,23 +310,25 @@ use (
 )
 ```
 
-### Installing the four binaries
+### Installing the three binaries
 
 ```sh
 go install github.com/yaroher/sqld/cmd/sqld@latest
 go install github.com/yaroher/sqld/cmd/sqld-gen-go@latest
 go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest   # nested module — keeps bob out of the core go.mod
-go install github.com/yaroher/sqld/cmd/sqld-migrate@latest
 ```
 
-## 7. The four binaries
+The migrator is **not** a separate binary — it ships inside `sqld` as the
+`sqld migrate` subcommand.
+
+## 7. The binaries
 
 | Binary | Role | Docs |
 | --- | --- | --- |
 | **`sqld`** | The **host**. `init` scaffolds a project; `collect` parses sources and prints the IR (json/prototext); `generate` runs the configured plugins against the IR and writes their output. This is the orchestrator that drives `internal/core`. | [docs/cmd/sqld.md](cmd/sqld.md) |
 | **`sqld-gen-go`** | The built-in **Go code generator** plugin (sqlc-style). Produces typed query rows + `*Queries` methods backed by pgx v5, dynamic-query builders, and the canonical leaf Go types (enums/composites/domains + `RegisterTypes`) shared with bob. | [docs/cmd/sqld-gen-go.md](cmd/sqld-gen-go.md) |
 | **`sqld-gen-bob`** | The **bob ORM** generator plugin (nested module). Drives stephenafamo/bob from the same IR to produce models, relationships with eager loading, and typed where/loaders/joins, referencing `sqld-gen-go`'s shared types and adding a `ToSqld()` bridge. | [docs/cmd/sqld-gen-bob.md](cmd/sqld-gen-bob.md) |
-| **`sqld-migrate`** | The **migrator** CLI. Apply / revert / inspect migrations, and `generate <name>` to diff the declarative `schema.sql` against the current migration history (via ephemeral Postgres) and emit a new migration with up + down DDL. Lint reports risky/destructive changes. | [docs/cmd/sqld-migrate.md](cmd/sqld-migrate.md) |
+| **`sqld migrate`** | The **migrator** — a subcommand of `sqld` (not a separate binary). Apply / revert / inspect migrations, and `generate <name>` to diff the declarative `schema.sql` against the current migration history (via ephemeral Postgres) and emit a new migration with up + down DDL. Lint reports risky/destructive changes. | [docs/cmd/sqld-migrate.md](cmd/sqld-migrate.md) |
 
 `sqld-gen-go` and `sqld-gen-bob` are themselves just plugins speaking the
 contract from §4; `sqld` discovers and runs them like any third-party plugin.
@@ -342,4 +343,4 @@ contract from §4; `sqld` discovers and runs them like any third-party plugin.
 - [docs/cmd/sqld.md](cmd/sqld.md) — the host CLI.
 - [docs/cmd/sqld-gen-go.md](cmd/sqld-gen-go.md) — the built-in Go generator.
 - [docs/cmd/sqld-gen-bob.md](cmd/sqld-gen-bob.md) — the bob ORM generator.
-- [docs/cmd/sqld-migrate.md](cmd/sqld-migrate.md) — the migrator CLI.
+- [docs/cmd/sqld-migrate.md](cmd/sqld-migrate.md) — the `sqld migrate` subcommand.

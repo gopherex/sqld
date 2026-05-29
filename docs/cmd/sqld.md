@@ -17,7 +17,7 @@ in config order → write the response files under each plugin's `out` directory
 go install github.com/yaroher/sqld/cmd/sqld@latest
 
 # or build from source
-make build       # → bin/sqld  (also builds bin/sqld-gen-go, bin/sqld-migrate)
+make build       # → bin/sqld (includes migrate), bin/sqld-gen-go
 ```
 
 ---
@@ -92,7 +92,7 @@ sqld generate -c sqld.yaml
 **Synopsis**
 
 ```
-sqld collect -c <config.yaml> [-format json|prototext]
+sqld collect -c <config.yaml> [--format json|prototext]
 ```
 
 Collect the IR Catalog from the schema sources and print it to stdout. No plugins are
@@ -104,7 +104,7 @@ feeding the IR into external tooling.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-c <path>` | — (required) | Path to the `sqld.yaml` config file |
-| `-format <fmt>` | `json` | Output format: `json` (pretty-printed protojson) or `prototext` |
+| `--format <fmt>` | `json` | Output format: `json` (pretty-printed protojson) or `prototext` |
 
 **Example**
 
@@ -113,7 +113,7 @@ feeding the IR into external tooling.
 sqld collect -c sqld.yaml
 
 # Prototext format
-sqld collect -c sqld.yaml -format prototext
+sqld collect -c sqld.yaml --format prototext
 
 # Pipe into jq
 sqld collect -c sqld.yaml | jq '.tables[].name'
@@ -341,5 +341,5 @@ Config struct is under `github.com/yaroher/sqld/pkg/config`.
 
 - [`docs/cmd/sqld-gen-go.md`](sqld-gen-go.md) — Go query-function generator plugin
 - [`docs/cmd/sqld-gen-bob.md`](sqld-gen-bob.md) — bob ORM generator plugin
-- [`docs/migrations.md`](../migrations.md) — `sqld-migrate` and the migration system
+- [`docs/migrations.md`](../migrations.md) — `sqld migrate` and the migration system
 - [`docs/adr.md`](../adr.md) — Architecture Decision Records

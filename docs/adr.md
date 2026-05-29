@@ -463,6 +463,10 @@ built-in Go generator.
 dogfoods the plugin contract. None scaffolded yet (proto + generated code exist;
 `cmd/` and `go.mod` are next).
 
+> **Later:** the standalone `sqld-migrate` binary was folded into the main `sqld`
+> binary as the `sqld migrate` subcommand; `cmd/sqld-migrate/` no longer exists.
+> The migration logic still lives in `pkg/migrate` (ADR-0024).
+
 ---
 
 <a id="adr-0024"></a>
@@ -722,6 +726,9 @@ etc.). Spec: `docs/superpowers/specs/2026-05-26-sqld-migrate-design.md`.
 against real Postgres (integration tests gated on Docker; the diff engine is
 Docker-free and golden-tested). Out of scope for now: grants/RLS/partitioning
 diff, multi-dialect, online/zero-downtime orchestration. Docs: `docs/migrations.md`.
+
+> **Later:** the standalone `cmd/sqld-migrate` binary was folded into `sqld` as
+> the `sqld migrate` subcommand (`sqld migrate up`/`down`/`status`/`generate <name>`/…).
 
 ---
 
