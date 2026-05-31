@@ -7,7 +7,7 @@ import "sqld/v1/ir/schema.proto";
 import "sqld/v1/ir/routine.proto";
 import "sqld/v1/ir/relation.proto";
 
-option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+option go_package = "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1";
 
 // ----------------------------------------------------------------------------
 // Root of the IR. A generator plugin consumes a single Catalog message.

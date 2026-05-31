@@ -1,4 +1,4 @@
-module github.com/yaroher/sqld
+module github.com/gopherex/sqld
 
 go 1.25.0
 

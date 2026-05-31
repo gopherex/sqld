@@ -3,7 +3,7 @@ package query
 import (
 	"testing"
 
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 func TestParseQueriesHeader(t *testing.T) {

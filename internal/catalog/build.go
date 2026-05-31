@@ -4,10 +4,10 @@ package catalog
 import (
 	"fmt"
 
+	"github.com/gopherex/sqld/internal/mapper"
+	"github.com/gopherex/sqld/internal/parse"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	pg "github.com/pganalyze/pg_query_go/v6"
-	"github.com/yaroher/sqld/internal/mapper"
-	"github.com/yaroher/sqld/internal/parse"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // ---------------------------------------------------------------------------

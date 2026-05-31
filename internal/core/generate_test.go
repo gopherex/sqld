@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yaroher/sqld/pkg/config"
+	"github.com/gopherex/sqld/pkg/config"
 )
 
 func TestGenerateWritesFiles(t *testing.T) {

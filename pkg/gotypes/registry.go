@@ -1,7 +1,7 @@
 package gotypes
 
 import (
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // enumEntry holds a resolved enum together with the schema name it was declared

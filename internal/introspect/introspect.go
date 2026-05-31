@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"sort"
 
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	"github.com/jackc/pgx/v5"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // DBTX is the minimal pgx query surface the introspector needs. Both

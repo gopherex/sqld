@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/yaroher/sqld/example/gen/db"
-	"github.com/yaroher/sqld/pkg/devdb"
+	"github.com/gopherex/sqld/example/gen/db"
+	"github.com/gopherex/sqld/pkg/devdb"
 )
 
 // TestOptModeCompositeScanGlue exercises the exact runtime pattern sqld-gen-go's

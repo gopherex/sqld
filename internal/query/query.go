@@ -6,10 +6,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/yaroher/sqld/internal/mapper"
-	"github.com/yaroher/sqld/internal/nodeid"
-	"github.com/yaroher/sqld/internal/parse"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	"github.com/gopherex/sqld/internal/mapper"
+	"github.com/gopherex/sqld/internal/nodeid"
+	"github.com/gopherex/sqld/internal/parse"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 // headerRe matches lines of the form:

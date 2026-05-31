@@ -11,17 +11,17 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/yaroher/sqld/internal/catalog"
-	"github.com/yaroher/sqld/internal/mapper"
-	"github.com/yaroher/sqld/internal/nodeid"
-	"github.com/yaroher/sqld/internal/parse"
-	"github.com/yaroher/sqld/internal/plugin"
-	"github.com/yaroher/sqld/internal/query"
-	"github.com/yaroher/sqld/internal/relate"
-	"github.com/yaroher/sqld/internal/source"
-	"github.com/yaroher/sqld/pkg/config"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	"github.com/gopherex/sqld/internal/catalog"
+	"github.com/gopherex/sqld/internal/mapper"
+	"github.com/gopherex/sqld/internal/nodeid"
+	"github.com/gopherex/sqld/internal/parse"
+	"github.com/gopherex/sqld/internal/plugin"
+	"github.com/gopherex/sqld/internal/query"
+	"github.com/gopherex/sqld/internal/relate"
+	"github.com/gopherex/sqld/internal/source"
+	"github.com/gopherex/sqld/pkg/config"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 // Result is the full output of a collection pass.

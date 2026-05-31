@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
 	"google.golang.org/protobuf/proto"
 )
 

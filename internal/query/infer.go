@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/yaroher/sqld/internal/catalog"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	"github.com/gopherex/sqld/internal/catalog"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 // Infer mutates q by:

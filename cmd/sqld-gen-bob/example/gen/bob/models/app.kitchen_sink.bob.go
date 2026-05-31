@@ -10,11 +10,11 @@ import (
 
 	"github.com/aarondl/opt/null"
 	"github.com/google/uuid"
+	"github.com/gopherex/sqld/example/gen/db"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stephenafamo/bob"
 	"github.com/stephenafamo/bob/dialect/psql"
 	"github.com/stephenafamo/bob/expr"
-	"github.com/yaroher/sqld/example/gen/db"
 )
 
 // AppKitchenSink is an object representing the database table.

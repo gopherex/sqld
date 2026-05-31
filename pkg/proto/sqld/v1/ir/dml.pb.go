@@ -1481,7 +1481,7 @@ const file_sqld_v1_ir_dml_proto_rawDesc = "" +
 	"\x18MERGE_ACTION_KIND_INSERT\x10\x01\x12\x1c\n" +
 	"\x18MERGE_ACTION_KIND_UPDATE\x10\x02\x12\x1c\n" +
 	"\x18MERGE_ACTION_KIND_DELETE\x10\x03\x12 \n" +
-	"\x1cMERGE_ACTION_KIND_DO_NOTHING\x10\x04B3Z1github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
+	"\x1cMERGE_ACTION_KIND_DO_NOTHING\x10\x04B3Z1github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
 	file_sqld_v1_ir_dml_proto_rawDescOnce sync.Once

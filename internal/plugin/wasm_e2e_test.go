@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yaroher/sqld/pkg/config"
-	"github.com/yaroher/sqld/pkg/sqld"
+	"github.com/gopherex/sqld/pkg/config"
+	"github.com/gopherex/sqld/pkg/sqld"
 )
 
 // repoRoot returns the module root (the directory containing go.mod), resolved

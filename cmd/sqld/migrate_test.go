@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yaroher/sqld/pkg/devdb"
+	"github.com/gopherex/sqld/pkg/devdb"
 )
 
 // TestGenVersionUnique verifies the version stamp has millisecond resolution,

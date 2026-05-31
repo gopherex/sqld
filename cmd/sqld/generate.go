@@ -7,7 +7,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/prototext"
 
-	"github.com/yaroher/sqld/pkg/sqld"
+	"github.com/gopherex/sqld/pkg/sqld"
 )
 
 func newGenerateCmd() *cobra.Command {

@@ -7,7 +7,7 @@
 package pluginv1
 
 import (
-	ir "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	ir "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -1082,7 +1082,7 @@ const file_sqld_v1_plugin_plugin_proto_rawDesc = "" +
 	"\x17QUERY_COMMAND_COPY_FROM\x10\b2\xa6\x01\n" +
 	"\tGenerator\x12J\n" +
 	"\aGetInfo\x12\x1e.sqld.v1.plugin.GetInfoRequest\x1a\x1f.sqld.v1.plugin.GetInfoResponse\x12M\n" +
-	"\bGenerate\x12\x1f.sqld.v1.plugin.GenerateRequest\x1a .sqld.v1.plugin.GenerateResponseB;Z9github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin;pluginv1b\x06proto3"
+	"\bGenerate\x12\x1f.sqld.v1.plugin.GenerateRequest\x1a .sqld.v1.plugin.GenerateResponseB;Z9github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin;pluginv1b\x06proto3"
 
 var (
 	file_sqld_v1_plugin_plugin_proto_rawDescOnce sync.Once

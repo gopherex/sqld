@@ -1,8 +1,8 @@
 package main
 
 import (
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 // Info reports the plugin's identity and capabilities. sqld-gen-bob generates

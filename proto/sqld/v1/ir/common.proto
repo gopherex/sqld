@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package sqld.v1.ir;
 
-option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+option go_package = "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1";
 
 // QualifiedName is a (catalog, schema, name) tuple. `name` is always set;
 // `schema` and `catalog` are empty when not applicable (e.g. a schema object

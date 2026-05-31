@@ -23,8 +23,8 @@ sqld is an open alternative to **sqlc + Atlas**. sqlc lacks dynamic queries; Atl
 Install the two core binaries:
 
 ```sh
-go install github.com/yaroher/sqld/cmd/sqld@latest
-go install github.com/yaroher/sqld/cmd/sqld-gen-go@latest
+go install github.com/gopherex/sqld/cmd/sqld@latest
+go install github.com/gopherex/sqld/cmd/sqld-gen-go@latest
 ```
 
 `sqld` is the host CLI; the migrator is built in as `sqld migrate ...` (no
@@ -34,7 +34,7 @@ The bob ORM generator is **optional** — it lives in a nested module so its
 dependency stays out of the core `go.mod`. Install it only if you want the ORM:
 
 ```sh
-go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest
+go install github.com/gopherex/sqld/cmd/sqld-gen-bob@latest
 ```
 
 Or build from source into `bin/`:
@@ -210,7 +210,7 @@ func main() {
 **Library use:**
 
 ```go
-import "github.com/yaroher/sqld/pkg/migrate"
+import "github.com/gopherex/sqld/pkg/migrate"
 
 migs, _ := migrate.Load("migrations")
 m := migrate.New(pool, migs)

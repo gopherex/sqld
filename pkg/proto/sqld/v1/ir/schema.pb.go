@@ -1737,7 +1737,7 @@ const file_sqld_v1_ir_schema_proto_rawDesc = "" +
 	"\x16CONSTRAINT_TYPE_UNIQUE\x10\x03\x12\x19\n" +
 	"\x15CONSTRAINT_TYPE_CHECK\x10\x04\x12\x1d\n" +
 	"\x19CONSTRAINT_TYPE_EXCLUSION\x10\x05\x12\x1c\n" +
-	"\x18CONSTRAINT_TYPE_NOT_NULL\x10\x06B3Z1github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
+	"\x18CONSTRAINT_TYPE_NOT_NULL\x10\x06B3Z1github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
 	file_sqld_v1_ir_schema_proto_rawDescOnce sync.Once

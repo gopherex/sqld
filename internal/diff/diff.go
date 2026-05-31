@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // Diff compares two catalogs and produces an ordered Plan of changes that turns

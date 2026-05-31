@@ -492,17 +492,17 @@ API surface in `pkg/migrate` must stay stable.
 **Status:** accepted (applied)
 
 **Context:** Generated code is emitted to `pkg/proto/sqld/v1/...`, but the proto
-`go_package` option currently points at `github.com/yaroher/sqld/proto/sqld/v1/...`
+`go_package` option currently points at `github.com/gopherex/sqld/proto/sqld/v1/...`
 (missing the `pkg/` segment). No `go.mod` exists yet, so nothing breaks today.
 
-**Decision:** Module path is `github.com/yaroher/sqld`. Generated code therefore
-imports as `github.com/yaroher/sqld/pkg/proto/sqld/v1/{ir,config,plugin}`. The
+**Decision:** Module path is `github.com/gopherex/sqld`. Generated code therefore
+imports as `github.com/gopherex/sqld/pkg/proto/sqld/v1/{ir,config,plugin}`. The
 proto `go_package` options must be updated to include `pkg/`:
 
 ```
-github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1
-github.com/yaroher/sqld/pkg/proto/sqld/v1/config;configv1
-github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin;pluginv1
+github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1
+github.com/gopherex/sqld/pkg/proto/sqld/v1/config;configv1
+github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin;pluginv1
 ```
 
 then re-run `make protocols`, and add `go.mod` with the module path.
@@ -513,7 +513,7 @@ other through the `.../proto/...` path that does not match their physical
 across the 3 packages.
 
 **Applied:** `go_package` updated in all 10 proto files, regenerated via
-`make protocols`, `go.mod` added (module `github.com/yaroher/sqld`, go 1.25,
+`make protocols`, `go.mod` added (module `github.com/gopherex/sqld`, go 1.25,
 deps `google.golang.org/protobuf` + `google.golang.org/grpc`). `go build ./...`
 and `go vet ./pkg/...` pass.
 
@@ -753,9 +753,9 @@ sqld-controlled Go types and runs natively on `*pgxpool.Pool`.
   shims; output is byte-identical (golden-locked).
 - **Nested `cmd/sqld-gen-bob` module**: the plugin, its bob-using example
   (`cmd/sqld-gen-bob/example`, incl. the `aarondl/opt`-using opt-mode tests) live
-  in a nested module `github.com/yaroher/sqld/cmd/sqld-gen-bob` (with
+  in a nested module `github.com/gopherex/sqld/cmd/sqld-gen-bob` (with
   `replace => ../../` + a root `go.work`), so the heavy bob dependency stays OUT
-  of the core `go.mod` — `go get github.com/yaroher/sqld` pulls no bob/opt.
+  of the core `go.mod` — `go get github.com/gopherex/sqld` pulls no bob/opt.
   `internal/devdb` was promoted to `pkg/devdb` so the nested module can reuse the
   testcontainers helper.
 - **`cmd/sqld-gen-bob`**: a binary plugin (no wasm — bob's generator is too
@@ -824,7 +824,7 @@ docs/superpowers/specs/ design doc
 Makefile                `make protocols` regenerates pkg/proto via easyp
 ```
 
-Module path: `github.com/yaroher/sqld` (`go.mod` present; go_package aligned per
+Module path: `github.com/gopherex/sqld` (`go.mod` present; go_package aligned per
 ADR-0025). `cmd/` and `pkg/migrate/` are not scaffolded yet.
 
 ### Packages

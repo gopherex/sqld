@@ -3,7 +3,7 @@ package gotypes
 import (
 	"testing"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 func scalarRef(pg string) *irv1.TypeRef { return &irv1.TypeRef{PgName: pg} }

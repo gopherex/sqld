@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 func testSchema() *pluginv1.AnnotationSchema {

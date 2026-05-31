@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yaroher/sqld/pkg/devdb"
+	"github.com/gopherex/sqld/pkg/devdb"
 )
 
 // TestMigrateGenerateDevURLIsolation exercises `migrate generate --dev-url

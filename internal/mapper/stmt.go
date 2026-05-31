@@ -65,10 +65,10 @@ package mapper
 // MergeStmt is mapped to a RawStatement{kind=MERGE} (best-effort fallback).
 
 import (
+	"github.com/gopherex/sqld/internal/nodeid"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	pg "github.com/pganalyze/pg_query_go/v6"
 	pgquery "github.com/wasilibs/go-pgquery"
-	"github.com/yaroher/sqld/internal/nodeid"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // MapStatement maps a *pg.Node to an IR *irv1.Statement.

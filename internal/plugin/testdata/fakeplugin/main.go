@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 	"google.golang.org/protobuf/proto"
 )
 

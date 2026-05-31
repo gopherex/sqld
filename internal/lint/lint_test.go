@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yaroher/sqld/pkg/migrate"
+	"github.com/gopherex/sqld/pkg/migrate"
 )
 
 // findOne returns the first finding matching rule, or nil.

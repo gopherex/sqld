@@ -7,7 +7,7 @@ import "sqld/v1/ir/type.proto";
 import "sqld/v1/ir/expr.proto";
 import "sqld/v1/ir/schema.proto"; // for Index (materialized view indexes)
 
-option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+option go_package = "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1";
 
 // ----------------------------------------------------------------------------
 // Programmable objects: views, functions, procedures, triggers, and

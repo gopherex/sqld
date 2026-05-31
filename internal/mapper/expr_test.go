@@ -3,9 +3,9 @@ package mapper
 import (
 	"testing"
 
+	nodeid "github.com/gopherex/sqld/internal/nodeid"
+	"github.com/gopherex/sqld/internal/parse"
 	pg "github.com/pganalyze/pg_query_go/v6"
-	nodeid "github.com/yaroher/sqld/internal/nodeid"
-	"github.com/yaroher/sqld/internal/parse"
 )
 
 func exprFor(t *testing.T, sql string) *pg.Node {

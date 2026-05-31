@@ -2,8 +2,8 @@
 package mapper
 
 import (
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	pg "github.com/pganalyze/pg_query_go/v6"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // MapType maps a parsed PostgreSQL TypeName AST node to an IR TypeRef.

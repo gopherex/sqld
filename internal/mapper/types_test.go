@@ -3,9 +3,9 @@ package mapper
 import (
 	"testing"
 
+	"github.com/gopherex/sqld/internal/parse"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	pg "github.com/pganalyze/pg_query_go/v6"
-	"github.com/yaroher/sqld/internal/parse"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 func typeNameFor(t *testing.T, typeSQL string) *pg.TypeName {

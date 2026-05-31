@@ -7,9 +7,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	bobpgx "github.com/stephenafamo/bob/drivers/pgx"
 
-	"github.com/yaroher/sqld/cmd/sqld-gen-bob/example/gen/bob/models"
-	"github.com/yaroher/sqld/example/gen/db"
-	"github.com/yaroher/sqld/pkg/devdb"
+	"github.com/gopherex/sqld/cmd/sqld-gen-bob/example/gen/bob/models"
+	"github.com/gopherex/sqld/example/gen/db"
+	"github.com/gopherex/sqld/pkg/devdb"
 )
 
 func strptr(s string) *string                        { return &s }

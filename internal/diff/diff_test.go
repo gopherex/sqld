@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yaroher/sqld/internal/catalog"
-	"github.com/yaroher/sqld/internal/parse"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	"github.com/gopherex/sqld/internal/catalog"
+	"github.com/gopherex/sqld/internal/parse"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // cat builds an IR catalog from DDL using parse + catalog.Build.

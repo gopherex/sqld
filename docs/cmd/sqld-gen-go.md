@@ -20,7 +20,7 @@ module so it can run on any platform that the sqld host supports.
 Install the latest release with `go install`:
 
 ```bash
-go install github.com/yaroher/sqld/cmd/sqld-gen-go@latest
+go install github.com/gopherex/sqld/cmd/sqld-gen-go@latest
 ```
 
 Or build from the repository (place the binary in `./bin/` as expected by the

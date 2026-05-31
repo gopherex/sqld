@@ -10,15 +10,15 @@
 //	err = sqld.Generate(cfg)        // Collect, then run the configured plugins
 //
 // The IR and plugin contract messages are protobuf types under
-// github.com/yaroher/sqld/pkg/proto/sqld/v1/{ir,plugin}.
-// The config is a plain Go struct under github.com/yaroher/sqld/pkg/config.
+// github.com/gopherex/sqld/pkg/proto/sqld/v1/{ir,plugin}.
+// The config is a plain Go struct under github.com/gopherex/sqld/pkg/config.
 package sqld
 
 import (
-	"github.com/yaroher/sqld/internal/core"
-	"github.com/yaroher/sqld/pkg/config"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	"github.com/gopherex/sqld/internal/core"
+	"github.com/gopherex/sqld/pkg/config"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 // Config re-exports the config type for callers who import only pkg/sqld.

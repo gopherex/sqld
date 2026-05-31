@@ -2,7 +2,7 @@ SHELL := bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
-ROOT_MODULE := github.com/yaroher/sqld
+ROOT_MODULE := github.com/gopherex/sqld
 # Max major allowed. v2+ needs semantic import versioning (/vN in module
 # paths), which we don't support yet — keep releases on v0/v1.
 MAX_MAJOR := 1

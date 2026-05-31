@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // Dependency ordering keys. Creates are applied in ascending order so that an

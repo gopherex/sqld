@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yaroher/sqld/pkg/config"
+	"github.com/gopherex/sqld/pkg/config"
 )
 
 const basicYAML = `

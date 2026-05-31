@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yaroher/sqld/internal/catalog"
-	"github.com/yaroher/sqld/internal/parse"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	"github.com/gopherex/sqld/internal/catalog"
+	"github.com/gopherex/sqld/internal/parse"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 	"google.golang.org/protobuf/proto"
 )
 

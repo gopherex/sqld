@@ -3,10 +3,10 @@ package mapper
 import (
 	"strconv"
 
+	"github.com/gopherex/sqld/internal/nodeid"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	pg "github.com/pganalyze/pg_query_go/v6"
 	pgquery "github.com/wasilibs/go-pgquery"
-	"github.com/yaroher/sqld/internal/nodeid"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // MapExpr maps a single libpg_query AST Node to an IR Expr, assigning the

@@ -8,8 +8,8 @@ import (
 	helpers "github.com/stephenafamo/bob/gen/bobgen-helpers"
 	"github.com/stephenafamo/bob/gen/drivers"
 
-	"github.com/yaroher/sqld/pkg/gotypes"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	"github.com/gopherex/sqld/pkg/gotypes"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // sqldDriver implements bob's drivers.Interface backed by an sqld IR Catalog.

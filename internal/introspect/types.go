@@ -3,7 +3,7 @@ package introspect
 import (
 	"context"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // loadTypes populates enums, domains, composites and ranges for the wanted

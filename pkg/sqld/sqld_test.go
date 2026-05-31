@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yaroher/sqld/pkg/config"
-	"github.com/yaroher/sqld/pkg/sqld"
+	"github.com/gopherex/sqld/pkg/config"
+	"github.com/gopherex/sqld/pkg/sqld"
 )
 
 // writeTempMigrations creates a temp dir with a single 0001.sql migration file

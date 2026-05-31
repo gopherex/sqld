@@ -5,8 +5,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/gopherex/sqld/pkg/devdb"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/yaroher/sqld/pkg/devdb"
 )
 
 func newDB(t *testing.T) (*pgxpool.Pool, func()) {

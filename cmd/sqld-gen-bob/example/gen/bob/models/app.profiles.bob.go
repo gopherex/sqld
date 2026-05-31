@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/aarondl/opt/null"
+	"github.com/gopherex/sqld/example/gen/db"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stephenafamo/bob"
 	"github.com/stephenafamo/bob/dialect/psql"
@@ -20,7 +21,6 @@ import (
 	"github.com/stephenafamo/bob/mods"
 	"github.com/stephenafamo/bob/orm"
 	"github.com/stephenafamo/bob/types/pgtypes"
-	"github.com/yaroher/sqld/example/gen/db"
 )
 
 // AppProfile is an object representing the database table.

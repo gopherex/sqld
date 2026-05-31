@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yaroher/sqld/internal/parse"
-	"github.com/yaroher/sqld/pkg/config"
+	"github.com/gopherex/sqld/internal/parse"
+	"github.com/gopherex/sqld/pkg/config"
 )
 
 func TestCollectCommand(t *testing.T) {

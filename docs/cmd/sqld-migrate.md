@@ -25,7 +25,7 @@ The migrator ships inside the `sqld` binary — there is no separate install.
 
 ```bash
 # from any module (no local clone required)
-go install github.com/yaroher/sqld/cmd/sqld@latest
+go install github.com/gopherex/sqld/cmd/sqld@latest
 
 # or build from the repository
 make build
@@ -347,7 +347,7 @@ import (
     "embed"
 
     "github.com/jackc/pgx/v5/pgxpool"
-    "github.com/yaroher/sqld/pkg/migrate"
+    "github.com/gopherex/sqld/pkg/migrate"
 )
 
 //go:embed migrations/*.sql

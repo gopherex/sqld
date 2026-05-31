@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aarondl/opt/null"
+	"github.com/gopherex/sqld/example/gen/db"
 	"github.com/stephenafamo/bob"
 	"github.com/stephenafamo/bob/dialect/psql"
 	"github.com/stephenafamo/bob/dialect/psql/dialect"
@@ -22,7 +23,6 @@ import (
 	"github.com/stephenafamo/bob/orm"
 	"github.com/stephenafamo/bob/types/pgtypes"
 	"github.com/stephenafamo/scan"
-	"github.com/yaroher/sqld/example/gen/db"
 )
 
 // AppUser is an object representing the database table.

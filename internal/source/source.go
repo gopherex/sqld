@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/yaroher/sqld/pkg/config"
+	"github.com/gopherex/sqld/pkg/config"
 )
 
 type Kind int

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // Derive inspects every table's FK constraints in cat and returns a

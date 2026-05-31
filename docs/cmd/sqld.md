@@ -14,7 +14,7 @@ in config order → write the response files under each plugin's `out` directory
 
 ```sh
 # via go install (recommended)
-go install github.com/yaroher/sqld/cmd/sqld@latest
+go install github.com/gopherex/sqld/cmd/sqld@latest
 
 # or build from source
 make build       # → bin/sqld (includes migrate), bin/sqld-gen-go
@@ -313,7 +313,7 @@ plugins:
 The `pkg/sqld` package exposes the same pipeline programmatically:
 
 ```go
-import "github.com/yaroher/sqld/pkg/sqld"
+import "github.com/gopherex/sqld/pkg/sqld"
 
 // Load and validate sqld.yaml
 cfg, err := sqld.LoadConfig("sqld.yaml")
@@ -332,8 +332,8 @@ catalog, err = sqld.CollectFile("sqld.yaml")
 err           = sqld.GenerateFile("sqld.yaml")
 ```
 
-Proto types are under `github.com/yaroher/sqld/pkg/proto/sqld/v1/{ir,plugin}`.
-Config struct is under `github.com/yaroher/sqld/pkg/config`.
+Proto types are under `github.com/gopherex/sqld/pkg/proto/sqld/v1/{ir,plugin}`.
+Config struct is under `github.com/gopherex/sqld/pkg/config`.
 
 ---
 

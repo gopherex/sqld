@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // firstTable returns the first table in the first schema of the catalog built

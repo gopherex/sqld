@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yaroher/sqld/pkg/config"
+	"github.com/gopherex/sqld/pkg/config"
 )
 
 func TestResolveQueryDir(t *testing.T) {

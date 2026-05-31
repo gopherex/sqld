@@ -88,9 +88,9 @@ package mapper
 //   DEFAULT nextval(); the backing sequence is implicit and not in the parse tree.
 
 import (
+	"github.com/gopherex/sqld/internal/nodeid"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	pg "github.com/pganalyze/pg_query_go/v6"
-	"github.com/yaroher/sqld/internal/nodeid"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // ---------------------------------------------------------------------------

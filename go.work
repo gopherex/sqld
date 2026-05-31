@@ -9,7 +9,7 @@ use (
 // The replace lives here, in go.work, NOT in cmd/sqld-gen-bob/go.mod: end-user
 // `go install .../cmd/sqld-gen-bob@vX` ignores the workspace and rejects a
 // go.mod that carries a replace directive, so installs fall back to the pinned
-// `require github.com/yaroher/sqld vX.Y.Z`. It is version-specific (the root is
+// `require github.com/gopherex/sqld vX.Y.Z`. It is version-specific (the root is
 // also `use`d, which forbids an all-versions replace) and must match
 // cmd/sqld-gen-bob's require — `make release` keeps both in lockstep.
-replace github.com/yaroher/sqld v0.1.0 => ./
+replace github.com/gopherex/sqld v0.1.0 => ./

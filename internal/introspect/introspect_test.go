@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gopherex/sqld/pkg/devdb"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	"github.com/jackc/pgx/v5"
-	"github.com/yaroher/sqld/pkg/devdb"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // richDDL exercises every object kind the introspector handles.

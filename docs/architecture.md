@@ -260,7 +260,7 @@ See [docs/cmd/sqld-gen-bob.md](cmd/sqld-gen-bob.md) for the full setup, and
 ## 6. Repository & module layout
 
 ```
-sqld/                                   module github.com/yaroher/sqld   (core)
+sqld/                                   module github.com/gopherex/sqld   (core)
 ├── go.mod                              core deps: pgx, pg_query, wazero, grpc/proto, testcontainers
 ├── go.work                            ties the two modules together
 ├── proto/sqld/v1/{ir,plugin}/*.proto  IR + plugin contract source
@@ -281,8 +281,8 @@ sqld/                                   module github.com/yaroher/sqld   (core)
 │   ├── sqld/                          host CLI (init / generate / collect / migrate)
 │   ├── sqld-gen-go/                   built-in Go (sqlc-style) generator plugin
 │   └── sqld-gen-bob/                  bob ORM generator   ── NESTED MODULE ──
-│       ├── go.mod                     module github.com/yaroher/sqld/cmd/sqld-gen-bob
-│       │                              replace github.com/yaroher/sqld => ../../
+│       ├── go.mod                     module github.com/gopherex/sqld/cmd/sqld-gen-bob
+│       │                              replace github.com/gopherex/sqld => ../../
 │       └── ...                        bridge.go, driver.go, generate.go, options.go
 └── example/                           worked example: schema, queries, migrations, generated output
 ```
@@ -290,14 +290,14 @@ sqld/                                   module github.com/yaroher/sqld   (core)
 ### Why two modules
 
 `cmd/sqld-gen-bob` is a **separate, nested Go module**
-(`github.com/yaroher/sqld/cmd/sqld-gen-bob`) rather than part of the root
+(`github.com/gopherex/sqld/cmd/sqld-gen-bob`) rather than part of the root
 module. The reason: the bob ORM (`github.com/stephenafamo/bob`) and its support
 libraries (`aarondl/opt`, `stephenafamo/scan`, sprig/koanf, ...) are a large
 dependency that only matters to projects opting into the ORM. Isolating it in a
 nested module keeps the **core `go.mod` free of bob** — projects that only use
 `sqld-gen-go` never pull bob.
 
-The nested module declares `replace github.com/yaroher/sqld => ../../` so it
+The nested module declares `replace github.com/gopherex/sqld => ../../` so it
 builds against the in-tree core. A root **`go.work`** ties both modules together
 for local development:
 
@@ -313,9 +313,9 @@ use (
 ### Installing the three binaries
 
 ```sh
-go install github.com/yaroher/sqld/cmd/sqld@latest
-go install github.com/yaroher/sqld/cmd/sqld-gen-go@latest
-go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest   # nested module — keeps bob out of the core go.mod
+go install github.com/gopherex/sqld/cmd/sqld@latest
+go install github.com/gopherex/sqld/cmd/sqld-gen-go@latest
+go install github.com/gopherex/sqld/cmd/sqld-gen-bob@latest   # nested module — keeps bob out of the core go.mod
 ```
 
 The migrator is **not** a separate binary — it ships inside `sqld` as the

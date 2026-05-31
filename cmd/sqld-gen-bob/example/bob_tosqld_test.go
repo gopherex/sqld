@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/aarondl/opt/null"
-	"github.com/yaroher/sqld/cmd/sqld-gen-bob/example/gen/bob/models"
-	"github.com/yaroher/sqld/example/gen/db"
+	"github.com/gopherex/sqld/cmd/sqld-gen-bob/example/gen/bob/models"
+	"github.com/gopherex/sqld/example/gen/db"
 )
 
 // TestToSqld exercises the auto-generated bob→sqld bridge (sqld_bridge.go),

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // testCatalog builds a one-schema catalog: an enum account_status and a table

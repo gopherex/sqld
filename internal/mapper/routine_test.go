@@ -3,8 +3,8 @@ package mapper
 import (
 	"testing"
 
-	"github.com/yaroher/sqld/internal/parse"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	"github.com/gopherex/sqld/internal/parse"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-module github.com/yaroher/sqld/cmd/sqld-gen-bob
+module github.com/gopherex/sqld/cmd/sqld-gen-bob
 
 go 1.25.0
 
@@ -14,7 +14,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/stephenafamo/bob v0.44.0
 	github.com/stephenafamo/scan v0.7.0
-	github.com/yaroher/sqld v0.1.0
+	github.com/gopherex/sqld v0.1.0
 	google.golang.org/protobuf v1.36.11
 )
 

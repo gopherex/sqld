@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
 // loadIndexes reads pg_index for the relations in the wanted schemas and

@@ -13,8 +13,8 @@ import (
 
 	pg "github.com/pganalyze/pg_query_go/v6"
 
-	"github.com/yaroher/sqld/internal/parse"
-	"github.com/yaroher/sqld/pkg/migrate"
+	"github.com/gopherex/sqld/internal/parse"
+	"github.com/gopherex/sqld/pkg/migrate"
 )
 
 // Severity is the seriousness of a Finding.

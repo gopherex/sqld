@@ -8,8 +8,8 @@ import (
 	"github.com/stephenafamo/bob/gen"
 	"github.com/stephenafamo/bob/gen/plugins"
 
-	"github.com/yaroher/sqld/pkg/gotypes"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	"github.com/gopherex/sqld/pkg/gotypes"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 // Generate runs bob's code generator over the request's catalog, writing the

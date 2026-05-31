@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yaroher/sqld/pkg/config"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	"github.com/gopherex/sqld/pkg/config"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 // Method tags written as the first stdin byte when invoking a plugin process.

@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/yaroher/sqld/pkg/gotypes"
-	irv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir"
-	pluginv1 "github.com/yaroher/sqld/pkg/proto/sqld/v1/plugin"
+	"github.com/gopherex/sqld/pkg/gotypes"
+	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
+	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
 )
 
 // The pg→Go type mapping lives in the shared pkg/gotypes package so that both

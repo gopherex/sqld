@@ -11,9 +11,9 @@ This is the ORM ⊕ sqlc tandem: `sqld-gen-go` owns hand-written and dynamic
 queries (and the leaf Go types); `sqld-gen-bob` owns the ORM surface. Both are
 fully open (sqld and bob are MIT/permissive — nothing paywalled).
 
-`sqld-gen-bob` lives in a **separate Go module** (`github.com/yaroher/sqld/cmd/sqld-gen-bob`, nested)
+`sqld-gen-bob` lives in a **separate Go module** (`github.com/gopherex/sqld/cmd/sqld-gen-bob`, nested)
 so the bob dependency stays out of the core `go.mod`. Install the plugin with
-`go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest`; only projects
+`go install github.com/gopherex/sqld/cmd/sqld-gen-bob@latest`; only projects
 that opt into the ORM pull bob.
 
 ## How it works
@@ -56,7 +56,7 @@ plugins:
         uuid: github.com/google/uuid.UUID
 
   - name: bob
-    command: sqld-gen-bob       # go install github.com/yaroher/sqld/cmd/sqld-gen-bob@latest
+    command: sqld-gen-bob       # go install github.com/gopherex/sqld/cmd/sqld-gen-bob@latest
     out: gen/bob
     options:
       package: models

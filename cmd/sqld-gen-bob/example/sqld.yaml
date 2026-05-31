@@ -18,7 +18,7 @@ plugins:
     out: cmd/sqld-gen-bob/example/gen/bob
     options:
       package: models
-      typesPackage: github.com/yaroher/sqld/example/gen/db
+      typesPackage: github.com/gopherex/sqld/example/gen/db
       overrides:
         "app.kitchen_sink.c_jsonb": map[string]any
         uuid: github.com/google/uuid.UUID

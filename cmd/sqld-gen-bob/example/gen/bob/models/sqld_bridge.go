@@ -2,7 +2,7 @@
 
 package models
 
-import db "github.com/yaroher/sqld/example/gen/db"
+import db "github.com/gopherex/sqld/example/gen/db"
 
 // ToSqld converts the bob model to the sqld-gen-go model (db.AppUsers),
 // dropping bob's ORM fields. Leaf types are shared, so this is a plain copy

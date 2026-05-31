@@ -4,7 +4,7 @@ package sqld.v1.ir;
 
 import "sqld/v1/ir/common.proto";
 
-option go_package = "github.com/yaroher/sqld/pkg/proto/sqld/v1/ir;irv1";
+option go_package = "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1";
 
 // ----------------------------------------------------------------------------
 // Derived relationship graph (design fork 1c).
