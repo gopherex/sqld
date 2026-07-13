@@ -48,6 +48,37 @@ func TestGoTypePointerMode(t *testing.T) {
 	}
 }
 
+func TestGoTypeArrayPreservesTypeOverride(t *testing.T) {
+	m := NewMapper2(nil, Overrides{"uuid": "github.com/google/uuid.UUID"}, Pointer)
+	array := &irv1.TypeRef{
+		Kind:    irv1.TypeKind_TYPE_KIND_ARRAY,
+		PgName:  "uuid",
+		Element: scalarRef("uuid"),
+	}
+	expr, imps := m.GoType("", array, false)
+	if expr != "[]uuid.UUID" {
+		t.Fatalf("GoType array=%q want %q", expr, "[]uuid.UUID")
+	}
+	wantImports := []string{"github.com/google/uuid"}
+	if !importsEqual(imps, wantImports) {
+		t.Fatalf("GoType imports=%v want %v", imps, wantImports)
+	}
+	if m.IsNullWrapped("", array, true) {
+		t.Fatal("nullable array override must remain a nil-capable slice")
+	}
+}
+
+func TestParseOverrideValueArrayImport(t *testing.T) {
+	expr, imps := ParseOverrideValue("[]github.com/google/uuid.UUID")
+	if expr != "[]uuid.UUID" {
+		t.Fatalf("expr=%q want %q", expr, "[]uuid.UUID")
+	}
+	wantImports := []string{"github.com/google/uuid"}
+	if !importsEqual(imps, wantImports) {
+		t.Fatalf("imports=%v want %v", imps, wantImports)
+	}
+}
+
 func TestGoTypeUDTPackage(t *testing.T) {
 	// Catalog with an enum app.user_status; gen-go names it "AppUserStatus".
 	cat := &irv1.Catalog{

@@ -53,6 +53,10 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	if q.Ast.GetUpdate() != nil {
 		inferUpdateSetParamNames(q.Ast.GetUpdate(), paramMap, catIdx)
 	}
+	if ins := q.Ast.GetInsert(); ins != nil {
+		tbl := catIdx.lookupTable(ins.GetTableName().GetName())
+		inferInsertParamTypes(ins, paramMap, tbl)
+	}
 
 	// Emit diagnostics for unresolved params and build the ordered param slice.
 	// Order by position (1-based).
@@ -119,9 +123,6 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 			q.Columns = append(q.Columns, cols...)
 		}
 
-		// Also infer INSERT parameter types from the column list + table schema.
-		inferInsertParamTypes(ins, paramMap, tbl)
-
 	case q.Ast.GetUpdate() != nil:
 		upd := q.Ast.GetUpdate()
 		returning := upd.GetReturning()
@@ -184,12 +185,10 @@ func inferInsertParamTypes(ins *irv1.InsertStmt, paramMap map[uint32]*pluginv1.Q
 	if vals == nil {
 		return
 	}
-	// Build col→type lookup.
-	colType := make(map[string]*irv1.TypeRef, len(tbl.GetColumns()))
-	colNullable := make(map[string]bool, len(tbl.GetColumns()))
+	// Build column lookup.
+	columns := make(map[string]*irv1.Column, len(tbl.GetColumns()))
 	for _, c := range tbl.GetColumns() {
-		colType[strings.ToLower(c.GetName())] = c.GetType()
-		colNullable[strings.ToLower(c.GetName())] = c.GetNullable()
+		columns[strings.ToLower(c.GetName())] = c
 	}
 	for _, row := range vals.GetRows() {
 		for i, expr := range row.GetValues() {
@@ -206,9 +205,10 @@ func inferInsertParamTypes(ins *irv1.InsertStmt, paramMap map[uint32]*pluginv1.Q
 				continue
 			}
 			colName := strings.ToLower(cols[i])
-			if t, ok := colType[colName]; ok {
-				p.Type = t
-				p.Nullable = colNullable[colName]
+			if col, ok := columns[colName]; ok {
+				p.Type = col.GetType()
+				p.Nullable = col.GetNullable()
+				p.Column = &irv1.ObjectRef{Id: col.GetId(), Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN}
 				if p.Name == "" {
 					p.Name = cols[i]
 				}

@@ -271,6 +271,9 @@ func TestInferParamNamesUpdate(t *testing.T) {
 	if p2.GetName() != "status" {
 		t.Errorf("$2 Name=%q want \"status\"", p2.GetName())
 	}
+	if p1.GetType().GetPgName() != "int8" || p2.GetType().GetPgName() != "text" {
+		t.Errorf("types=(%q, %q) want (int8, text)", p1.GetType().GetPgName(), p2.GetType().GetPgName())
+	}
 }
 
 // TestInferParamNamesInsert: positional params in INSERT VALUES get names from
@@ -304,6 +307,36 @@ func TestInferParamNamesInsert(t *testing.T) {
 	}
 	if p2.GetName() != "email" {
 		t.Errorf("$2 Name=%q want \"email\"", p2.GetName())
+	}
+	if p1.GetType().GetPgName() != "int8" || p2.GetType().GetPgName() != "text" {
+		t.Errorf("types=(%q, %q) want (int8, text)", p1.GetType().GetPgName(), p2.GetType().GetPgName())
+	}
+}
+
+func TestInferInsertParamTypesWithoutReturning(t *testing.T) {
+	stmts, _ := parse.Statements("CREATE TABLE users(id bigint primary key, email text not null);")
+	cat, _ := catalog.Build(stmts)
+	qs, err := ParseQueries(
+		"-- name: C :exec\nINSERT INTO users (id, email) VALUES ($1, $2);\n",
+		"q.sql",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d catalog.Diagnostics
+	Infer(qs[0], cat, &d)
+	params := qs[0].GetParameters()
+	if len(params) != 2 {
+		t.Fatalf("params=%d want 2", len(params))
+	}
+	if got := params[0].GetType().GetPgName(); got != "int8" {
+		t.Errorf("$1 type=%q want int8", got)
+	}
+	if got := params[1].GetType().GetPgName(); got != "text" {
+		t.Errorf("$2 type=%q want text", got)
+	}
+	if params[0].GetColumn().GetId() == "" || params[1].GetColumn().GetId() == "" {
+		t.Errorf("column refs not inferred: %+v", params)
 	}
 }
 

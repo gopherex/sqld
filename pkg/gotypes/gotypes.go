@@ -114,8 +114,9 @@ func (m *Mapper) IsNullWrapped(columnID string, t *irv1.TypeRef, nullable bool) 
 }
 
 // resolveBaseExpr returns the non-null base Go type expression for a column,
-// applying overrides the same way GoType does (column id, then pg type name,
-// then the default mapping). It never wraps for nullability.
+// applying overrides the same way GoType does (column id, then an array's
+// element type or a scalar pg type, then the default mapping). It never wraps
+// for nullability.
 func (m *Mapper) resolveBaseExpr(columnID string, t *irv1.TypeRef) (string, []string) {
 	if m.ov != nil {
 		if columnID != "" {
@@ -123,6 +124,11 @@ func (m *Mapper) resolveBaseExpr(columnID string, t *irv1.TypeRef) (string, []st
 				return parseOverrideValue(v)
 			}
 		}
+	}
+	if t != nil && t.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
+		return m.GoType("", t, false)
+	}
+	if m.ov != nil {
 		if t != nil {
 			if v, ok := m.ov[t.GetPgName()]; ok {
 				return parseOverrideValue(v)
@@ -135,8 +141,9 @@ func (m *Mapper) resolveBaseExpr(columnID string, t *irv1.TypeRef) (string, []st
 // GoType chooses the Go type for a value, applying overrides before falling back
 // to the default mapping. Precedence:
 //  1. an override keyed by the (non-empty) columnID;
-//  2. an override keyed by the TypeRef's PostgreSQL name;
-//  3. the default mapping.
+//  2. for arrays, an override keyed by the element PostgreSQL name;
+//  3. an override keyed by the non-array TypeRef's PostgreSQL name;
+//  4. the default mapping.
 //
 // For override hits, a nullable value is wrapped via wrapNull unless the
 // override Go type already has a nil-capable zero value.
@@ -147,6 +154,12 @@ func (m *Mapper) GoType(columnID string, t *irv1.TypeRef, nullable bool) (goExpr
 				return m.overrideGoType(v, nullable)
 			}
 		}
+	}
+	if t != nil && t.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
+		elemExpr, elemImports := m.GoType("", t.GetElement(), false)
+		return "[]" + elemExpr, elemImports
+	}
+	if m.ov != nil {
 		if t != nil {
 			if v, ok := m.ov[t.GetPgName()]; ok {
 				return m.overrideGoType(v, nullable)
@@ -171,6 +184,12 @@ func (m *Mapper) ParamType(columnID string, t *irv1.TypeRef, nullable bool) (goE
 				return m.overrideGoType(v, nullable)
 			}
 		}
+	}
+	if t != nil && t.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
+		elemExpr, elemImports := m.ParamType("", t.GetElement(), false)
+		return "[]" + elemExpr, elemImports
+	}
+	if m.ov != nil {
 		if t != nil {
 			if v, ok := m.ov[t.GetPgName()]; ok {
 				return m.overrideGoType(v, nullable)

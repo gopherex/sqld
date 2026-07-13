@@ -82,7 +82,17 @@ func UDTName(schema, name string) string {
 //     path segment).
 //   - A value without "/" is a bare Go type used verbatim with no import, EXCEPT
 //     that "json.RawMessage" (or any "json.*") adds the "encoding/json" import.
+//   - Leading slice and pointer markers are preserved while the element type is
+//     resolved, so "[]github.com/google/uuid.UUID" imports uuid correctly.
 func parseOverrideValue(v string) (goExpr string, imports []string) {
+	if strings.HasPrefix(v, "[]") {
+		expr, imps := parseOverrideValue(strings.TrimPrefix(v, "[]"))
+		return "[]" + expr, imps
+	}
+	if strings.HasPrefix(v, "*") {
+		expr, imps := parseOverrideValue(strings.TrimPrefix(v, "*"))
+		return "*" + expr, imps
+	}
 	if strings.Contains(v, "/") {
 		// import path + ".TypeName" split on the last dot.
 		dot := strings.LastIndex(v, ".")

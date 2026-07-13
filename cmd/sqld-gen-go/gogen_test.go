@@ -141,6 +141,136 @@ func TestGenerateDynamicQuery(t *testing.T) {
 	}
 }
 
+func TestGenerateDynamicQueryPreservesSuffixAndAllConditionParams(t *testing.T) {
+	sql := "SELECT timeline_id, msg_id FROM messages\n" +
+		"WHERE\n" +
+		"  timeline_id = $1\n" +
+		"  AND text IS NOT NULL\n" +
+		"  AND msg_id = ANY ($2)\n" +
+		"  AND ($3 IS NULL OR (created_at, timeline_id, msg_id) < ($3::timestamptz,\n" +
+		"    $4::uuid, $5::bigint))\n" +
+		"ORDER BY msg_id ASC\n" +
+		"LIMIT $6;"
+	req := &pluginv1.GenerateRequest{Queries: []*pluginv1.Query{{
+		Name:    "MessagesBefore",
+		Sql:     sql,
+		Command: pluginv1.QueryCommand_QUERY_COMMAND_MANY,
+		Parameters: []*pluginv1.QueryParameter{
+			{Number: 1, Name: "timeline_id", Type: &irv1.TypeRef{PgName: "uuid"}},
+			{Number: 2, Name: "msg_ids", Type: &irv1.TypeRef{PgName: "int8"}},
+			{Number: 3, Name: "before_at", Optional: true, Type: &irv1.TypeRef{PgName: "timestamptz"}},
+			{Number: 4, Name: "before_timeline", Type: &irv1.TypeRef{PgName: "uuid"}},
+			{Number: 5, Name: "before_msg", Type: &irv1.TypeRef{PgName: "int8"}},
+			{Number: 6, Name: "limit", Type: &irv1.TypeRef{PgName: "int4"}},
+		},
+		Columns: []*pluginv1.QueryColumn{
+			{Name: "timeline_id", Type: &irv1.TypeRef{PgName: "uuid"}},
+			{Name: "msg_id", Type: &irv1.TypeRef{PgName: "int8"}},
+		},
+	}}}
+
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generated string
+	for _, file := range resp.GetFiles() {
+		if file.GetPath() == "queries.go" {
+			generated = string(file.GetContents())
+		}
+	}
+	if generated == "" {
+		t.Fatal("queries.go not found in response")
+	}
+
+	for _, want := range []string{
+		"TimelineID",
+		"MsgIds",
+		"[]int64",
+		"BeforeAt",
+		"*time.Time",
+		"BeforeTimeline",
+		"BeforeMsg",
+		"Limit",
+		`conds = append(conds, "text IS NOT NULL")`,
+		`if len(arg.MsgIds) > 0`,
+		`if arg.BeforeAt != nil`,
+		`args = append(args, *arg.BeforeAt)`,
+		`args = append(args, arg.BeforeTimeline)`,
+		`args = append(args, arg.BeforeMsg)`,
+		`fmt.Sprintf("($%d IS NULL OR (created_at, timeline_id, msg_id) < ($%d::timestamptz,\n$%d::uuid, $%d::bigint))", len(args)-2, len(args)-2, len(args)-1, len(args))`,
+		`args = append(args, arg.Limit)`,
+		`b.WriteString(fmt.Sprintf(" ORDER BY msg_id ASC\nLIMIT $%d", len(args)))`,
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("missing %q in:\n%s", want, generated)
+		}
+	}
+	if count := strings.Count(generated, "\tBeforeAt"); count != 1 {
+		t.Fatalf("BeforeAt field count=%d want 1 in:\n%s", count, generated)
+	}
+	for _, bad := range []string{"Arg0", `fmt.Sprintf("text IS NOT NULL"`, `conds = append(conds, fmt.Sprintf("ORDER BY`} {
+		if strings.Contains(generated, bad) {
+			t.Fatalf("found disallowed %q in:\n%s", bad, generated)
+		}
+	}
+}
+
+func TestGenerateDynamicQueryIncludesParamsBeforeWhere(t *testing.T) {
+	req := &pluginv1.GenerateRequest{Queries: []*pluginv1.Query{{
+		Name:    "UpdateMessage",
+		Sql:     "UPDATE messages SET text = $1\nWHERE id = $2\nAND author_id = $3\nRETURNING id;",
+		Command: pluginv1.QueryCommand_QUERY_COMMAND_EXEC_ROWS,
+		Parameters: []*pluginv1.QueryParameter{
+			{Number: 1, Name: "text", Type: &irv1.TypeRef{PgName: "text"}},
+			{Number: 2, Name: "id", Type: &irv1.TypeRef{PgName: "int8"}},
+			{Number: 3, Name: "author_id", Optional: true, Type: &irv1.TypeRef{PgName: "uuid"}},
+		},
+	}}}
+	resp, err := Generate(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generated string
+	for _, file := range resp.GetFiles() {
+		if file.GetPath() == "queries.go" {
+			generated = string(file.GetContents())
+		}
+	}
+	for _, want := range []string{
+		`args = append(args, arg.Text)`,
+		`b.WriteString(fmt.Sprintf("UPDATE messages SET text = $%d", len(args)))`,
+		`if arg.AuthorID != nil`,
+		`b.WriteString(" RETURNING id")`,
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("missing %q in:\n%s", want, generated)
+		}
+	}
+}
+
+func TestSplitWhereSuffixOnlyUsesTopLevelClauses(t *testing.T) {
+	body, suffix := splitWhereSuffix("EXISTS (SELECT 1 FROM x ORDER BY x.id LIMIT 1) AND note = 'LIMIT 2' ORDER BY created_at DESC LIMIT 20")
+	if want := "EXISTS (SELECT 1 FROM x ORDER BY x.id LIMIT 1) AND note = 'LIMIT 2'"; body != want {
+		t.Fatalf("body=%q want %q", body, want)
+	}
+	if want := "ORDER BY created_at DESC LIMIT 20"; suffix != want {
+		t.Fatalf("suffix=%q want %q", suffix, want)
+	}
+	for _, clause := range []string{
+		"ORDER BY id", "GROUP BY id", "HAVING count(*) > 1", "LIMIT 1",
+		"OFFSET 1", "FETCH FIRST 1 ROW ONLY", "WINDOW w AS ()", "UNION SELECT 1",
+		"INTERSECT SELECT 1", "EXCEPT SELECT 1", "RETURNING id", "ON CONFLICT DO NOTHING",
+	} {
+		t.Run(strings.Fields(clause)[0], func(t *testing.T) {
+			body, suffix := splitWhereSuffix("id = $1 " + clause)
+			if body != "id = $1" || suffix != clause {
+				t.Fatalf("split=(%q, %q) want (%q, %q)", body, suffix, "id = $1", clause)
+			}
+		})
+	}
+}
+
 func keys(m map[string]string) []string {
 	ks := make([]string, 0, len(m))
 	for k := range m {
