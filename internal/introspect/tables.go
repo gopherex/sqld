@@ -157,12 +157,15 @@ func (b *builder) loadConstraints(ctx context.Context, schemas []string) error {
 	// Column names are resolved inside SQL (correlated subqueries over
 	// pg_attribute) so we never issue a nested query on the same connection
 	// while iterating this result set.
+	// indnullsnotdistinct is read through to_jsonb so this query also works on
+	// PostgreSQL versions before the column was introduced in PostgreSQL 15.
 	const q = `
 SELECT con.conrelid,
        con.conname,
        con.contype::text,
        con.condeferrable,
        con.condeferred,
+       COALESCE((to_jsonb(ci)->>'indnullsnotdistinct')::boolean, false),
        con.confupdtype::text,
        con.confdeltype::text,
        con.confmatchtype::text,
@@ -182,6 +185,7 @@ JOIN pg_catalog.pg_class rc ON rc.oid = con.conrelid
 JOIN pg_catalog.pg_namespace rn ON rn.oid = rc.relnamespace
 LEFT JOIN pg_catalog.pg_class fc ON fc.oid = con.confrelid
 LEFT JOIN pg_catalog.pg_namespace fn ON fn.oid = fc.relnamespace
+LEFT JOIN pg_catalog.pg_index ci ON ci.indexrelid = con.conindid
 WHERE rn.nspname = ANY($1)
   AND con.contype IN ('p','f','u','c','x')
   AND rc.relkind = 'r'
@@ -194,22 +198,23 @@ ORDER BY rn.nspname, rc.relname, con.conname`
 
 	for rows.Next() {
 		var (
-			conrelid    uint32
-			conname     string
-			contype     string
-			deferrable  bool
-			deferred    bool
-			confupdtype string
-			confdeltype string
-			confmatch   string
-			def         string
-			localCols   []string
-			refCols     []string
-			refSchema   *string
-			refName     *string
+			conrelid         uint32
+			conname          string
+			contype          string
+			deferrable       bool
+			deferred         bool
+			nullsNotDistinct bool
+			confupdtype      string
+			confdeltype      string
+			confmatch        string
+			def              string
+			localCols        []string
+			refCols          []string
+			refSchema        *string
+			refName          *string
 		)
 		if err := rows.Scan(&conrelid, &conname, &contype, &deferrable,
-			&deferred, &confupdtype, &confdeltype, &confmatch, &def,
+			&deferred, &nullsNotDistinct, &confupdtype, &confdeltype, &confmatch, &def,
 			&localCols, &refCols, &refSchema, &refName); err != nil {
 			return err
 		}
@@ -235,7 +240,10 @@ ORDER BY rn.nspname, rc.relname, con.conname`
 		case "u":
 			c.Type = irv1.ConstraintType_CONSTRAINT_TYPE_UNIQUE
 			c.Body = &irv1.Constraint_Unique{
-				Unique: &irv1.UniqueConstraint{Columns: localCols},
+				Unique: &irv1.UniqueConstraint{
+					Columns:          localCols,
+					NullsNotDistinct: nullsNotDistinct,
+				},
 			}
 		case "c":
 			c.Type = irv1.ConstraintType_CONSTRAINT_TYPE_CHECK

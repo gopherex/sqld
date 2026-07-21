@@ -22,12 +22,16 @@ func (b *builder) loadIndexes(ctx context.Context, schemas []string) error {
 	// Column names are resolved in SQL. keycol_names holds one entry per key
 	// attribute (in order); a NULL entry marks an expression key (attnum 0).
 	// inc_names holds the INCLUDE (covering) column names.
+	// indnullsnotdistinct is read through to_jsonb so this query also works on
+	// PostgreSQL versions before the column was introduced in PostgreSQL 15.
 	const q = `
 SELECT i.indrelid                                AS table_oid,
        ic.relname                                AS index_name,
        am.amname                                 AS method,
        i.indisunique                             AS is_unique,
        i.indisprimary                            AS is_primary,
+       COALESCE((to_jsonb(i)->>'indnullsnotdistinct')::boolean, false)
+                                                  AS nulls_not_distinct,
        (SELECT array_agg(a.attname ORDER BY k.ord)
         FROM unnest((string_to_array(i.indkey::text,' ')::int2[])[1:i.indnkeyatts])
              WITH ORDINALITY AS k(attnum, ord)
@@ -58,18 +62,19 @@ ORDER BY n.nspname, tc.relname, ic.relname`
 
 	for rows.Next() {
 		var (
-			tableOID    uint32
-			indexName   string
-			method      string
-			isUnique    bool
-			isPrimary   bool
-			keycolNames []*string
-			incNames    []string
-			predicate   *string
-			indexdef    string
+			tableOID         uint32
+			indexName        string
+			method           string
+			isUnique         bool
+			isPrimary        bool
+			nullsNotDistinct bool
+			keycolNames      []*string
+			incNames         []string
+			predicate        *string
+			indexdef         string
 		)
 		if err := rows.Scan(&tableOID, &indexName, &method, &isUnique,
-			&isPrimary, &keycolNames, &incNames, &predicate, &indexdef); err != nil {
+			&isPrimary, &nullsNotDistinct, &keycolNames, &incNames, &predicate, &indexdef); err != nil {
 			return err
 		}
 
@@ -79,12 +84,13 @@ ORDER BY n.nspname, tc.relname, ic.relname`
 		}
 
 		idx := &irv1.Index{
-			Id:      tbl.GetId() + "." + indexName,
-			Name:    indexName,
-			Method:  method,
-			Unique:  isUnique,
-			Primary: isPrimary,
-			Include: incNames,
+			Id:               tbl.GetId() + "." + indexName,
+			Name:             indexName,
+			Method:           method,
+			Unique:           isUnique,
+			Primary:          isPrimary,
+			NullsNotDistinct: nullsNotDistinct,
+			Include:          incNames,
 		}
 		if predicate != nil {
 			idx.Predicate = rawExpr(*predicate)

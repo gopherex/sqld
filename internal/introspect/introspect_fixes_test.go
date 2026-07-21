@@ -211,6 +211,66 @@ func TestIntrospectConstraintBackedIndexExcluded(t *testing.T) {
 	applyOnFreshPG(t, up)
 }
 
+func TestIntrospectNullsNotDistinct(t *testing.T) {
+	const ddl = `
+CREATE TABLE event_rsvps (
+  event_id bigint,
+  user_id bigint,
+  occurrence_at timestamptz,
+  CONSTRAINT event_rsvps_pk
+    UNIQUE NULLS NOT DISTINCT (event_id, user_id, occurrence_at)
+);
+CREATE UNIQUE INDEX event_rsvps_lookup_uidx
+  ON event_rsvps (user_id, occurrence_at) NULLS NOT DISTINCT;`
+
+	cat := introspectDDL(t, ddl, []string{"public"})
+	tbl := tableIn(findSchemaCat(cat, "public"), "event_rsvps")
+	if tbl == nil {
+		t.Fatal("table event_rsvps not introspected")
+	}
+
+	var uniqueConstraint *irv1.UniqueConstraint
+	for _, c := range tbl.GetConstraints() {
+		if c.GetName() == "event_rsvps_pk" {
+			uniqueConstraint = c.GetUnique()
+			break
+		}
+	}
+	if uniqueConstraint == nil {
+		t.Fatal("unique constraint event_rsvps_pk not introspected")
+	}
+	if !uniqueConstraint.GetNullsNotDistinct() {
+		t.Fatal("unique constraint lost NULLS NOT DISTINCT")
+	}
+
+	var uniqueIndex *irv1.Index
+	for _, idx := range tbl.GetIndexes() {
+		if idx.GetName() == "event_rsvps_lookup_uidx" {
+			uniqueIndex = idx
+			break
+		}
+	}
+	if uniqueIndex == nil {
+		t.Fatal("unique index event_rsvps_lookup_uidx not introspected")
+	}
+	if !uniqueIndex.GetNullsNotDistinct() {
+		t.Fatal("unique index lost NULLS NOT DISTINCT")
+	}
+
+	plan, err := diff.Diff(&irv1.Catalog{}, cat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := plan.UpSQL()
+	if !strings.Contains(up, `UNIQUE NULLS NOT DISTINCT ("event_id", "user_id", "occurrence_at")`) {
+		t.Fatalf("generated constraint lost NULLS NOT DISTINCT:\n%s", up)
+	}
+	if !strings.Contains(up, `CREATE UNIQUE INDEX "event_rsvps_lookup_uidx" ON "public"."event_rsvps" ("user_id", "occurrence_at") NULLS NOT DISTINCT;`) {
+		t.Fatalf("generated index lost NULLS NOT DISTINCT:\n%s", up)
+	}
+	applyOnFreshPG(t, up)
+}
+
 // TestIntrospectExclusionConstraint (C4) verifies an EXCLUSION constraint
 // introspects to a non-empty, valid EXCLUDE body (not "EXCLUDE ()") whose
 // generated DDL applies on a real PG.
