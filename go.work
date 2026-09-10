@@ -12,4 +12,4 @@ use (
 // `require github.com/gopherex/sqld vX.Y.Z`. It is version-specific (the root is
 // also `use`d, which forbids an all-versions replace) and must match
 // cmd/sqld-gen-bob's require — `make release` keeps both in lockstep.
-replace github.com/gopherex/sqld v1.0.2 => ./
+replace github.com/gopherex/sqld v1.1.0 => ./
