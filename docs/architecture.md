@@ -132,7 +132,12 @@ stages:
    positional `$N` placeholders (`named.go`), and then `Infer` walks the
    statement AST against the catalog to deduce each query's bind parameters
    (`QueryParameter`) and output columns (`QueryColumn`), including nullability
-   and originating column.
+   and originating column. A complete protobuf traversal collects parameter
+   references and explicit casts. `param_context.go` then applies supported
+   expression constraints in lexical query scopes: common types for CASE and
+   COALESCE, builtin function/operator signatures, CTEs, derived tables and
+   correlated references. Unknown overloads remain unresolved; ambiguous column
+   references and incompatible parameter contexts produce diagnostics.
 6. **Derive relationships** — `internal/relate` (`Derive`) inspects FK
    constraints to produce the deterministic `Relationship` graph (detecting
    join tables for many-to-many), which is stamped onto `Catalog.relationships`.

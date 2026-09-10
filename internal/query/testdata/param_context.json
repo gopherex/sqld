@@ -1,0 +1,374 @@
+[
+  {
+    "name": "coalesce",
+    "sql": "UPDATE users SET col = COALESCE(@p, col)",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "coalesce_reverse",
+    "sql": "UPDATE users SET col = COALESCE(col, @p)",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "coalesce_null",
+    "sql": "SELECT COALESCE(NULL, @p, col) FROM users",
+    "types": [
+      "text"
+    ],
+    "columns": [
+      "text"
+    ]
+  },
+  {
+    "name": "coalesce_all_unknown",
+    "sql": "SELECT COALESCE(@p, @q)",
+    "types": [
+      "text",
+      "text"
+    ]
+  },
+  {
+    "name": "coalesce_nested",
+    "sql": "UPDATE users SET col = COALESCE(lower(@p), col)",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "greatest",
+    "sql": "SELECT greatest(@p, quantity) FROM users",
+    "types": [
+      "int4"
+    ],
+    "columns": [
+      "int4"
+    ]
+  },
+  {
+    "name": "case_results",
+    "sql": "UPDATE users SET col = CASE WHEN active THEN @p ELSE col END",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "case_condition",
+    "sql": "UPDATE users SET col = CASE WHEN @p THEN col ELSE @q END",
+    "types": [
+      "bool",
+      "text"
+    ]
+  },
+  {
+    "name": "case_operand",
+    "sql": "SELECT CASE @p WHEN col THEN 1 ELSE 0 END FROM users",
+    "types": [
+      "text"
+    ],
+    "columns": [
+      "int4"
+    ]
+  },
+  {
+    "name": "case_when",
+    "sql": "SELECT CASE col WHEN @p THEN 1 ELSE 0 END FROM users",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "lower",
+    "sql": "SELECT lower(@p)",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "substring",
+    "sql": "SELECT substring(@p, @start, @count)",
+    "types": [
+      "text",
+      "text",
+      "text"
+    ]
+  },
+  {
+    "name": "replace",
+    "sql": "SELECT replace(@p, @from, @to)",
+    "types": [
+      "text",
+      "text",
+      "text"
+    ]
+  },
+  {
+    "name": "length",
+    "sql": "SELECT length(@p)",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "length_bytea",
+    "sql": "SELECT length(@p::bytea)",
+    "types": [
+      "bytea"
+    ]
+  },
+  {
+    "name": "concat_unknown",
+    "sql": "SELECT concat(@p)",
+    "types": []
+  },
+  {
+    "name": "arithmetic_column",
+    "sql": "SELECT quantity + @p FROM users",
+    "types": [
+      "int4"
+    ]
+  },
+  {
+    "name": "arithmetic_literal",
+    "sql": "SELECT @p + 1",
+    "types": [
+      "int4"
+    ]
+  },
+  {
+    "name": "arithmetic_nested",
+    "sql": "UPDATE users SET quantity = quantity + COALESCE(@p, 0)",
+    "types": [
+      "int4"
+    ]
+  },
+  {
+    "name": "arithmetic_date",
+    "sql": "SELECT stamp + @p FROM users",
+    "types": [
+      "interval"
+    ],
+    "columns": [
+      "timestamp"
+    ]
+  },
+  {
+    "name": "arithmetic_interval",
+    "sql": "SELECT duration * @p FROM users",
+    "types": [
+      "float8"
+    ],
+    "columns": [
+      "interval"
+    ]
+  },
+  {
+    "name": "comparison_literal",
+    "sql": "SELECT @p = 1",
+    "types": [
+      "int4"
+    ]
+  },
+  {
+    "name": "comparison_function",
+    "sql": "SELECT lower(col) = @p FROM users",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "comparison_array",
+    "sql": "SELECT id = ANY(@p) FROM users",
+    "types": [
+      "_int8"
+    ],
+    "columns": [
+      "bool"
+    ]
+  },
+  {
+    "name": "where_bool",
+    "sql": "SELECT id FROM users WHERE @p",
+    "types": [
+      "bool"
+    ]
+  },
+  {
+    "name": "in_list",
+    "sql": "SELECT id FROM users WHERE quantity IN (@p, @q)",
+    "types": [
+      "int4",
+      "int4"
+    ]
+  },
+  {
+    "name": "subquery_alias",
+    "sql": "SELECT id FROM users WHERE EXISTS (SELECT 1 FROM events e WHERE e.id = @p)",
+    "types": [
+      "uuid"
+    ]
+  },
+  {
+    "name": "shadow_alias",
+    "sql": "SELECT u.id FROM users u WHERE EXISTS (SELECT 1 FROM events u WHERE u.id = @p)",
+    "types": [
+      "uuid"
+    ]
+  },
+  {
+    "name": "correlated",
+    "sql": "SELECT u.id FROM users u WHERE EXISTS (SELECT 1 FROM events e WHERE u.id = @p)",
+    "types": [
+      "int8"
+    ]
+  },
+  {
+    "name": "correlated_unqualified",
+    "sql": "SELECT id FROM users WHERE EXISTS (SELECT 1 WHERE id = @p)",
+    "types": [
+      "int8"
+    ]
+  },
+  {
+    "name": "derived",
+    "sql": "SELECT v.id FROM (SELECT id FROM events) v WHERE v.id = @p",
+    "types": [
+      "uuid"
+    ],
+    "columns": [
+      "uuid"
+    ]
+  },
+  {
+    "name": "cte",
+    "sql": "WITH v AS (SELECT id FROM events) SELECT id FROM v WHERE id = @p",
+    "types": [
+      "uuid"
+    ],
+    "columns": [
+      "uuid"
+    ]
+  },
+  {
+    "name": "cte_alias",
+    "sql": "WITH v(key) AS (SELECT id FROM events) SELECT key FROM v WHERE key = @p",
+    "types": [
+      "uuid"
+    ],
+    "columns": [
+      "uuid"
+    ]
+  },
+  {
+    "name": "update_from",
+    "sql": "UPDATE users u SET col = e.col::text FROM events e WHERE e.id = @p",
+    "types": [
+      "uuid"
+    ]
+  },
+  {
+    "name": "ambiguous",
+    "sql": "SELECT u.id FROM users u JOIN events e ON true WHERE id = @p",
+    "types": []
+  },
+  {
+    "name": "hidden_table",
+    "sql": "SELECT id FROM users u WHERE users.id = @p",
+    "types": []
+  },
+  {
+    "name": "unrelated_table",
+    "sql": "SELECT id FROM users WHERE events.id = @p",
+    "types": []
+  },
+  {
+    "name": "repeat_same",
+    "sql": "SELECT id FROM users WHERE quantity = @p OR quantity = @p",
+    "types": [
+      "int4"
+    ]
+  },
+  {
+    "name": "repeat_numeric",
+    "sql": "SELECT id FROM users WHERE quantity = @p OR id = @p",
+    "types": [
+      "int4"
+    ]
+  },
+  {
+    "name": "repeat_incompatible",
+    "sql": "SELECT id FROM users WHERE col = @p AND id = @p",
+    "types": []
+  },
+  {
+    "name": "cast_repeat",
+    "sql": "SELECT @p::integer, @p::text",
+    "types": [
+      "int4"
+    ]
+  },
+  {
+    "name": "cast_repeat_reverse",
+    "sql": "SELECT @p::text, @p::integer",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "cast_order",
+    "sql": "SELECT @p::text FROM users WHERE @p::integer > 0",
+    "types": [
+      "text"
+    ]
+  },
+  {
+    "name": "cast_incompatible_context",
+    "sql": "SELECT @p::text FROM users WHERE id = @p",
+    "types": []
+  },
+  {
+    "name": "substring_count",
+    "sql": "SELECT substring(@p, @start, 1)",
+    "types": [
+      "text",
+      "int4"
+    ]
+  },
+  {
+    "name": "substring_bytea",
+    "sql": "SELECT substring(@p::bytea, @start, @count)",
+    "types": [
+      "bytea",
+      "int4",
+      "int4"
+    ]
+  },
+  {
+    "name": "date_ambiguous",
+    "sql": "SELECT CURRENT_DATE + @p",
+    "types": []
+  },
+  {
+    "name": "coalesce_numeric",
+    "sql": "SELECT COALESCE(@p, 1.0, 1::real)",
+    "types": [
+      "float4"
+    ],
+    "columns": [
+      "float4"
+    ]
+  },
+  {
+    "name": "comparison_all",
+    "sql": "SELECT id = ALL(@p) FROM users",
+    "types": [
+      "_int8"
+    ],
+    "columns": [
+      "bool"
+    ]
+  }
+]

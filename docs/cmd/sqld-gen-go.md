@@ -130,6 +130,56 @@ func (q *Queries) GetProfile(ctx context.Context, userID int64) (GetProfileRow, 
 A **single** named param is passed directly; two or more params become a
 `XParams` struct.
 
+### Explicit parameter types
+
+Use `@name::type` or `CAST(@name AS type)` to specify a parameter's input
+type. This also works for positional `$N` parameters and casts nested inside
+functions, `CASE`, subqueries, CTEs, `RETURNING`, and `ON CONFLICT` clauses.
+Explicit casts are collected before column-based inference.
+
+```sql
+-- name: UpdateBio :exec
+UPDATE app.profiles SET bio = COALESCE(@bio::text, bio) WHERE user_id = @user_id;
+```
+
+Here `Bio` is `*string`: `nil` lets `COALESCE` retain the existing value,
+including when `bio` is `NOT NULL`. A cast alone permits NULL input; scalar
+parameters inferred from casts therefore use nullable Go types. Arrays keep
+their slice representation, for example `@tags::text[]` becomes `[]string`.
+
+Only a cast directly on a parameter supplies its input type: in
+`(@value::integer)::text`, `Value` is `*int32`. Casting a function's result,
+such as `length(@value)::bigint`, does not determine its argument's type.
+Unresolved parameter types still fall back to `any`.
+
+### Types from expression context
+
+Explicit casts are optional when the host can determine the input type from
+the expression. `COALESCE(@bio, bio)` and `CASE WHEN active THEN @bio ELSE bio
+END` infer a nullable text parameter from a text column. Supported builtin
+signatures also type arguments, for example `lower(@value)` takes text and
+`replace(@value, @from, @to)` takes three text parameters. A result cast does
+not replace those input types: `length(@value)::bigint` still takes text.
+
+Operator inference distinguishes input signatures: `integer_column + @value`
+takes an integer, `timestamp_column + @duration` takes an interval, and
+`interval_column * @factor` takes double precision. `= ANY(@ids)` and
+`= ALL(@ids)` infer an array, not the element type. Ambiguous signatures such
+as `date_column + @value` require an explicit cast.
+
+Column lookup follows query scopes, table aliases, correlated subqueries,
+derived tables and SELECT CTEs. An alias hides the original table name; an
+ambiguous or unavailable column produces a diagnostic instead of supplying a
+parameter type from an unrelated catalog table. Repeated parameters retain one
+input type; known incompatible contexts produce a diagnostic. Different casts
+on one parameter are not automatically a conflict, since subsequent casts may
+convert the established input type.
+
+This is static, best-effort inference, not PostgreSQL's complete overload
+resolver. Unmodelled functions (including schema-qualified user functions) and
+ambiguous contexts can remain unresolved. Diagnostics are available on
+`core.Result`; use an explicit parameter cast to remove uncertainty.
+
 ### Optional parameters (`@name?`)
 
 Appending `?` to a parameter name marks it optional. Optional parameters become

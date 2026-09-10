@@ -35,6 +35,39 @@ func TestMapSelectBasic(t *testing.T) {
 	}
 }
 
+func TestMapWindowReferencesAndExpressions(t *testing.T) {
+	stmt := stmtFor(t, `SELECT row_number() OVER w,
+		row_number() OVER (w ORDER BY $1::text DESC NULLS LAST)
+		FROM users WINDOW w AS (PARTITION BY $2::text), inherited AS (w)`)
+	sel := stmt.GetSelect().GetSelect()
+	if len(sel.GetWindows()) != 2 || len(sel.GetTargets()) != 2 {
+		t.Fatalf("window definitions or targets lost: %v", sel)
+	}
+	window := sel.GetWindows()[0]
+	if window.GetName() != "w" || window.GetSpec().GetRefName() != "" {
+		t.Fatalf("declaration confused with a window reference: %v", window)
+	}
+	partition := window.GetSpec().GetPartitionBy()
+	if len(partition) != 1 || partition[0].GetCast().GetExpr().GetParameter().GetPosition() != 2 {
+		t.Fatalf("partition parameter lost: %v", partition)
+	}
+	if got := sel.GetWindows()[1].GetSpec().GetRefName(); got != "w" {
+		t.Fatalf("inherited window=%q, want w", got)
+	}
+	for _, target := range sel.GetTargets() {
+		if got := target.GetExpr().GetFunctionCall().GetOver().GetRefName(); got != "w" {
+			t.Errorf("OVER reference=%q, want w", got)
+		}
+	}
+	order := sel.GetTargets()[1].GetExpr().GetFunctionCall().GetOver().GetOrderBy()
+	if len(order) != 1 || order[0].GetExpr().GetCast().GetExpr().GetParameter().GetPosition() != 1 {
+		t.Fatalf("window ordering parameter lost: %v", order)
+	}
+	if order[0].GetOrder() != irv1.SortOrder_SORT_ORDER_DESC || order[0].GetNulls() != irv1.NullsOrder_NULLS_ORDER_LAST {
+		t.Fatalf("ordering semantics lost: %v", order[0])
+	}
+}
+
 func TestMapInsert(t *testing.T) {
 	s := stmtFor(t, "INSERT INTO t(a,b) VALUES ($1,$2)")
 	ins := s.GetInsert()

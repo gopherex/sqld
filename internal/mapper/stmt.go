@@ -265,8 +265,39 @@ func mapSimpleSelect(sel *pg.SelectStmt, id nodeid.Builder) *irv1.SimpleSelect {
 	if sel.GetHavingClause() != nil {
 		ss.Having = MapExpr(sel.GetHavingClause(), id.Child("having"))
 	}
+	for i, node := range sel.GetWindowClause() {
+		if window := node.GetWindowDef(); window != nil {
+			spec := mapWindowSpec(window, id.Child("window").Index(i))
+			// Here Name declares the window, rather than referencing it.
+			spec.RefName = window.GetRefname()
+			ss.Windows = append(ss.Windows, &irv1.WindowDef{
+				Name: window.GetName(),
+				Spec: spec,
+			})
+		}
+	}
 
 	return ss
+}
+
+// mapWindowSpec preserves expressions in window partitioning and ordering so
+// bind parameters there participate in inference just like other expressions.
+func mapWindowSpec(window *pg.WindowDef, id nodeid.Builder) *irv1.WindowSpec {
+	if window == nil {
+		return nil
+	}
+	spec := &irv1.WindowSpec{RefName: window.GetRefname()}
+	if spec.RefName == "" {
+		// OVER w uses Name; OVER (w ORDER BY ...) uses Refname.
+		spec.RefName = window.GetName()
+	}
+	for i, expr := range window.GetPartitionClause() {
+		spec.PartitionBy = append(spec.PartitionBy, MapExpr(expr, id.Child("partition").Index(i)))
+	}
+	for i, order := range window.GetOrderClause() {
+		spec.OrderBy = append(spec.OrderBy, mapSortBy(order, id.Child("orderby").Index(i)))
+	}
+	return spec
 }
 
 // ---------------------------------------------------------------------------

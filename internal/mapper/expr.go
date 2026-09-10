@@ -321,7 +321,10 @@ func mapFuncCall(fc *pg.FuncCall, id nodeid.Builder) *irv1.Expr {
 		call.Filter = MapExpr(f, id.Child("filter"))
 	}
 
-	// Over (window) is left nil for now — Task 8 can wire it up.
+	for i, order := range fc.GetAggOrder() {
+		call.OrderBy = append(call.OrderBy, mapSortBy(order, id.Child("orderby").Index(i)))
+	}
+	call.Over = mapWindowSpec(fc.GetOver(), id.Child("over"))
 
 	return &irv1.Expr{
 		Node:   &irv1.Expr_FunctionCall{FunctionCall: call},
@@ -431,6 +434,12 @@ func aExprSymbol(ae *pg.A_Expr) string {
 		for _, n := range ae.GetName() {
 			sym := n.GetString_().GetSval()
 			if sym != "" {
+				if ae.GetKind() == pg.A_Expr_Kind_AEXPR_OP_ANY {
+					return sym + " ANY"
+				}
+				if ae.GetKind() == pg.A_Expr_Kind_AEXPR_OP_ALL {
+					return sym + " ALL"
+				}
 				return sym
 			}
 		}

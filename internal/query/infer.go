@@ -8,10 +8,13 @@ import (
 	"github.com/gopherex/sqld/internal/catalog"
 	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
+	"google.golang.org/protobuf/reflect/protopath"
+	"google.golang.org/protobuf/reflect/protorange"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // Infer mutates q by:
-//  1. Walking the AST to collect ParameterRef nodes → QueryParameter entries.
+//  1. Walking the AST to collect parameters and their explicit cast types.
 //  2. Attempting shallow type inference for parameters by examining operator
 //     operands — if a param appears beside a resolved ColumnRef, the param
 //     inherits the column's type.
@@ -27,7 +30,7 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	catIdx := buildCatalogIndex(cat)
 
 	// ------------------------------------------------------------------ //
-	// 1. Collect all parameter refs from the full AST.
+	// 1. Collect all parameter refs and explicit cast types from the full AST.
 	// ------------------------------------------------------------------ //
 	// Seed paramMap from any parameters already set on the query (e.g. named
 	// params seeded by ParseQueries via rewriteNamedParams).  This ensures
@@ -47,7 +50,23 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	// For each operator expr we check whether one side is a ParameterRef and
 	// the other is a ColumnRef; if so, resolve the column and assign its type
 	// and (for positional params) its name.
-	inferParamTypes(q.Ast, paramMap, catIdx, q.GetName(), d)
+	inference := inferParamTypes(q.Ast, paramMap, catIdx, q.GetName(), d)
+	output := inference.output
+	// Keep result types in the same lexical scopes as parameter inference.
+	// The existing target resolver still provides names, nullability and metadata.
+	defer func() {
+		if len(output) != len(q.GetColumns()) {
+			return
+		}
+		for n, col := range output {
+			if col.GetType() != nil {
+				q.Columns[n].Type = col.GetType()
+				if col.GetId() != "" {
+					q.Columns[n].SourceColumn = &irv1.ObjectRef{Id: col.GetId(), Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN}
+				}
+			}
+		}
+	}()
 
 	// Infer positional param names from UPDATE SET assignments.
 	if q.Ast.GetUpdate() != nil {
@@ -80,17 +99,16 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 		}
 
 		// Build a table alias map from the FROM clause.
-		aliasMap := buildAliasMap(ss.GetFrom(), catIdx)
+		aliasMap := inference.root.tables
 
 		// Collect all tables referenced (for star expansion).
 		var fromTables []*irv1.Table
-		for _, fi := range ss.GetFrom() {
-			tbl := resolveFromItemTable(fi, catIdx)
+		for _, name := range inference.root.order {
+			tbl := aliasMap[name]
 			if tbl != nil {
 				fromTables = append(fromTables, tbl)
 			}
 		}
-		fromTables = collectJoinTables(ss.GetFrom(), catIdx, fromTables)
 
 		for _, target := range ss.GetTargets() {
 			expr := target.GetExpr()
@@ -261,370 +279,57 @@ func (ci catalogIndex) lookupColumn(tbl *irv1.Table, colName string) *irv1.Colum
 // Parameter collection
 // ---------------------------------------------------------------------------
 
-// collectParams recursively walks an IR Statement and populates paramMap.
+// collectParams collects parameters and their explicit casts before contextual
+// inference. A protobuf traversal covers every structured clause, including
+// CTEs, RETURNING, ON CONFLICT, ORDER BY and window expressions.
 func collectParams(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryParameter) {
 	if stmt == nil {
 		return
 	}
-	switch {
-	case stmt.GetSelect() != nil:
-		collectParamsFromSelect(stmt.GetSelect(), paramMap)
-	case stmt.GetInsert() != nil:
-		ins := stmt.GetInsert()
-		// INSERT has no WHERE clause; params come from VALUES / SELECT / RETURNING.
-		if ins.GetQuery() != nil {
-			collectParamsFromSelect(ins.GetQuery(), paramMap)
+	// The IR contains no Any messages, and the visitor never returns an error.
+	// Stable field order also makes repeated parameter occurrences deterministic.
+	_ = (protorange.Options{Stable: true}).Range(stmt.ProtoReflect(), func(path protopath.Values) error {
+		msg, ok := path.Index(-1).Value.Interface().(protoreflect.Message)
+		if !ok {
+			return nil
 		}
-		// VALUES
-		if ins.GetValues() != nil {
-			for _, row := range ins.GetValues().GetRows() {
-				for _, e := range row.GetValues() {
-					walkExpr(e, paramMap)
+		switch node := msg.Interface().(type) {
+		case *irv1.ParameterRef:
+			collectParam(node, paramMap)
+		case *irv1.CastExpr:
+			// Only a direct cast constrains a parameter's input type. For
+			// ($1::int)::text the inner cast wins; a cast of a function result
+			// must not be applied to the function's arguments.
+			ref := node.GetExpr().GetParameter()
+			if ref != nil && node.GetTargetType() != nil {
+				if p := collectParam(ref, paramMap); p != nil && p.GetType() == nil {
+					p.Type = node.GetTargetType()
+					// A cast alone does not reject NULL input. In particular,
+					// COALESCE($1::text, not_null_column) must accept nil.
+					p.Nullable = true
 				}
 			}
 		}
-		for _, t := range ins.GetReturning() {
-			walkExpr(t.GetExpr(), paramMap)
-		}
-	case stmt.GetUpdate() != nil:
-		upd := stmt.GetUpdate()
-		collectParamsFromExprs(upd.GetWhere(), paramMap)
-		for _, a := range upd.GetSet() {
-			walkExpr(a.GetValue(), paramMap)
-		}
-		for _, t := range upd.GetReturning() {
-			walkExpr(t.GetExpr(), paramMap)
-		}
-	case stmt.GetDelete() != nil:
-		del := stmt.GetDelete()
-		collectParamsFromExprs(del.GetWhere(), paramMap)
-		for _, t := range del.GetReturning() {
-			walkExpr(t.GetExpr(), paramMap)
-		}
-	}
+		return nil
+	}, nil)
 }
 
-func collectParamsFromSelect(sel *irv1.SelectStmt, paramMap map[uint32]*pluginv1.QueryParameter) {
-	if sel == nil {
-		return
+func collectParam(ref *irv1.ParameterRef, paramMap map[uint32]*pluginv1.QueryParameter) *pluginv1.QueryParameter {
+	pos := ref.GetPosition()
+	if pos == 0 {
+		return nil
 	}
-	if ss := sel.GetSelect(); ss != nil {
-		collectParamsFromSimpleSelect(ss, paramMap)
+	p := paramMap[pos]
+	if p == nil {
+		p = &pluginv1.QueryParameter{Number: pos, Name: ref.GetName()}
+		paramMap[pos] = p
 	}
-	if so := sel.GetSetOperation(); so != nil {
-		collectParamsFromSelect(so.GetLeft(), paramMap)
-		collectParamsFromSelect(so.GetRight(), paramMap)
-	}
-	walkExpr(sel.GetLimit(), paramMap)
-	walkExpr(sel.GetOffset(), paramMap)
-}
-
-func collectParamsFromSimpleSelect(ss *irv1.SimpleSelect, paramMap map[uint32]*pluginv1.QueryParameter) {
-	if ss == nil {
-		return
-	}
-	for _, t := range ss.GetTargets() {
-		walkExpr(t.GetExpr(), paramMap)
-	}
-	walkExpr(ss.GetWhere(), paramMap)
-	for _, g := range ss.GetGroupBy() {
-		walkExpr(g, paramMap)
-	}
-	walkExpr(ss.GetHaving(), paramMap)
-	for _, d := range ss.GetDistinctOn() {
-		walkExpr(d, paramMap)
-	}
-	// Walk FROM items: collect params from JOIN ON conditions and subqueries.
-	collectParamsFromFromItems(ss.GetFrom(), paramMap)
-}
-
-// collectParamsFromFromItems walks a FROM clause recursively to collect params
-// from JOIN ON conditions, FROM-subqueries, and FROM-functions.
-func collectParamsFromFromItems(from []*irv1.FromItem, paramMap map[uint32]*pluginv1.QueryParameter) {
-	for _, fi := range from {
-		if fi == nil {
-			continue
-		}
-		if jc := fi.GetJoin(); jc != nil {
-			// Walk the ON condition.
-			walkExpr(jc.GetOn(), paramMap)
-			// Recurse into both join sides.
-			collectParamsFromFromItems([]*irv1.FromItem{jc.GetLeft(), jc.GetRight()}, paramMap)
-		}
-		if sq := fi.GetSubquery(); sq != nil {
-			collectParamsFromSelect(sq.GetQuery(), paramMap)
-		}
-		if fn := fi.GetFunction(); fn != nil {
-			walkExpr(fn.GetCall(), paramMap)
-		}
-	}
-}
-
-func collectParamsFromExprs(e *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter) {
-	walkExpr(e, paramMap)
-}
-
-// walkExpr recursively visits an Expr and records any ParameterRef it finds.
-func walkExpr(e *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter) {
-	if e == nil {
-		return
-	}
-	switch {
-	case e.GetParameter() != nil:
-		pos := e.GetParameter().GetPosition()
-		if pos > 0 {
-			if _, exists := paramMap[pos]; !exists {
-				paramMap[pos] = &pluginv1.QueryParameter{
-					Number: pos,
-					Name:   e.GetParameter().GetName(),
-				}
-			}
-		}
-	case e.GetOperator() != nil:
-		for _, op := range e.GetOperator().GetOperands() {
-			walkExpr(op, paramMap)
-		}
-	case e.GetFunctionCall() != nil:
-		for _, arg := range e.GetFunctionCall().GetArguments() {
-			walkExpr(arg, paramMap)
-		}
-		walkExpr(e.GetFunctionCall().GetFilter(), paramMap)
-	case e.GetCaseExpr() != nil:
-		ce := e.GetCaseExpr()
-		walkExpr(ce.GetOperand(), paramMap)
-		for _, w := range ce.GetWhens() {
-			walkExpr(w.GetCondition(), paramMap)
-			walkExpr(w.GetResult(), paramMap)
-		}
-		walkExpr(ce.GetElseResult(), paramMap)
-	case e.GetCast() != nil:
-		walkExpr(e.GetCast().GetExpr(), paramMap)
-	case e.GetList() != nil:
-		for _, item := range e.GetList().GetElements() {
-			walkExpr(item, paramMap)
-		}
-	case e.GetSubquery() != nil:
-		collectParamsFromSelect(e.GetSubquery().GetQuery(), paramMap)
-	}
-	// ColumnRef, Literal, Star, RawSql have no sub-expressions to walk.
+	return p
 }
 
 // ---------------------------------------------------------------------------
 // Parameter type inference
 // ---------------------------------------------------------------------------
-
-// inferParamTypes walks the statement AST looking for OperatorExpr nodes where
-// one operand is a ParameterRef and another is a resolvable ColumnRef.
-// When found, the param inherits the column's type.
-func inferParamTypes(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryParameter, catIdx catalogIndex, qName string, d *catalog.Diagnostics) {
-	if stmt == nil {
-		return
-	}
-	// Build alias map from the statement's FROM clause (for select/update/delete).
-	var aliasMap map[string]*irv1.Table
-	switch {
-	case stmt.GetSelect() != nil:
-		if ss := stmt.GetSelect().GetSelect(); ss != nil {
-			aliasMap = buildAliasMap(ss.GetFrom(), catIdx)
-		}
-	case stmt.GetUpdate() != nil:
-		aliasMap = buildFromTableAlias(stmt.GetUpdate().GetTableName(), stmt.GetUpdate().GetAlias(), catIdx)
-	case stmt.GetDelete() != nil:
-		aliasMap = buildFromTableAlias(stmt.GetDelete().GetTableName(), stmt.GetDelete().GetAlias(), catIdx)
-	case stmt.GetInsert() != nil:
-		aliasMap = buildFromTableAlias(stmt.GetInsert().GetTableName(), stmt.GetInsert().GetAlias(), catIdx)
-	}
-	if aliasMap == nil {
-		aliasMap = make(map[string]*irv1.Table)
-	}
-
-	inferParamTypesInStatement(stmt, paramMap, aliasMap, catIdx)
-}
-
-func buildFromTableAlias(qn *irv1.QualifiedName, alias string, catIdx catalogIndex) map[string]*irv1.Table {
-	m := make(map[string]*irv1.Table)
-	if qn == nil {
-		return m
-	}
-	tbl := catIdx.lookupTable(qn.GetName())
-	if tbl == nil {
-		return m
-	}
-	tableName := strings.ToLower(qn.GetName())
-	m[tableName] = tbl
-	if alias != "" {
-		m[strings.ToLower(alias)] = tbl
-	}
-	return m
-}
-
-func inferParamTypesInStatement(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
-	if stmt == nil {
-		return
-	}
-	switch {
-	case stmt.GetSelect() != nil:
-		inferParamTypesInSelect(stmt.GetSelect(), paramMap, aliasMap, catIdx)
-	case stmt.GetUpdate() != nil:
-		upd := stmt.GetUpdate()
-		inferParamTypesInExpr(upd.GetWhere(), paramMap, aliasMap, catIdx)
-		for _, a := range upd.GetSet() {
-			inferParamTypesInExpr(a.GetValue(), paramMap, aliasMap, catIdx)
-		}
-	case stmt.GetDelete() != nil:
-		inferParamTypesInExpr(stmt.GetDelete().GetWhere(), paramMap, aliasMap, catIdx)
-	case stmt.GetInsert() != nil:
-		ins := stmt.GetInsert()
-		if ins.GetQuery() != nil {
-			inferParamTypesInSelect(ins.GetQuery(), paramMap, aliasMap, catIdx)
-		}
-		if ins.GetValues() != nil {
-			for _, row := range ins.GetValues().GetRows() {
-				for _, e := range row.GetValues() {
-					inferParamTypesInExpr(e, paramMap, aliasMap, catIdx)
-				}
-			}
-		}
-	}
-}
-
-func inferParamTypesInSelect(sel *irv1.SelectStmt, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
-	if sel == nil {
-		return
-	}
-	if ss := sel.GetSelect(); ss != nil {
-		inferParamTypesInExpr(ss.GetWhere(), paramMap, aliasMap, catIdx)
-		for _, t := range ss.GetTargets() {
-			inferParamTypesInExpr(t.GetExpr(), paramMap, aliasMap, catIdx)
-		}
-		for _, g := range ss.GetGroupBy() {
-			inferParamTypesInExpr(g, paramMap, aliasMap, catIdx)
-		}
-		inferParamTypesInExpr(ss.GetHaving(), paramMap, aliasMap, catIdx)
-		// Walk FROM items for JOIN ON conditions and subqueries.
-		inferParamTypesInFromItems(ss.GetFrom(), paramMap, aliasMap, catIdx)
-	}
-	if so := sel.GetSetOperation(); so != nil {
-		inferParamTypesInSelect(so.GetLeft(), paramMap, aliasMap, catIdx)
-		inferParamTypesInSelect(so.GetRight(), paramMap, aliasMap, catIdx)
-	}
-}
-
-// inferParamTypesInFromItems walks FROM items to infer param types from JOIN ON
-// conditions and FROM-subqueries.
-func inferParamTypesInFromItems(from []*irv1.FromItem, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
-	for _, fi := range from {
-		if fi == nil {
-			continue
-		}
-		if jc := fi.GetJoin(); jc != nil {
-			inferParamTypesInExpr(jc.GetOn(), paramMap, aliasMap, catIdx)
-			inferParamTypesInFromItems([]*irv1.FromItem{jc.GetLeft(), jc.GetRight()}, paramMap, aliasMap, catIdx)
-		}
-		if sq := fi.GetSubquery(); sq != nil {
-			inferParamTypesInSelect(sq.GetQuery(), paramMap, aliasMap, catIdx)
-		}
-		if fn := fi.GetFunction(); fn != nil {
-			inferParamTypesInExpr(fn.GetCall(), paramMap, aliasMap, catIdx)
-		}
-	}
-}
-
-// inferParamTypesInExpr traverses an Expr looking for OperatorExpr nodes
-// where one side is a param and the other is a resolvable column. When found,
-// it sets the param's Type from the column.
-func inferParamTypesInExpr(e *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
-	if e == nil {
-		return
-	}
-	if op := e.GetOperator(); op != nil {
-		operands := op.GetOperands()
-		// Try to find (param, colref) or (colref, param) pairs.
-		if len(operands) == 2 {
-			tryInferParamFromPair(operands[0], operands[1], paramMap, aliasMap, catIdx)
-			tryInferParamFromPair(operands[1], operands[0], paramMap, aliasMap, catIdx)
-		}
-		// Recurse into all operands regardless.
-		for _, operand := range operands {
-			inferParamTypesInExpr(operand, paramMap, aliasMap, catIdx)
-		}
-		return
-	}
-	// Recurse into sub-expressions.
-	if fc := e.GetFunctionCall(); fc != nil {
-		for _, arg := range fc.GetArguments() {
-			inferParamTypesInExpr(arg, paramMap, aliasMap, catIdx)
-		}
-		inferParamTypesInExpr(fc.GetFilter(), paramMap, aliasMap, catIdx)
-		return
-	}
-	if ce := e.GetCaseExpr(); ce != nil {
-		inferParamTypesInExpr(ce.GetOperand(), paramMap, aliasMap, catIdx)
-		for _, w := range ce.GetWhens() {
-			inferParamTypesInExpr(w.GetCondition(), paramMap, aliasMap, catIdx)
-			inferParamTypesInExpr(w.GetResult(), paramMap, aliasMap, catIdx)
-		}
-		inferParamTypesInExpr(ce.GetElseResult(), paramMap, aliasMap, catIdx)
-		return
-	}
-	if cast := e.GetCast(); cast != nil {
-		inferParamTypesInExpr(cast.GetExpr(), paramMap, aliasMap, catIdx)
-		return
-	}
-	if lst := e.GetList(); lst != nil {
-		for _, item := range lst.GetElements() {
-			inferParamTypesInExpr(item, paramMap, aliasMap, catIdx)
-		}
-		return
-	}
-	if sq := e.GetSubquery(); sq != nil {
-		inferParamTypesInSelect(sq.GetQuery(), paramMap, aliasMap, catIdx)
-		return
-	}
-}
-
-// tryInferParamFromPair: if `maybeParam` is a ParameterRef and `maybeCol` is
-// a ColumnRef, resolve the column from aliasMap/catIdx and assign its type to
-// the parameter (if not already set). Also sets the param Name from the column
-// when the param has no Name yet (positional params).
-func tryInferParamFromPair(maybeParam, maybeCol *irv1.Expr, paramMap map[uint32]*pluginv1.QueryParameter, aliasMap map[string]*irv1.Table, catIdx catalogIndex) {
-	if maybeParam == nil || maybeCol == nil {
-		return
-	}
-	param := maybeParam.GetParameter()
-	if param == nil {
-		return
-	}
-	colRef := maybeCol.GetColumnRef()
-	if colRef == nil {
-		return
-	}
-	pos := param.GetPosition()
-	if pos == 0 {
-		return
-	}
-	p, ok := paramMap[pos]
-	if !ok {
-		return
-	}
-
-	col := resolveColumnRef(colRef, aliasMap, catIdx)
-	if col == nil {
-		return
-	}
-	if p.GetType() == nil {
-		p.Type = col.GetType()
-		p.Nullable = col.GetNullable()
-		p.Column = &irv1.ObjectRef{
-			Id:   col.GetId(),
-			Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN,
-		}
-	}
-	// Set the Name from the column only for positional params (no existing Name).
-	if p.GetName() == "" {
-		p.Name = col.GetName()
-	}
-}
 
 // inferUpdateSetParamNames assigns Name (and Type/Nullable when not already set)
 // to positional parameters that appear directly as the value in an UPDATE SET
@@ -948,6 +653,9 @@ func funcName(fc *irv1.FunctionCall) string {
 
 // isBoolOperator reports whether the operator symbol yields a boolean result.
 func isBoolOperator(sym string) bool {
+	if strings.HasSuffix(strings.ToUpper(sym), " ANY") || strings.HasSuffix(strings.ToUpper(sym), " ALL") {
+		return true
+	}
 	switch strings.ToUpper(strings.TrimSpace(sym)) {
 	case "=", "<", ">", "<=", ">=", "<>", "!=",
 		"AND", "OR", "NOT",
@@ -1052,6 +760,13 @@ func inferExprType(e *irv1.Expr, resolve func(qualifier, col string) *irv1.Colum
 	// ---------------------------------------------------------------- //
 	case e.GetFunctionCall() != nil:
 		return inferFunctionType(e.GetFunctionCall(), resolve)
+	case e.GetCaseExpr() != nil:
+		c := e.GetCaseExpr()
+		args := []*irv1.Expr{c.GetElseResult()}
+		for _, w := range c.GetWhens() {
+			args = append(args, w.GetResult())
+		}
+		return commonExprType(args, resolve)
 
 	// ---------------------------------------------------------------- //
 	// OperatorExpr — boolean for comparisons/logical; recurse for arithmetic.
@@ -1154,8 +869,9 @@ func inferFunctionType(fc *irv1.FunctionCall, resolve func(qualifier, col string
 		return scalarType("timestamp")
 
 	// --- Pass-through over first argument ------------------------------ //
-	case "coalesce", "nullif", "greatest", "least",
-		"abs", "ceil", "ceiling", "floor", "round", "trunc", "sign", "mod":
+	case "coalesce", "greatest", "least":
+		return commonExprType(args, resolve)
+	case "nullif", "abs", "ceil", "ceiling", "floor", "round", "trunc", "sign", "mod":
 		return arg0Type()
 
 	// --- Misc ---------------------------------------------------------- //
