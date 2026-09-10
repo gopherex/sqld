@@ -11,7 +11,7 @@ go 1.25.0
 require (
 	github.com/aarondl/opt v0.0.0-20250607033636-982744e1bd65
 	github.com/google/uuid v1.6.0
-	github.com/gopherex/sqld v1.1.0
+	github.com/gopherex/sqld v1.1.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/stephenafamo/bob v0.44.0
 	github.com/stephenafamo/scan v0.7.0
