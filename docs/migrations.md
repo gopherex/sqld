@@ -76,8 +76,15 @@ sqld migrate generate add_orders --dev-url postgres://localhost:5432/scratch?ssl
 The diff covers schemas, types (enum/domain/composite/range), sequences, tables,
 columns, constraints (PK/FK/unique/check/exclusion), indexes, views, materialized
 views, functions, procedures, and triggers — in dependency order, with a reverse
-`down`. Letting Postgres realize the schema means the diff supports everything
-Postgres supports, not just what our parser models.
+`down`. Letting Postgres realize the schema normalizes definitions before they
+are compared.
+
+Index introspection parses PostgreSQL's `CREATE INDEX` definition into
+individual keys. Mixed indexes such as `(tenant_id, lower(email))` retain the
+boundary between the column and expression keys, including nested expressions.
+Per-key `DESC` and `NULLS FIRST`/`NULLS LAST` survive migration generation, along
+with `INCLUDE` columns and partial-index predicates. Changing index ordering is
+therefore detected by the schema diff.
 
 If there are no changes, `generate` prints `no changes` and writes nothing.
 

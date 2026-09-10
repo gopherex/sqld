@@ -498,8 +498,8 @@ func TestInferComparisonIsBool(t *testing.T) {
 	if c.GetType().GetPgName() != "bool" {
 		t.Fatalf("comparison → %v", c.GetType())
 	}
-	if c.GetNullable() {
-		t.Fatalf("comparison should be non-null")
+	if !c.GetNullable() {
+		t.Fatalf("comparison with nullable id must remain nullable")
 	}
 }
 

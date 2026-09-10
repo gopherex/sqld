@@ -2,8 +2,11 @@ package introspect
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/gopherex/sqld/internal/mapper"
+	"github.com/gopherex/sqld/internal/parse"
 	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
@@ -19,11 +22,9 @@ import (
 // The indrelid filter therefore excludes any index referenced by some
 // constraint's conindid.
 func (b *builder) loadIndexes(ctx context.Context, schemas []string) error {
-	// Column names are resolved in SQL. keycol_names holds one entry per key
-	// attribute (in order); a NULL entry marks an expression key (attnum 0).
-	// inc_names holds the INCLUDE (covering) column names.
-	// indnullsnotdistinct is read through to_jsonb so this query also works on
-	// PostgreSQL versions before the column was introduced in PostgreSQL 15.
+	// Parse PostgreSQL's index definition with the same mapper used for source
+	// DDL. This retains each key expression, ordering, null ordering and opclass.
+	// indnullsnotdistinct is read through to_jsonb for PostgreSQL < 15.
 	const q = `
 SELECT i.indrelid                                AS table_oid,
        ic.relname                                AS index_name,
@@ -32,11 +33,6 @@ SELECT i.indrelid                                AS table_oid,
        i.indisprimary                            AS is_primary,
        COALESCE((to_jsonb(i)->>'indnullsnotdistinct')::boolean, false)
                                                   AS nulls_not_distinct,
-       (SELECT array_agg(a.attname ORDER BY k.ord)
-        FROM unnest((string_to_array(i.indkey::text,' ')::int2[])[1:i.indnkeyatts])
-             WITH ORDINALITY AS k(attnum, ord)
-        LEFT JOIN pg_catalog.pg_attribute a
-          ON a.attrelid = i.indrelid AND a.attnum = k.attnum) AS keycol_names,
        (SELECT array_agg(a.attname ORDER BY k.ord)
         FROM unnest((string_to_array(i.indkey::text,' ')::int2[])[i.indnkeyatts+1:i.indnatts])
              WITH ORDINALITY AS k(attnum, ord)
@@ -68,13 +64,12 @@ ORDER BY n.nspname, tc.relname, ic.relname`
 			isUnique         bool
 			isPrimary        bool
 			nullsNotDistinct bool
-			keycolNames      []*string
 			incNames         []string
 			predicate        *string
 			indexdef         string
 		)
 		if err := rows.Scan(&tableOID, &indexName, &method, &isUnique,
-			&isPrimary, &nullsNotDistinct, &keycolNames, &incNames, &predicate, &indexdef); err != nil {
+			&isPrimary, &nullsNotDistinct, &incNames, &predicate, &indexdef); err != nil {
 			return err
 		}
 
@@ -96,19 +91,14 @@ ORDER BY n.nspname, tc.relname, ic.relname`
 			idx.Predicate = rawExpr(*predicate)
 		}
 
-		// A NULL key name marks an expression element; its text comes from the
-		// index definition's key list.
-		for pos, name := range keycolNames {
-			if name == nil {
-				idx.Elements = append(idx.Elements, &irv1.IndexElement{
-					Target: &irv1.IndexElement_Expr{Expr: rawExpr(indexElementExpr(indexdef, pos))},
-				})
-				continue
-			}
-			idx.Elements = append(idx.Elements, &irv1.IndexElement{
-				Target: &irv1.IndexElement_Column{Column: *name},
-			})
+		stmts, err := parse.Statements(indexdef)
+		if err != nil {
+			return fmt.Errorf("parse index %q: %w", indexName, err)
 		}
+		if len(stmts) != 1 || stmts[0].Node.GetIndexStmt() == nil {
+			return fmt.Errorf("index %q: expected one CREATE INDEX statement", indexName)
+		}
+		idx.Elements = mapper.MapIndex(stmts[0].Node.GetIndexStmt()).GetElements()
 
 		tbl.Indexes = append(tbl.Indexes, idx)
 	}
@@ -382,31 +372,6 @@ ORDER BY n.nspname, tc.relname, tg.tgname`
 		}
 	}
 	return rows.Err()
-}
-
-// indexElementExpr is a best-effort extractor that returns the whole index
-// definition's expression list when the position-specific text cannot be
-// isolated. The diff engine compares index expressions textually, so storing
-// the full indexdef fragment is acceptable as a fallback.
-func indexElementExpr(indexdef string, _ int) string {
-	open := strings.IndexByte(indexdef, '(')
-	if open < 0 {
-		return indexdef
-	}
-	// Find the matching close paren of the key list.
-	depth := 0
-	for i := open; i < len(indexdef); i++ {
-		switch indexdef[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return strings.TrimSpace(indexdef[open+1 : i])
-			}
-		}
-	}
-	return strings.TrimSpace(indexdef[open+1:])
 }
 
 // ---------------------------------------------------------------------------

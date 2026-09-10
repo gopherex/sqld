@@ -261,6 +261,21 @@ func TestRoundTripAddIndex(t *testing.T) {
 	)
 }
 
+func TestRoundTripMixedExpressionIndex(t *testing.T) {
+	roundTrip(t, []string{"public"},
+		`CREATE TABLE users(tenant_id bigint, email text, payload text);`,
+		`CREATE TABLE users(tenant_id bigint, email text, payload text);
+		 CREATE INDEX users_email ON users(tenant_id DESC NULLS LAST, lower(email) DESC, (length(email) + 1)) INCLUDE (payload);`,
+	)
+}
+
+func TestRoundTripIndexDirectionChange(t *testing.T) {
+	roundTrip(t, []string{"public"},
+		`CREATE TABLE users(tenant_id bigint, email text); CREATE INDEX users_email ON users(tenant_id, lower(email));`,
+		`CREATE TABLE users(tenant_id bigint, email text); CREATE INDEX users_email ON users(tenant_id DESC, lower(email) DESC NULLS LAST);`,
+	)
+}
+
 func TestRoundTripAddUniqueConstraint(t *testing.T) {
 	roundTrip(t, []string{"public"},
 		`CREATE TABLE t(id bigint primary key, email text);`,

@@ -52,13 +52,14 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	// and (for positional params) its name.
 	inference := inferParamTypes(q.Ast, paramMap, catIdx, q.GetName(), d)
 	output := inference.output
-	// Keep result types in the same lexical scopes as parameter inference.
-	// The existing target resolver still provides names, nullability and metadata.
+	// Keep result types and nullability in the same lexical scopes as parameter
+	// inference. The existing target resolver provides names and metadata.
 	defer func() {
 		if len(output) != len(q.GetColumns()) {
 			return
 		}
 		for n, col := range output {
+			q.Columns[n].Nullable = col.GetNullable()
 			if col.GetType() != nil {
 				q.Columns[n].Type = col.GetType()
 				if col.GetId() != "" {
@@ -584,7 +585,7 @@ func resolveTarget(expr *irv1.Expr, alias string, aliasMap map[string]*irv1.Tabl
 	return []*pluginv1.QueryColumn{{
 		Name:     colName,
 		Type:     ty,
-		Nullable: exprNullable(expr),
+		Nullable: exprNullable(expr, resolve),
 	}}
 }
 
@@ -607,28 +608,75 @@ func defaultColumnName(expr *irv1.Expr) string {
 	return "column"
 }
 
-// exprNullable returns a best-effort nullability for a non-column target.
-// Comparison/logical operators and count(*) are NOT NULL; aggregates and
-// everything else default to nullable=true.
-func exprNullable(expr *irv1.Expr) bool {
-	if op := expr.GetOperator(); op != nil {
-		if isBoolOperator(op.GetSymbol()) {
-			return false
+// exprNullable proves non-nullability using literals and expression structure.
+// The resolver must reflect outer joins; unsupported expressions stay nullable.
+func exprNullable(expr *irv1.Expr, resolve func(string, string) *irv1.Column) bool {
+	if expr == nil {
+		return true
+	}
+	if col := expr.GetColumnRef(); col != nil {
+		if resolve != nil {
+			if c := resolve(col.GetQualifier(), col.GetColumn()); c != nil {
+				return c.GetNullable()
+			}
 		}
 		return true
 	}
+	if lit := expr.GetLiteral(); lit != nil {
+		return lit.GetNullValue()
+	}
+	if cast := expr.GetCast(); cast != nil {
+		return exprNullable(cast.GetExpr(), resolve)
+	}
+	if c := expr.GetCaseExpr(); c != nil {
+		if exprNullable(c.GetElseResult(), resolve) {
+			return true
+		}
+		for _, w := range c.GetWhens() {
+			if exprNullable(w.GetResult(), resolve) {
+				return true
+			}
+		}
+		return false
+	}
 	if fc := expr.GetFunctionCall(); fc != nil {
+		if schema := fc.GetName().GetSchema(); schema != "" && schema != "pg_catalog" {
+			return true
+		}
 		switch funcName(fc) {
 		case "count":
 			return false
+		case "coalesce":
+			// COALESCE is NULL only when every argument can be NULL.
+			for _, arg := range fc.GetArguments() {
+				if !exprNullable(arg, resolve) {
+					return false
+				}
+			}
+			return true
+		case "lower", "upper", "length", "char_length", "character_length", "octet_length", "bit_length",
+			"trim", "ltrim", "rtrim", "btrim", "replace", "initcap", "reverse":
+			for _, arg := range fc.GetArguments() {
+				if exprNullable(arg, resolve) {
+					return true
+				}
+			}
+			return false
 		}
 		return true
 	}
-	// Casts and literals: conservatively nullable=false for literals,
-	// nullable for casts of unknown source.
-	if expr.GetLiteral() != nil {
-		// A non-null literal cannot be NULL.
-		return expr.GetLiteral().GetNullValue()
+	if op := expr.GetOperator(); op != nil {
+		switch strings.ToUpper(op.GetSymbol()) {
+		case "IS NULL", "IS NOT NULL", "IS TRUE", "IS FALSE", "IS NOT TRUE", "IS NOT FALSE", "IS DISTINCT FROM", "IS NOT DISTINCT FROM", "EXISTS":
+			return false
+		case "=", "<", ">", "<=", ">=", "<>", "!=", "+", "-", "*", "/", "%", "^", "||", "AND", "OR", "NOT", "LIKE", "ILIKE":
+			for _, arg := range op.GetOperands() {
+				if exprNullable(arg, resolve) {
+					return true
+				}
+			}
+			return false
+		}
 	}
 	return true
 }

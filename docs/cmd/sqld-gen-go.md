@@ -354,6 +354,22 @@ internally. Types that are **never** wrapped: slices, `map[…]`, `json.RawMessa
 `pgtype.Hstore`, all `pgtype` struct types (`Interval`, `Point`, `Bits`, …),
 `pgtype.Range[T]`, `pgtype.Multirange[T]`.
 
+Query result nullability also accounts for expressions and outer joins. The
+right side of a `LEFT JOIN`, the left side of a `RIGHT JOIN`, and both sides of
+a `FULL JOIN` can be NULL even when the underlying columns are `NOT NULL`.
+`COALESCE` produces a non-nullable result when at least one argument is known
+to be non-nullable:
+
+```sql
+SELECT u.email AS raw_email, COALESCE(u.email, '') AS email
+FROM tenants t LEFT JOIN users u ON u.tenant_id = t.id;
+```
+
+With the default pointer mode, `RawEmail` is `*string` and `Email` is `string`.
+`COALESCE(u.email, NULL::text)` remains nullable. These rules also apply inside
+derived tables and SELECT CTEs; unsupported expressions stay conservatively
+nullable. Comparisons with nullable operands can themselves return SQL NULL.
+
 The wrapping strategy is controlled by the `nullMode` option:
 
 | `nullMode` | Nullable scalar/enum/composite | Example |

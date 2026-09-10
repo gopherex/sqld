@@ -7,6 +7,7 @@ import (
 	"github.com/gopherex/sqld/internal/catalog"
 	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
+	"google.golang.org/protobuf/proto"
 )
 
 // Parameter inference has its own lexical scopes. Catalog-wide column fallback
@@ -115,8 +116,17 @@ func (i *paramInference) from(items []*irv1.FromItem, s *paramScope) {
 			i.addTable(s, t.GetName(), t.GetAlias())
 		case item.GetJoin() != nil:
 			j := item.GetJoin()
-			i.from([]*irv1.FromItem{j.GetLeft(), j.GetRight()}, s)
+			start := len(s.order)
+			i.from([]*irv1.FromItem{j.GetLeft()}, s)
+			middle := len(s.order)
+			i.from([]*irv1.FromItem{j.GetRight()}, s)
 			i.expr(j.GetOn(), s, scalarType("bool"), nil)
+			if j.GetType() == irv1.JoinType_JOIN_TYPE_LEFT || j.GetType() == irv1.JoinType_JOIN_TYPE_FULL {
+				nullExtend(s, s.order[middle:])
+			}
+			if j.GetType() == irv1.JoinType_JOIN_TYPE_RIGHT || j.GetType() == irv1.JoinType_JOIN_TYPE_FULL {
+				nullExtend(s, s.order[start:middle])
+			}
 		case item.GetSubquery() != nil:
 			q := item.GetSubquery()
 			// A non-LATERAL FROM subquery cannot see siblings in this FROM.
@@ -168,7 +178,9 @@ func (i *paramInference) targets(targets []*irv1.SelectTarget, s *paramScope) []
 		if name == "" {
 			name = e.GetColumnRef().GetColumn()
 		}
-		col := &irv1.Column{Name: name, Type: typ, Nullable: true}
+		col := &irv1.Column{Name: name, Type: typ, Nullable: exprNullable(e, func(q, col string) *irv1.Column {
+			return i.column(&irv1.ColumnRef{Qualifier: q, Column: col}, s)
+		})}
 		if cr := e.GetColumnRef(); cr != nil {
 			if source := i.column(cr, s); source != nil {
 				col.Id = source.GetId()
@@ -178,6 +190,20 @@ func (i *paramInference) targets(targets []*irv1.SelectTarget, s *paramScope) []
 		cols = append(cols, col)
 	}
 	return cols
+}
+
+// Outer joins add NULL rows to one or both input sides. Copy the relation so
+// another alias of the same table, other queries and the catalog stay intact.
+func nullExtend(s *paramScope, names []string) {
+	for _, name := range names {
+		if tbl := s.tables[name]; tbl != nil {
+			copy := proto.Clone(tbl).(*irv1.Table)
+			for _, col := range copy.GetColumns() {
+				col.Nullable = true
+			}
+			s.tables[name] = copy
+		}
+	}
 }
 
 func (i *paramInference) selectQuery(sel *irv1.SelectStmt, parent *paramScope) []*irv1.Column {
