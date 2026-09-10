@@ -1977,7 +1977,7 @@ const file_sqld_v1_ir_routine_proto_rawDesc = "" +
 	"\fTriggerLevel\x12\x1d\n" +
 	"\x19TRIGGER_LEVEL_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11TRIGGER_LEVEL_ROW\x10\x01\x12\x1b\n" +
-	"\x17TRIGGER_LEVEL_STATEMENT\x10\x02B3Z1github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
+	"\x17TRIGGER_LEVEL_STATEMENT\x10\x02B4Z2github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
 	file_sqld_v1_ir_routine_proto_rawDescOnce sync.Once

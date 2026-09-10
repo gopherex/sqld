@@ -1049,7 +1049,7 @@ const file_sqld_v1_ir_common_proto_rawDesc = "" +
 	"\x18ANNOTATION_ARG_TYPE_BOOL\x10\x04\x12\x1d\n" +
 	"\x19ANNOTATION_ARG_TYPE_IDENT\x10\x05\x12 \n" +
 	"\x1cANNOTATION_ARG_TYPE_DURATION\x10\x06\x12\x1c\n" +
-	"\x18ANNOTATION_ARG_TYPE_ENUM\x10\aB3Z1github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
+	"\x18ANNOTATION_ARG_TYPE_ENUM\x10\aB4Z2github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
 	file_sqld_v1_ir_common_proto_rawDescOnce sync.Once

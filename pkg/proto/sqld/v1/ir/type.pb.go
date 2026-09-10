@@ -548,7 +548,7 @@ const file_sqld_v1_ir_type_proto_rawDesc = "" +
 	"\x13TYPE_KIND_COMPOSITE\x10\x05\x12\x13\n" +
 	"\x0fTYPE_KIND_RANGE\x10\x06\x12\x14\n" +
 	"\x10TYPE_KIND_PSEUDO\x10\a\x12\x1a\n" +
-	"\x16TYPE_KIND_USER_DEFINED\x10\bB3Z1github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
+	"\x16TYPE_KIND_USER_DEFINED\x10\bB4Z2github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
 	file_sqld_v1_ir_type_proto_rawDescOnce sync.Once

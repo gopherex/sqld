@@ -317,7 +317,7 @@ const file_sqld_v1_ir_catalog_proto_rawDesc = "" +
 	"searchPath\x12,\n" +
 	"\aschemas\x18\x06 \x03(\v2\x12.sqld.v1.ir.SchemaR\aschemas\x12>\n" +
 	"\rrelationships\x18\a \x03(\v2\x18.sqld.v1.ir.RelationshipR\rrelationships\x12(\n" +
-	"\x04meta\x18\x0f \x01(\v2\x14.sqld.v1.ir.MetadataR\x04metaB3Z1github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
+	"\x04meta\x18\x0f \x01(\v2\x14.sqld.v1.ir.MetadataR\x04metaB4Z2github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
 	file_sqld_v1_ir_catalog_proto_rawDescOnce sync.Once

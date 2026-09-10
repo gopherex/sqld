@@ -52,10 +52,10 @@ test:
 	  if [ "$$d" = "." ]; then
 	    # Root is the standalone published artifact: build it without the
 	    # workspace to validate module independence.
-	    ( cd "$$d" && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... )
+	    ( cd "$$d" && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test -race ./... )
 	  else
 	    # Nested modules (sqld-gen-bob) depend on the root source via go.work.
-	    ( cd "$$d" && go build ./... && go vet ./... && go test ./... )
+	    ( cd "$$d" && go build ./... && go vet ./... && go test -race ./... )
 	  fi
 	done
 

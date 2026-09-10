@@ -314,7 +314,7 @@ const file_sqld_v1_ir_relation_proto_rawDesc = "" +
 	"\x1cRELATIONSHIP_KIND_ONE_TO_ONE\x10\x01\x12!\n" +
 	"\x1dRELATIONSHIP_KIND_ONE_TO_MANY\x10\x02\x12!\n" +
 	"\x1dRELATIONSHIP_KIND_MANY_TO_ONE\x10\x03\x12\"\n" +
-	"\x1eRELATIONSHIP_KIND_MANY_TO_MANY\x10\x04B3Z1github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
+	"\x1eRELATIONSHIP_KIND_MANY_TO_MANY\x10\x04B4Z2github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
 	file_sqld_v1_ir_relation_proto_rawDescOnce sync.Once

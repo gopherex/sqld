@@ -316,10 +316,14 @@ Regenerate Go from proto sources (requires `easyp`):
 make protocols
 ```
 
-Run tests:
+Edit `.proto` sources and regenerate; do not replace text inside generated
+`.pb.go` descriptors, even when changing the module path. Those descriptors
+contain length-prefixed binary data.
+
+Build, vet, and test all modules with the race detector, as in CI:
 
 ```sh
-go test ./...
+make test
 ```
 
 Integration tests (migration generation, `sqld migrate generate`) spin up Postgres via testcontainers and require Docker.

@@ -607,7 +607,7 @@ const file_sqld_v1_plugin_annotation_proto_rawDesc = "" +
 	"\x19COMMENT_PLACEMENT_LEADING\x10\x01\x12\x1e\n" +
 	"\x1aCOMMENT_PLACEMENT_TRAILING\x10\x02\x12 \n" +
 	"\x1cCOMMENT_PLACEMENT_COMMENT_ON\x10\x03\x12\x19\n" +
-	"\x15COMMENT_PLACEMENT_ANY\x10\x04B;Z9github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin;pluginv1b\x06proto3"
+	"\x15COMMENT_PLACEMENT_ANY\x10\x04B<Z:github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin;pluginv1b\x06proto3"
 
 var (
 	file_sqld_v1_plugin_annotation_proto_rawDescOnce sync.Once

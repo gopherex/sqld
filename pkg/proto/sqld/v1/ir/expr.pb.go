@@ -3036,7 +3036,7 @@ const file_sqld_v1_ir_expr_proto_rawDesc = "" +
 	"\x0eJOIN_TYPE_LEFT\x10\x02\x12\x13\n" +
 	"\x0fJOIN_TYPE_RIGHT\x10\x03\x12\x12\n" +
 	"\x0eJOIN_TYPE_FULL\x10\x04\x12\x13\n" +
-	"\x0fJOIN_TYPE_CROSS\x10\x05B3Z1github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
+	"\x0fJOIN_TYPE_CROSS\x10\x05B4Z2github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
 	file_sqld_v1_ir_expr_proto_rawDescOnce sync.Once
