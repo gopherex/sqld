@@ -628,6 +628,12 @@ func exprNullable(expr *irv1.Expr, resolve func(string, string) *irv1.Column) bo
 	if cast := expr.GetCast(); cast != nil {
 		return exprNullable(cast.GetExpr(), resolve)
 	}
+	if sub := expr.GetSubquery(); sub != nil {
+		if sub.GetKind() == irv1.SubqueryKind_SUBQUERY_KIND_EXISTS {
+			return false
+		}
+		return scalarSubqueryNullable(sub)
+	}
 	if c := expr.GetCaseExpr(); c != nil {
 		if exprNullable(c.GetElseResult(), resolve) {
 			return true
@@ -808,6 +814,13 @@ func inferExprType(e *irv1.Expr, resolve func(qualifier, col string) *irv1.Colum
 	// ---------------------------------------------------------------- //
 	case e.GetFunctionCall() != nil:
 		return inferFunctionType(e.GetFunctionCall(), resolve)
+	case e.GetSubquery() != nil:
+		switch e.GetSubquery().GetKind() {
+		case irv1.SubqueryKind_SUBQUERY_KIND_EXISTS, irv1.SubqueryKind_SUBQUERY_KIND_IN,
+			irv1.SubqueryKind_SUBQUERY_KIND_ANY, irv1.SubqueryKind_SUBQUERY_KIND_ALL:
+			return scalarType("bool")
+		}
+		return nil
 	case e.GetCaseExpr() != nil:
 		c := e.GetCaseExpr()
 		args := []*irv1.Expr{c.GetElseResult()}

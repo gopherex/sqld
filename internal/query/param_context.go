@@ -27,11 +27,18 @@ type paramInference struct {
 	reported map[string]bool
 	output   []*irv1.Column
 	root     *paramScope
+	// Input constraints are accumulated independently of type discovery order.
+	inputNulls  map[uint32]inputNullability
+	joinSources map[*irv1.Column]*irv1.Column
 }
 
 func inferParamTypes(stmt *irv1.Statement, params map[uint32]*pluginv1.QueryParameter, cat catalogIndex, name string, d *catalog.Diagnostics) *paramInference {
-	i := &paramInference{params: params, catalog: cat, query: name, diags: d, reported: make(map[string]bool)}
+	i := &paramInference{params: params, catalog: cat, query: name, diags: d, reported: make(map[string]bool), inputNulls: make(map[uint32]inputNullability), joinSources: make(map[*irv1.Column]*irv1.Column)}
 	i.statement(stmt)
+	for number, p := range params {
+		constraint := i.inputNulls[number]
+		p.Nullable = p.GetOptional() || constraint.nullable || !constraint.required
+	}
 	return i
 }
 
@@ -122,10 +129,10 @@ func (i *paramInference) from(items []*irv1.FromItem, s *paramScope) {
 			i.from([]*irv1.FromItem{j.GetRight()}, s)
 			i.expr(j.GetOn(), s, scalarType("bool"), nil)
 			if j.GetType() == irv1.JoinType_JOIN_TYPE_LEFT || j.GetType() == irv1.JoinType_JOIN_TYPE_FULL {
-				nullExtend(s, s.order[middle:])
+				i.nullExtend(s, s.order[middle:])
 			}
 			if j.GetType() == irv1.JoinType_JOIN_TYPE_RIGHT || j.GetType() == irv1.JoinType_JOIN_TYPE_FULL {
-				nullExtend(s, s.order[start:middle])
+				i.nullExtend(s, s.order[start:middle])
 			}
 		case item.GetSubquery() != nil:
 			q := item.GetSubquery()
@@ -194,11 +201,12 @@ func (i *paramInference) targets(targets []*irv1.SelectTarget, s *paramScope) []
 
 // Outer joins add NULL rows to one or both input sides. Copy the relation so
 // another alias of the same table, other queries and the catalog stay intact.
-func nullExtend(s *paramScope, names []string) {
+func (i *paramInference) nullExtend(s *paramScope, names []string) {
 	for _, name := range names {
 		if tbl := s.tables[name]; tbl != nil {
 			copy := proto.Clone(tbl).(*irv1.Table)
-			for _, col := range copy.GetColumns() {
+			for n, col := range copy.GetColumns() {
+				i.joinSources[col] = tbl.GetColumns()[n]
 				col.Nullable = true
 			}
 			s.tables[name] = copy
@@ -232,7 +240,19 @@ func (i *paramInference) selectQuery(sel *irv1.SelectStmt, parent *paramScope) [
 	}
 	if set := sel.GetSetOperation(); set != nil {
 		cols = i.selectQuery(set.GetLeft(), s)
-		i.selectQuery(set.GetRight(), s)
+		right := i.selectQuery(set.GetRight(), s)
+		for n, col := range cols {
+			if n >= len(right) {
+				break
+			}
+			switch set.GetKind() {
+			case irv1.SetOpKind_SET_OP_KIND_UNION:
+				col.Nullable = col.GetNullable() || right[n].GetNullable()
+			case irv1.SetOpKind_SET_OP_KIND_INTERSECT:
+				col.Nullable = col.GetNullable() && right[n].GetNullable()
+				// EXCEPT can only return rows from the left input.
+			}
+		}
 	}
 	if sel.GetValues() != nil {
 		cols = i.values(sel.GetValues(), s, nil)
@@ -242,6 +262,8 @@ func (i *paramInference) selectQuery(sel *irv1.SelectStmt, parent *paramScope) [
 	}
 	i.expr(sel.GetLimit(), s, scalarType("int8"), nil)
 	i.expr(sel.GetOffset(), s, scalarType("int8"), nil)
+	i.constrainInput(sel.GetLimit(), false)
+	i.constrainInput(sel.GetOffset(), false)
 	if ss := sel.GetSelect(); ss != nil && len(cols) == len(ss.GetTargets()) {
 		for n, target := range ss.GetTargets() {
 			if p := target.GetExpr().GetParameter(); p != nil {
@@ -286,6 +308,7 @@ func (i *paramInference) statement(stmt *irv1.Statement) {
 			}
 		}
 		i.values(ins.GetValues(), s, columns)
+		i.insertSelectInputs(ins.GetQuery(), columns)
 		i.selectQuery(ins.GetQuery(), s)
 		if conflict := ins.GetOnConflict(); conflict != nil {
 			s.tables["excluded"] = tbl
@@ -317,8 +340,13 @@ func (i *paramInference) values(values *irv1.Values, s *paramScope, targets []*i
 				col = targets[n]
 			}
 			typ := i.expr(e, s, col.GetType(), col)
+			nullable := exprNullable(e, func(qualifier, name string) *irv1.Column {
+				return i.column(&irv1.ColumnRef{Qualifier: qualifier, Column: name}, s)
+			})
 			if rowN == 0 {
-				cols = append(cols, &irv1.Column{Name: fmt.Sprintf("column%d", n+1), Type: typ, Nullable: true})
+				cols = append(cols, &irv1.Column{Name: fmt.Sprintf("column%d", n+1), Type: typ, Nullable: nullable})
+			} else if n < len(cols) {
+				cols[n].Nullable = cols[n].GetNullable() || nullable
 			}
 		}
 	}
@@ -341,18 +369,17 @@ func (i *paramInference) bind(ref *irv1.ParameterRef, typ *irv1.TypeRef, col *ir
 	}
 	if typ != nil {
 		if p.GetType() == nil {
-			p.Type, p.Nullable = typ, true
-			if col != nil {
-				p.Nullable = col.GetNullable()
-				if col.GetId() != "" {
-					p.Column = &irv1.ObjectRef{Id: col.GetId(), Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN}
-				}
-			}
+			p.Type = typ
 		} else if incompatibleTypes(p.GetType(), typ) {
 			i.diagnostic(fmt.Sprintf("param $%d type conflict: %s versus %s", p.GetNumber(), p.GetType().GetPgName(), typ.GetPgName()))
 		}
-		if col == nil {
-			p.Nullable = true
+	}
+	if col != nil {
+		if !col.GetNullable() {
+			i.recordInput(ref.GetPosition(), false)
+		}
+		if col.GetId() != "" {
+			p.Column = &irv1.ObjectRef{Id: col.GetId(), Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN}
 		}
 	}
 	if p.GetName() == "" && col != nil {
@@ -403,6 +430,9 @@ func arrayType(elem *irv1.TypeRef) *irv1.TypeRef {
 func (i *paramInference) expr(e *irv1.Expr, s *paramScope, expected *irv1.TypeRef, origin *irv1.Column) *irv1.TypeRef {
 	if e == nil {
 		return nil
+	}
+	if origin != nil && !origin.GetNullable() {
+		i.constrainInput(e, false)
 	}
 	switch {
 	case e.GetParameter() != nil:
@@ -495,6 +525,13 @@ func (i *paramInference) function(fc *irv1.FunctionCall, s *paramScope) *irv1.Ty
 	if builtin {
 		switch name {
 		case "coalesce", "greatest", "least", "nullif":
+			for n, arg := range args {
+				// A COALESCE fallback does not make a required input optional.
+				if name == "coalesce" && n == len(args)-1 {
+					continue
+				}
+				i.constrainInput(arg, true)
+			}
 			return i.common(args, s)
 		}
 	}
@@ -546,6 +583,12 @@ func (i *paramInference) function(fc *irv1.FunctionCall, s *paramScope) *irv1.Ty
 
 func (i *paramInference) operator(op *irv1.OperatorExpr, s *paramScope) *irv1.TypeRef {
 	args, sym := op.GetOperands(), strings.ToUpper(op.GetSymbol())
+	switch sym {
+	case "IS NULL", "IS NOT NULL":
+		for _, arg := range args {
+			i.constrainInput(arg, true)
+		}
+	}
 	if sym == "AND" || sym == "OR" || sym == "NOT" {
 		for _, a := range args {
 			i.expr(a, s, scalarType("bool"), nil)
@@ -590,13 +633,10 @@ func (i *paramInference) operator(op *irv1.OperatorExpr, s *paramScope) *irv1.Ty
 	}
 	// Direct comparisons retain column identity and existing NOT NULL behaviour.
 	var leftCol, rightCol *irv1.Column
-	if isBoolOperator(sym) && !strings.Contains(sym, "ANY") && !strings.Contains(sym, "ALL") {
-		if args[1].GetColumnRef() != nil {
-			leftCol = i.column(args[1].GetColumnRef(), s)
-		}
-		if args[0].GetColumnRef() != nil {
-			rightCol = i.column(args[0].GetColumnRef(), s)
-		}
+	if isBoolOperator(sym) && !strings.Contains(sym, "ANY") && !strings.Contains(sym, "ALL") &&
+		sym != "IS DISTINCT FROM" && sym != "IS NOT DISTINCT FROM" {
+		leftCol = i.inputOrigin(args[1], s)
+		rightCol = i.inputOrigin(args[0], s)
 	}
 	i.expect(args[0], leftWant, leftCol)
 	i.expect(args[1], rightWant, rightCol)
@@ -659,6 +699,9 @@ func commonExprType(args []*irv1.Expr, resolve func(string, string) *irv1.Column
 func (i *paramInference) expect(e *irv1.Expr, typ *irv1.TypeRef, col *irv1.Column) {
 	if e == nil {
 		return
+	}
+	if col != nil && !col.GetNullable() {
+		i.constrainInput(e, false)
 	}
 	if p := e.GetParameter(); p != nil {
 		i.bind(p, typ, col)

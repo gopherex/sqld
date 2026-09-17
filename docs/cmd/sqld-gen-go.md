@@ -143,9 +143,11 @@ UPDATE app.profiles SET bio = COALESCE(@bio::text, bio) WHERE user_id = @user_id
 ```
 
 Here `Bio` is `*string`: `nil` lets `COALESCE` retain the existing value,
-including when `bio` is `NOT NULL`. A cast alone permits NULL input; scalar
-parameters inferred from casts therefore use nullable Go types. Arrays keep
-their slice representation, for example `@tags::text[]` becomes `[]string`.
+including when `bio` is `NOT NULL`. A cast supplies the input type; its
+nullability is inferred separately from how the parameter is used. A cast
+alone permits NULL, but `WHERE id = @id::uuid` against a `NOT NULL` column
+uses a value. Arrays keep their slice representation, for example
+`@tags::text[]` becomes `[]string`.
 
 Only a cast directly on a parameter supplies its input type: in
 `(@value::integer)::text`, `Value` is `*int32`. Casting a function's result,
@@ -174,6 +176,25 @@ parameter type from an unrelated catalog table. Repeated parameters retain one
 input type; known incompatible contexts produce a diagnostic. Different casts
 on one parameter are not automatically a conflict, since subsequent casts may
 convert the established input type.
+
+Comparisons and assignments inherit the column's declared nullability,
+including through casts and supported NULL-propagating functions such as
+`lower`. This also applies to direct `INSERT ... SELECT` targets. Type-only
+contexts cannot reset that nullability when a parameter is used again.
+`LIMIT @lim` and `OFFSET @offset` use `int64` values. Explicit optional
+parameters (`@name?`), NULL checks (`@after IS NULL`), and inputs with a
+`COALESCE` fallback retain nullable types. A parameter used as the final
+fallback in `COALESCE` retains its other context constraints. Nullable columns
+and null-safe comparisons do not override a required input established
+elsewhere in the query.
+
+For results, an outer join makes columns on its unmatched side nullable,
+even when the source column is `NOT NULL`. `COALESCE` with a non-null fallback
+removes that nullability. `EXISTS` returns a non-null boolean. Scalar subqueries
+normally remain nullable because they can return no rows; a singleton
+`SELECT count(*) ...` is non-null unless grouping, `HAVING`, `LIMIT`, or
+`OFFSET` prevents that guarantee. Set operations and `VALUES` also account
+for the nullability of their input rows.
 
 This is static, best-effort inference, not PostgreSQL's complete overload
 resolver. Unmodelled functions (including schema-qualified user functions) and
