@@ -144,13 +144,15 @@ UPDATE app.profiles SET bio = COALESCE(@bio::text, bio) WHERE user_id = @user_id
 
 Here `Bio` is `*string`: `nil` lets `COALESCE` retain the existing value,
 including when `bio` is `NOT NULL`. A cast supplies the input type; its
-nullability is inferred separately from how the parameter is used. A cast
-alone permits NULL, but `WHERE id = @id::uuid` against a `NOT NULL` column
-uses a value. Arrays keep their slice representation, for example
-`@tags::text[]` becomes `[]string`.
+nullability is inferred separately from how the parameter is used. When no
+nullable context is known, a directly cast parameter defaults to a Go value:
+`@kind::text = ''` takes `string`, `NOT @reserved_only::bool` takes `bool`,
+and `@at::timestamptz` takes `time.Time`. This is an input API convention;
+a SQL cast itself does not prohibit NULL. Arrays keep their slice
+representation, for example `@tags::text[]` becomes `[]string`.
 
 Only a cast directly on a parameter supplies its input type: in
-`(@value::integer)::text`, `Value` is `*int32`. Casting a function's result,
+`(@value::integer)::text`, `Value` defaults to `int32`. Casting a function's result,
 such as `length(@value)::bigint`, does not determine its argument's type.
 Unresolved parameter types still fall back to `any`.
 
@@ -187,6 +189,22 @@ parameters (`@name?`), NULL checks (`@after IS NULL`), and inputs with a
 fallback in `COALESCE` retains its other context constraints. Nullable columns
 and null-safe comparisons do not override a required input established
 elsewhere in the query.
+
+Unknown nullability is distinct from known nullable-column context. A cast
+does not override nullable-column context, NULL checks, or `COALESCE` inputs.
+Repeated uses merge these constraints independently of traversal order:
+explicit NULL handling takes precedence, then required-column context, then
+nullable-column context, then the cast default. Without a direct cast or
+known nullability context, input inference remains conservative.
+
+To mark a user-function argument optional, write
+`handle_reservation_matches(pattern, kind, @handle?::text)`. As with other
+optional parameters, a nil field omits its WHERE condition; it does not mean
+that the function will be called with SQL NULL. In a keyset filter
+`@after_id::uuid IS NULL OR (pinned, published_at, id) <
+(@after_pinned::bool, @after_at::timestamptz, @after_id::uuid)`, the guard keeps
+`AfterID` nullable; the other two cast-only inputs default to `bool` and
+`time.Time`. The guard does not make every member of the tuple optional.
 
 For results, an outer join makes columns on its unmatched side nullable,
 even when the source column is `NOT NULL`. `COALESCE` with a non-null fallback

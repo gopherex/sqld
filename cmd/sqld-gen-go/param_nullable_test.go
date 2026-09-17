@@ -66,6 +66,25 @@ UPDATE users SET handle = COALESCE(@handle::text, handle) WHERE id = @id;
 			source = file.GetContents()
 		}
 	}
+	got := generatedGoTypes(t, source)
+	for field, want := range map[string]string{
+		"SearchParams.HandleExact": "string", "SearchParams.QueryPattern": "string",
+		"SearchParams.After": "*uuid.UUID", "SearchParams.Lim": "int64",
+		"SearchRow.DirectHandle": "string", "SearchRow.JoinedHandle": "*string",
+		"SearchRow.Handle": "string", "SearchRow.OnAir": "bool", "SearchRow.NewCount": "int32",
+		"Owner.handle": "string", "Scope.chatID": "uuid.UUID",
+		"BatchParams.UserID": "uuid.UUID", "BatchParams.Names": "[]string",
+		"BatchParams.Positions": "[]int32", "BatchParams.Cursors": "[][]byte",
+		"PatchParams.Handle": "*string", "PatchParams.ID": "uuid.UUID",
+	} {
+		if got[field] != want {
+			t.Errorf("%s: got %q, want %q", field, got[field], want)
+		}
+	}
+}
+
+func generatedGoTypes(t *testing.T, source []byte) map[string]string {
+	t.Helper()
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "queries.go", source, parser.AllErrors)
 	if err != nil {
@@ -94,18 +113,5 @@ UPDATE users SET handle = COALESCE(@handle::text, handle) WHERE id = @id;
 		}
 		return true
 	})
-	for field, want := range map[string]string{
-		"SearchParams.HandleExact": "string", "SearchParams.QueryPattern": "string",
-		"SearchParams.After": "*uuid.UUID", "SearchParams.Lim": "int64",
-		"SearchRow.DirectHandle": "string", "SearchRow.JoinedHandle": "*string",
-		"SearchRow.Handle": "string", "SearchRow.OnAir": "bool", "SearchRow.NewCount": "int32",
-		"Owner.handle": "string", "Scope.chatID": "uuid.UUID",
-		"BatchParams.UserID": "uuid.UUID", "BatchParams.Names": "[]string",
-		"BatchParams.Positions": "[]int32", "BatchParams.Cursors": "[][]byte",
-		"PatchParams.Handle": "*string", "PatchParams.ID": "uuid.UUID",
-	} {
-		if got[field] != want {
-			t.Errorf("%s: got %q, want %q", field, got[field], want)
-		}
-	}
+	return got
 }

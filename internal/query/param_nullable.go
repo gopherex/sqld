@@ -6,9 +6,41 @@ import (
 	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
+// Contexts are ordered by strength, so merging repeated uses is independent
+// of AST traversal order. Explicit NULL handling wins over required uses;
+// a nullable column alone does not override another NOT NULL column.
+type inputNullContext uint8
+
+const (
+	inputUnknown inputNullContext = iota
+	inputNullableColumn
+	inputRequired
+	inputAcceptsNull
+)
+
 type inputNullability struct {
-	required bool
-	nullable bool
+	context inputNullContext
+	cast    bool
+}
+
+func (n inputNullability) isNullable() bool {
+	switch n.context {
+	case inputRequired:
+		return false
+	case inputNullableColumn, inputAcceptsNull:
+		return true
+	default:
+		// A direct cast provides a value-type API unless SQL supplies a
+		// nullable context. Uncast unknown inputs stay conservative.
+		return !n.cast
+	}
+}
+
+func columnInputContext(col *irv1.Column) inputNullContext {
+	if col.GetNullable() {
+		return inputNullableColumn
+	}
+	return inputRequired
 }
 
 func (i *paramInference) insertSelectInputs(sel *irv1.SelectStmt, columns []*irv1.Column) {
@@ -27,40 +59,38 @@ func (i *paramInference) insertSelectInputs(sel *irv1.SelectStmt, columns []*irv
 	}
 }
 
-func (i *paramInference) recordInput(number uint32, nullable bool) {
+func (i *paramInference) recordInput(number uint32, context inputNullContext) {
 	c := i.inputNulls[number]
-	if nullable {
-		c.nullable = true
-	} else {
-		c.required = true
+	if context > c.context {
+		c.context = context
 	}
 	i.inputNulls[number] = c
 }
 
 // A context constrains inputs only through NULL-propagating expressions. A
 // COALESCE result, for example, can be required while its inputs accept nil.
-func (i *paramInference) constrainInput(e *irv1.Expr, nullable bool) {
+func (i *paramInference) constrainInput(e *irv1.Expr, context inputNullContext) {
 	if e == nil {
 		return
 	}
 	if p := e.GetParameter(); p != nil {
-		i.recordInput(p.GetPosition(), nullable)
+		i.recordInput(p.GetPosition(), context)
 		return
 	}
 	if c := e.GetCast(); c != nil {
-		i.constrainInput(c.GetExpr(), nullable)
+		i.constrainInput(c.GetExpr(), context)
 		return
 	}
 	if f := e.GetFunctionCall(); f != nil && strictNullFunction(f) {
 		for _, arg := range f.GetArguments() {
-			i.constrainInput(arg, nullable)
+			i.constrainInput(arg, context)
 		}
 	}
 	if op := e.GetOperator(); op != nil {
 		switch strings.ToUpper(op.GetSymbol()) {
 		case "+", "-", "*", "/", "%", "^", "||":
 			for _, arg := range op.GetOperands() {
-				i.constrainInput(arg, nullable)
+				i.constrainInput(arg, context)
 			}
 		}
 	}

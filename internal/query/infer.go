@@ -42,7 +42,7 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 			paramMap[p.GetNumber()] = p
 		}
 	}
-	collectParams(q.Ast, paramMap)
+	castParams := collectParams(q.Ast, paramMap)
 
 	// ------------------------------------------------------------------ //
 	// 2. Shallow type inference via operator context.
@@ -50,7 +50,7 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	// For each operator expr we check whether one side is a ParameterRef and
 	// the other is a ColumnRef; if so, resolve the column and assign its type
 	// and (for positional params) its name.
-	inference := inferParamTypes(q.Ast, paramMap, catIdx, q.GetName(), d)
+	inference := inferParamTypes(q.Ast, paramMap, castParams, catIdx, q.GetName(), d)
 	output := inference.output
 	// Keep result types and nullability in the same lexical scopes as parameter
 	// inference. The existing target resolver provides names and metadata.
@@ -283,9 +283,10 @@ func (ci catalogIndex) lookupColumn(tbl *irv1.Table, colName string) *irv1.Colum
 // collectParams collects parameters and their explicit casts before contextual
 // inference. A protobuf traversal covers every structured clause, including
 // CTEs, RETURNING, ON CONFLICT, ORDER BY and window expressions.
-func collectParams(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryParameter) {
+func collectParams(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryParameter) map[uint32]bool {
+	casts := make(map[uint32]bool)
 	if stmt == nil {
-		return
+		return casts
 	}
 	// The IR contains no Any messages, and the visitor never returns an error.
 	// Stable field order also makes repeated parameter occurrences deterministic.
@@ -303,16 +304,15 @@ func collectParams(stmt *irv1.Statement, paramMap map[uint32]*pluginv1.QueryPara
 			// must not be applied to the function's arguments.
 			ref := node.GetExpr().GetParameter()
 			if ref != nil && node.GetTargetType() != nil {
+				casts[ref.GetPosition()] = true
 				if p := collectParam(ref, paramMap); p != nil && p.GetType() == nil {
 					p.Type = node.GetTargetType()
-					// A cast alone does not reject NULL input. In particular,
-					// COALESCE($1::text, not_null_column) must accept nil.
-					p.Nullable = true
 				}
 			}
 		}
 		return nil
 	}, nil)
+	return casts
 }
 
 func collectParam(ref *irv1.ParameterRef, paramMap map[uint32]*pluginv1.QueryParameter) *pluginv1.QueryParameter {

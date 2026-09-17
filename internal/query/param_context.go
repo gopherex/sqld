@@ -32,12 +32,15 @@ type paramInference struct {
 	joinSources map[*irv1.Column]*irv1.Column
 }
 
-func inferParamTypes(stmt *irv1.Statement, params map[uint32]*pluginv1.QueryParameter, cat catalogIndex, name string, d *catalog.Diagnostics) *paramInference {
+func inferParamTypes(stmt *irv1.Statement, params map[uint32]*pluginv1.QueryParameter, casts map[uint32]bool, cat catalogIndex, name string, d *catalog.Diagnostics) *paramInference {
 	i := &paramInference{params: params, catalog: cat, query: name, diags: d, reported: make(map[string]bool), inputNulls: make(map[uint32]inputNullability), joinSources: make(map[*irv1.Column]*irv1.Column)}
+	for number := range casts {
+		i.inputNulls[number] = inputNullability{cast: true}
+	}
 	i.statement(stmt)
 	for number, p := range params {
 		constraint := i.inputNulls[number]
-		p.Nullable = p.GetOptional() || constraint.nullable || !constraint.required
+		p.Nullable = p.GetOptional() || constraint.isNullable()
 	}
 	return i
 }
@@ -262,8 +265,8 @@ func (i *paramInference) selectQuery(sel *irv1.SelectStmt, parent *paramScope) [
 	}
 	i.expr(sel.GetLimit(), s, scalarType("int8"), nil)
 	i.expr(sel.GetOffset(), s, scalarType("int8"), nil)
-	i.constrainInput(sel.GetLimit(), false)
-	i.constrainInput(sel.GetOffset(), false)
+	i.constrainInput(sel.GetLimit(), inputRequired)
+	i.constrainInput(sel.GetOffset(), inputRequired)
 	if ss := sel.GetSelect(); ss != nil && len(cols) == len(ss.GetTargets()) {
 		for n, target := range ss.GetTargets() {
 			if p := target.GetExpr().GetParameter(); p != nil {
@@ -375,9 +378,7 @@ func (i *paramInference) bind(ref *irv1.ParameterRef, typ *irv1.TypeRef, col *ir
 		}
 	}
 	if col != nil {
-		if !col.GetNullable() {
-			i.recordInput(ref.GetPosition(), false)
-		}
+		i.recordInput(ref.GetPosition(), columnInputContext(col))
 		if col.GetId() != "" {
 			p.Column = &irv1.ObjectRef{Id: col.GetId(), Kind: irv1.ObjectKind_OBJECT_KIND_COLUMN}
 		}
@@ -431,8 +432,8 @@ func (i *paramInference) expr(e *irv1.Expr, s *paramScope, expected *irv1.TypeRe
 	if e == nil {
 		return nil
 	}
-	if origin != nil && !origin.GetNullable() {
-		i.constrainInput(e, false)
+	if origin != nil {
+		i.constrainInput(e, columnInputContext(origin))
 	}
 	switch {
 	case e.GetParameter() != nil:
@@ -530,7 +531,7 @@ func (i *paramInference) function(fc *irv1.FunctionCall, s *paramScope) *irv1.Ty
 				if name == "coalesce" && n == len(args)-1 {
 					continue
 				}
-				i.constrainInput(arg, true)
+				i.constrainInput(arg, inputAcceptsNull)
 			}
 			return i.common(args, s)
 		}
@@ -586,7 +587,11 @@ func (i *paramInference) operator(op *irv1.OperatorExpr, s *paramScope) *irv1.Ty
 	switch sym {
 	case "IS NULL", "IS NOT NULL":
 		for _, arg := range args {
-			i.constrainInput(arg, true)
+			i.constrainInput(arg, inputAcceptsNull)
+		}
+	case "IS DISTINCT FROM", "IS NOT DISTINCT FROM":
+		for _, arg := range args {
+			i.constrainInput(arg, inputNullableColumn)
 		}
 	}
 	if sym == "AND" || sym == "OR" || sym == "NOT" {
@@ -607,6 +612,9 @@ func (i *paramInference) operator(op *irv1.OperatorExpr, s *paramScope) *irv1.Ty
 	left, right := i.expr(args[0], s, nil, nil), i.expr(args[1], s, nil, nil)
 	leftWant, rightWant := right, left
 	if sym == "NULLIF" {
+		for _, arg := range args {
+			i.constrainInput(arg, inputAcceptsNull)
+		}
 		return i.common(args, s)
 	}
 	if strings.Contains(sym, "ANY") || strings.Contains(sym, "ALL") {
@@ -700,8 +708,8 @@ func (i *paramInference) expect(e *irv1.Expr, typ *irv1.TypeRef, col *irv1.Colum
 	if e == nil {
 		return
 	}
-	if col != nil && !col.GetNullable() {
-		i.constrainInput(e, false)
+	if col != nil {
+		i.constrainInput(e, columnInputContext(col))
 	}
 	if p := e.GetParameter(); p != nil {
 		i.bind(p, typ, col)

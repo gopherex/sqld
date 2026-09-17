@@ -73,7 +73,7 @@ SELECT v.col FROM (SELECT col FROM users) v WHERE v.col = @p;
 		"type CoalesceCastParams struct {\n\tP  *string\n\tID int64\n}",
 		"DirectCast(ctx context.Context, p string) error",
 		"DirectParam(ctx context.Context, p string) error",
-		"SelectCast(ctx context.Context, p *string)",
+		"SelectCast(ctx context.Context, p string)",
 		"NestedCast(ctx context.Context, p int32) error",
 		"ArrayCast(ctx context.Context, p []string)",
 		"ConflictCast(ctx context.Context, p *string) error",
