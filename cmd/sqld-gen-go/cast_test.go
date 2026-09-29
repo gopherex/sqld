@@ -78,7 +78,7 @@ SELECT v.col FROM (SELECT col FROM users) v WHERE v.col = @p;
 		"ArrayCast(ctx context.Context, p []string)",
 		"ConflictCast(ctx context.Context, p *string) error",
 		"CoalesceContext(ctx context.Context, p *string) error",
-		"CaseContext(ctx context.Context, p *string) error",
+		"CaseContext(ctx context.Context, p string) error",
 		"FunctionContext(ctx context.Context, p string) error",
 		"ArithmeticContext(ctx context.Context, p int64) error",
 		"AllContext(ctx context.Context, p []int64) error",

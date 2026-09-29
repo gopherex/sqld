@@ -40,6 +40,15 @@ SELECT COALESCE((SELECT id FROM users WHERE id = @chat_id::uuid), @chat_id::uuid
 -- name: Batch :exec
 INSERT INTO commands(user_id, name, position, cursor)
 SELECT @user_id::uuid, unnest(@names::text[]), unnest(@positions::int[]), unnest(@cursors::bytea[]);
+-- name: CasePatch :exec
+UPDATE users SET nickname = CASE WHEN @set_name::bool THEN @name::text ELSE nickname END,
+    handle = CASE @mode::int WHEN 1 THEN @handle::text ELSE handle END WHERE id = @id;
+-- name: NullableSentinel :many
+SELECT id FROM users WHERE (@filter::text = '' OR nickname::text = @filter);
+-- name: DynamicNullableSentinel :many
+SELECT id FROM users WHERE (@filter::text = '' OR nickname::text = @filter) AND id = ANY(@ids::uuid[]);
+-- name: DynamicCasePatch :exec
+UPDATE users SET nickname = CASE WHEN @set_name::bool THEN @name::text ELSE nickname END WHERE id = ANY(@ids::uuid[]);
 -- name: Patch :exec
 UPDATE users SET handle = COALESCE(@handle::text, handle) WHERE id = @id;
 `, "q.sql")
@@ -76,6 +85,10 @@ UPDATE users SET handle = COALESCE(@handle::text, handle) WHERE id = @id;
 		"BatchParams.UserID": "uuid.UUID", "BatchParams.Names": "[]string",
 		"BatchParams.Positions": "[]int32", "BatchParams.Cursors": "[][]byte",
 		"PatchParams.Handle": "*string", "PatchParams.ID": "uuid.UUID",
+		"CasePatchParams.SetName": "bool", "CasePatchParams.Name": "*string",
+		"CasePatchParams.Mode": "int32", "CasePatchParams.Handle": "string", "CasePatchParams.ID": "uuid.UUID",
+		"NullableSentinel.filter": "string", "DynamicNullableSentinelParams.Filter": "string",
+		"DynamicCasePatchParams.SetName": "bool", "DynamicCasePatchParams.Name": "*string",
 	} {
 		if got[field] != want {
 			t.Errorf("%s: got %q, want %q", field, got[field], want)

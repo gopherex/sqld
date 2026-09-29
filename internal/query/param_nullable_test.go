@@ -9,7 +9,7 @@ import (
 )
 
 func TestInferParameterNullability(t *testing.T) {
-	stmts, err := parse.Statements(`CREATE TABLE users(id uuid PRIMARY KEY, handle text NOT NULL, nickname text);`)
+	stmts, err := parse.Statements(`CREATE TABLE users(id uuid PRIMARY KEY, handle text NOT NULL, nickname text, active bool);`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,28 @@ func TestInferParameterNullability(t *testing.T) {
 		{"repeated", "SELECT id FROM users WHERE handle = @p AND length(@p) > 0", "text", false},
 		{"repeated_reverse", "SELECT id FROM users WHERE length(@p) > 0 AND handle = @p", "text", false},
 		{"literal_guard", "SELECT id FROM users WHERE @p::text = '' OR handle = @p", "text", false},
-		{"nullable_literal_guard", "SELECT id FROM users WHERE @p::text = '' OR nickname = @p", "text", true},
+		{"nullable_literal_guard", "SELECT id FROM users WHERE @p::text = '' OR nickname = @p", "text", false},
+		{"nullable_literal_guard_cast_column", "SELECT id FROM users WHERE @p::text = '' OR nickname::text = @p", "text", false},
+		{"nullable_literal_guard_reverse", "SELECT id FROM users WHERE nickname::text = @p OR '' = @p::text", "text", false},
+		{"nullable_literal_guard_uncast", "SELECT id FROM users WHERE @p = '' OR nickname = @p", "text", false},
+		{"nullable_literal_guard_optional", "SELECT id FROM users WHERE @p?::text = '' OR nickname = @p", "text", true},
+		{"nullable_literal_guard_null", "SELECT id FROM users WHERE @p::text IS NULL OR @p = '' OR nickname = @p", "text", true},
+		{"nullable_literal_guard_coalesce", "SELECT id FROM users WHERE COALESCE(@p::text, '') = '' OR nickname = @p", "text", true},
+		{"nullable_null_literal", "SELECT id FROM users WHERE @p::text = NULL OR nickname = @p", "text", true},
+		{"nullable_literal_guard_boolean", "SELECT id FROM users WHERE @p::bool = false OR active = @p", "bool", false},
+		{"case_nullable_then", "UPDATE users SET nickname = CASE WHEN id IS NOT NULL THEN @p::text ELSE nickname END", "text", true},
+		{"case_nullable_else", "UPDATE users SET nickname = CASE WHEN id IS NULL THEN nickname ELSE @p::text END", "text", true},
+		{"case_nullable_nested", "UPDATE users SET nickname = CASE WHEN true THEN CASE WHEN false THEN nickname ELSE upper(@p::text) END END", "text", true},
+		{"case_required_then", "UPDATE users SET handle = CASE WHEN true THEN @p::text ELSE handle END", "text", false},
+		{"case_required_uncast", "UPDATE users SET handle = CASE WHEN true THEN @p ELSE handle END", "text", false},
+		{"case_nullable_uncast", "UPDATE users SET nickname = CASE WHEN true THEN @p ELSE nickname END", "text", true},
+		{"case_nullable_insert", "INSERT INTO users(nickname) VALUES (CASE WHEN true THEN @p::text ELSE 'fallback' END)", "text", true},
+		{"case_nullable_insert_select", "INSERT INTO users(nickname) SELECT CASE WHEN true THEN @p::text ELSE 'fallback' END", "text", true},
+		{"case_nullable_conflict", "INSERT INTO users(id,handle) VALUES ('00000000-0000-0000-0000-000000000001','h') ON CONFLICT(id) DO UPDATE SET nickname = CASE WHEN true THEN @p::text ELSE users.nickname END", "text", true},
+		{"case_required_coalesce", "UPDATE users SET handle = CASE WHEN true THEN COALESCE(@p::text, handle) ELSE handle END", "text", true},
+		{"case_coalesce_result", "UPDATE users SET handle = COALESCE(CASE WHEN true THEN @p::text END, handle)", "text", true},
+		{"case_condition_not_target", "UPDATE users SET nickname = CASE WHEN @p::bool THEN 'yes' ELSE 'no' END", "bool", false},
+		{"case_operand_not_target", "UPDATE users SET nickname = CASE @p::int WHEN 0 THEN 'yes' ELSE 'no' END", "int4", false},
 		{"mixed_columns", "SELECT id FROM users WHERE handle = @p OR nickname = @p", "text", false},
 		{"mixed_columns_reverse", "SELECT id FROM users WHERE nickname = @p OR handle = @p", "text", false},
 		{"null_safe_repeated", "SELECT id FROM users WHERE handle = @p AND nickname IS DISTINCT FROM @p", "text", false},

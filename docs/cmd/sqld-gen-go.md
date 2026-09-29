@@ -183,6 +183,20 @@ Comparisons and assignments inherit the column's declared nullability,
 including through casts and supported NULL-propagating functions such as
 `lower`. This also applies to direct `INSERT ... SELECT` targets. Type-only
 contexts cannot reset that nullability when a parameter is used again.
+For a `CASE` assignment, the target column's nullability propagates through
+`THEN` and `ELSE` results, including nested CASE expressions. It does not
+propagate into the CASE operand or WHEN conditions. For example,
+`nullable_col = CASE WHEN @set_value::bool THEN @value::text ELSE nullable_col END`
+generates `SetValue bool` and `Value *string` in pointer mode: a true flag and
+a nil value write SQL NULL; a false flag preserves the column.
+
+Direct equality with a non-NULL literal supplies a required-value context.
+Thus `(@filter::text = '' OR nullable_col::text = @filter)` takes a `string`:
+the empty string disables the filter, and nil is not accepted by the Go API.
+The comparison can appear in either order. NULL checks, COALESCE fallbacks,
+and explicit `@filter?` still retain nullable inputs. Comparing only against
+a nullable column continues to inherit that column's nullability.
+
 `LIMIT @lim` and `OFFSET @offset` use `int64` values. Explicit optional
 parameters (`@name?`), NULL checks (`@after IS NULL`), and inputs with a
 `COALESCE` fallback retain nullable types. A parameter used as the final
@@ -193,8 +207,8 @@ elsewhere in the query.
 Unknown nullability is distinct from known nullable-column context. A cast
 does not override nullable-column context, NULL checks, or `COALESCE` inputs.
 Repeated uses merge these constraints independently of traversal order:
-explicit NULL handling takes precedence, then required-column context, then
-nullable-column context, then the cast default. Without a direct cast or
+explicit NULL handling takes precedence, then required-column or direct-literal
+context, then nullable-column context, then the cast default. Without a direct cast or
 known nullability context, input inference remains conservative.
 
 To mark a user-function argument optional, write

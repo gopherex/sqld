@@ -117,6 +117,18 @@ func TestDynamicGeneratedRuntime(t *testing.T) {
 	if len(response.Diagnostics) > 0 {
 		t.Fatalf("generation diagnostics: %v", response.Diagnostics)
 	}
+	data, err := json.Marshal(cases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testGeneratedPostgres(t, response, map[string][]byte{
+		"cases.json":              data,
+		"dynamic_runtime_test.go": dynamicRuntimeTest,
+	})
+}
+
+func testGeneratedPostgres(t *testing.T, response *pluginv1.GenerateResponse, fixtures map[string][]byte) {
+	t.Helper()
 	dir := t.TempDir()
 	write := func(name string, data []byte) {
 		t.Helper()
@@ -134,12 +146,9 @@ func TestDynamicGeneratedRuntime(t *testing.T) {
 		}
 		write(name, data)
 	}
-	data, err := json.Marshal(cases)
-	if err != nil {
-		t.Fatal(err)
+	for name, data := range fixtures {
+		write(name, data)
 	}
-	write("cases.json", data)
-	write("dynamic_runtime_test.go", dynamicRuntimeTest)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	db, err := devdb.Start(ctx)

@@ -81,6 +81,15 @@ func (i *paramInference) constrainInput(e *irv1.Expr, context inputNullContext) 
 		i.constrainInput(c.GetExpr(), context)
 		return
 	}
+	if c := e.GetCaseExpr(); c != nil {
+		// Only the selected result flows into the surrounding expression.
+		// The CASE operand and WHEN conditions have their own input contracts.
+		for _, when := range c.GetWhens() {
+			i.constrainInput(when.GetResult(), context)
+		}
+		i.constrainInput(c.GetElseResult(), context)
+		return
+	}
 	if f := e.GetFunctionCall(); f != nil && strictNullFunction(f) {
 		for _, arg := range f.GetArguments() {
 			i.constrainInput(arg, context)
@@ -93,6 +102,25 @@ func (i *paramInference) constrainInput(e *irv1.Expr, context inputNullContext) 
 				i.constrainInput(arg, context)
 			}
 		}
+	}
+}
+
+// Equality between a parameter (possibly cast) and a non-NULL literal declares
+// a value sentinel. It outweighs a nullable comparison column, while explicit NULL
+// handling (IS NULL, COALESCE, @name?) still wins. Do not propagate this rule
+// through functions: their inputs need not have the result's input contract.
+func (i *paramInference) literalInput(value, literal *irv1.Expr) {
+	for literal.GetCast() != nil {
+		literal = literal.GetCast().GetExpr()
+	}
+	if lit := literal.GetLiteral(); lit == nil || lit.GetNullValue() {
+		return
+	}
+	for value.GetCast() != nil {
+		value = value.GetCast().GetExpr()
+	}
+	if p := value.GetParameter(); p != nil {
+		i.recordInput(p.GetPosition(), inputRequired)
 	}
 }
 

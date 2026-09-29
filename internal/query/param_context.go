@@ -610,6 +610,10 @@ func (i *paramInference) operator(op *irv1.OperatorExpr, s *paramScope) *irv1.Ty
 		return nil
 	}
 	left, right := i.expr(args[0], s, nil, nil), i.expr(args[1], s, nil, nil)
+	if sym == "=" {
+		i.literalInput(args[0], args[1])
+		i.literalInput(args[1], args[0])
+	}
 	leftWant, rightWant := right, left
 	if sym == "NULLIF" {
 		for _, arg := range args {
