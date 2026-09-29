@@ -1,6 +1,7 @@
 package plugin_test
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,6 +126,35 @@ func TestGenerateViaWasmPlugin(t *testing.T) {
 		"func (q *Queries) GetUser(",
 		"func (q *Queries) ListActiveUsers(",
 		"func (q *Queries) SearchUsers(",
+	}
+
+	// Compare freshly generated output, including dynamic WHERE builders, with
+	// the native plugin. Both transports must use exactly the same semantics.
+	nativePath := filepath.Join(t.TempDir(), "sqld-gen-go")
+	build := exec.Command("go", "build", "-o", nativePath, "./cmd/sqld-gen-go")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build native plugin: %v\n%s", err, output)
+	}
+	nativeOut := filepath.Join(t.TempDir(), "dbnative")
+	cfg.Plugins[0].Wasm = ""
+	cfg.Plugins[0].Binary = nativePath
+	cfg.Plugins[0].Out = nativeOut
+	if err := sqld.Generate(cfg); err != nil {
+		t.Fatalf("sqld.Generate via native plugin: %v", err)
+	}
+	for _, name := range []string{"models.go", "queries.go"} {
+		native, err := os.ReadFile(filepath.Join(nativeOut, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wasm, err := os.ReadFile(filepath.Join(outDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(native, wasm) {
+			t.Errorf("native and WASM generated different %s", name)
+		}
 	}
 	for _, want := range queryChecks {
 		if !strings.Contains(queriesContent, want) {

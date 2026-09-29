@@ -64,7 +64,7 @@ func TestGenerateDynamicQuery(t *testing.T) {
 			Parameters: []*pluginv1.QueryParameter{
 				// email = $1 → optional (`@email?`) → pointer field.
 				{Number: 1, Name: "email", Optional: true, Type: &irv1.TypeRef{PgName: "text"}},
-				// id = ANY($2) → slice (inherently conditional, no `?`).
+				// id = ANY($2) → required slice (no `?`).
 				{Number: 2, Name: "ids", Type: &irv1.TypeRef{PgName: "int8"}},
 			},
 			Columns: []*pluginv1.QueryColumn{
@@ -115,9 +115,9 @@ func TestGenerateDynamicQuery(t *testing.T) {
 		"SearchUsersOrderBy",
 		"OrderDir", // shared direction field
 		// WHERE-aware builder.
-		"var conds []string",
-		`strings.Join(conds, " AND ")`,
-		`b.WriteString(" WHERE " + `,
+		"var cond0Parts []string",
+		`strings.Join(cond0Parts, " AND ")`,
+		`b.WriteString("\nWHERE " + `,
 		// ORDER BY block.
 		`ORDER BY %s %s`,
 	} {
@@ -192,15 +192,15 @@ func TestGenerateDynamicQueryPreservesSuffixAndAllConditionParams(t *testing.T) 
 		"BeforeTimeline",
 		"BeforeMsg",
 		"Limit",
-		`conds = append(conds, "text IS NOT NULL")`,
-		`if len(arg.MsgIds) > 0`,
+		`= "text IS NOT NULL"`,
+		`args = append(args, arg.MsgIds)`,
 		`if arg.BeforeAt != nil`,
 		`args = append(args, *arg.BeforeAt)`,
 		`args = append(args, arg.BeforeTimeline)`,
 		`args = append(args, arg.BeforeMsg)`,
-		`fmt.Sprintf("($%d IS NULL OR (created_at, timeline_id, msg_id) < ($%d::timestamptz,\n$%d::uuid, $%d::bigint))", len(args)-2, len(args)-2, len(args)-1, len(args))`,
+		`fmt.Sprintf("(created_at, timeline_id, msg_id) < ($%d::timestamptz,\n    $%d::uuid, $%d::bigint)", positions[3], positions[4], positions[5])`,
 		`args = append(args, arg.Limit)`,
-		`b.WriteString(fmt.Sprintf(" ORDER BY msg_id ASC\nLIMIT $%d", len(args)))`,
+		`b.WriteString(fmt.Sprintf("\nORDER BY msg_id ASC\nLIMIT $%d", positions[6]))`,
 	} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("missing %q in:\n%s", want, generated)
@@ -239,9 +239,9 @@ func TestGenerateDynamicQueryIncludesParamsBeforeWhere(t *testing.T) {
 	}
 	for _, want := range []string{
 		`args = append(args, arg.Text)`,
-		`b.WriteString(fmt.Sprintf("UPDATE messages SET text = $%d", len(args)))`,
+		`b.WriteString(fmt.Sprintf("UPDATE messages SET text = $%d", positions[1]))`,
 		`if arg.AuthorID != nil`,
-		`b.WriteString(" RETURNING id")`,
+		`b.WriteString("\nRETURNING id")`,
 	} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("missing %q in:\n%s", want, generated)

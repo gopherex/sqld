@@ -327,26 +327,43 @@ type SearchUsersRow struct {
 
 func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]SearchUsersRow, error) {
 	var b strings.Builder
-	b.WriteString("SELECT id, email, status FROM app.users")
 	var args []any
-	var conds []string
+	positions := make(map[uint32]int)
+	b.WriteString("SELECT id, email, status FROM app.users")
+	var cond0 string
+	var cond0Parts []string
+	var cond1 string
 	if arg.Email != nil {
-		args = append(args, *arg.Email)
-		conds = append(conds, fmt.Sprintf("email = $%d", len(args)))
+		if positions[1] == 0 {
+			args = append(args, *arg.Email)
+			positions[1] = len(args)
+		}
+		cond1 = fmt.Sprintf("email = $%d", positions[1])
 	}
-	if len(arg.Ids) > 0 {
+	if cond1 != "" {
+		cond0Parts = append(cond0Parts, cond1)
+	}
+	var cond2 string
+	if positions[2] == 0 {
 		args = append(args, arg.Ids)
-		conds = append(conds, fmt.Sprintf("id = ANY($%d)", len(args)))
+		positions[2] = len(args)
 	}
-	if len(conds) > 0 {
-		b.WriteString(" WHERE " + strings.Join(conds, " AND "))
+	cond2 = fmt.Sprintf("id = ANY($%d)", positions[2])
+	if cond2 != "" {
+		cond0Parts = append(cond0Parts, cond2)
+	}
+	if len(cond0Parts) > 0 {
+		cond0 = "(" + strings.Join(cond0Parts, " AND ") + ")"
+	}
+	if cond0 != "" {
+		b.WriteString("\nWHERE " + cond0)
 	}
 	if arg.OrderBy != "" {
 		dir := "ASC"
 		if arg.OrderDir == OrderDesc {
 			dir = "DESC"
 		}
-		fmt.Fprintf(&b, " ORDER BY %s %s", string(arg.OrderBy), dir)
+		fmt.Fprintf(&b, "\nORDER BY %s %s", string(arg.OrderBy), dir)
 	}
 	rows, err := q.db.Query(ctx, b.String(), args...)
 	if err != nil {

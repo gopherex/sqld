@@ -589,8 +589,9 @@ annotation model). It is now implemented end-to-end through the real pipeline.
   position map is kept and each `QueryParameter` carries its `Name`.
 - **Optionality on the parameter** (no `@if` directive). A param written
   `@name?` is OPTIONAL: the host's `?`-aware lexer strips the suffix and sets
-  `QueryParameter.optional = true`. A condition using `= ANY(@p)` is a SLICE
-  (included when non-empty). `-- @orderby col1, col2` (the one remaining
+  `QueryParameter.optional = true`. `= ANY(@p)` uses a required slice; nil and
+  empty slices retain the predicate. Only `ANY(@p?)` permits omission on nil,
+  while a non-nil empty slice remains bound. `-- @orderby col1, col2` (the one remaining
   directive) declares the allowlist for a runtime `ORDER BY`. The base SQL
   (comments ignored by libpg_query) stays valid, so inference works and the
   result shape is fixed.
@@ -599,15 +600,18 @@ annotation model). It is now implemented end-to-end through the real pipeline.
   WHERE condition optional from its `$N` param's `optional` flag (not a comment),
   detects slices from `ANY($N)`, and emits a builder. Validity is guaranteed at
   generation: the base (all conditions) is parsed by libpg_query in `Collect`
-  (invalid → generation fails), and removing whole top-level AND conditions keeps
-  the SQL valid by construction — no runtime parsing needed.
+  (invalid → generation fails). The plugin tokenizes SQL and builds the outer
+  WHERE's boolean tree, preserving AND/OR/NOT, parentheses, CASE and BETWEEN.
+  Comments, literals and nested SQL scopes do not delimit the outer WHERE.
+  The generated runtime omits only explicitly optional predicates and prunes
+  empty groups; it does not parse SQL at runtime.
 - **Generated Go**: a `<Name>Params` struct — `@name?` → `*T` pointer,
   `ANY(@p)` → `[]T` slice, `@orderby` → a typed enum `<Name>OrderBy` (+ a shared
   `OrderDir` ASC/DESC). The method assembles parameterized SQL with a
-  `strings.Builder`, collecting included conditions into `conds` and emitting
-  **a clean `WHERE c1 AND c2`** only when non-empty (no `WHERE true`, no
-  `OR NULL`), **renumbering `$N`** in append order, and appending
-  `ORDER BY <enum> <dir>` (sort column from the allowlist enum → injection-safe).
+  `strings.Builder`, retaining the original boolean operators and emitting
+  WHERE only when at least one predicate remains. It renumbers actual `$N`
+  tokens in bind order, shares repeated arguments across fragments, and places
+  runtime `ORDER BY <enum> <dir>` before pagination and locking clauses.
   Fixed typed result row.
 
 **Consequences:** Typed dynamic queries — sqlc's blocking gap — work end-to-end
@@ -615,9 +619,10 @@ annotation model). It is now implemented end-to-end through the real pipeline.
 `WHERE`, typed sort enum + direction. UDTs map to Go types in `sqld-gen-go`
 (enum → a typed `string` + consts, domain → its base type, composite → a struct;
 resolved against the catalog by name) — so an enum param is `AppUserStatus`, a
-`text` domain is `string`, not `any`. v1 condition splitting is per-line over a
-top-level `WHERE` (one `$N` per condition); nested OR/paren-heavy WHEREs are
-best-effort. Composites scan/encode via generated pgx methods
+`text` domain is `string`, not `any`. Predicate boundaries follow SQL tokens,
+not source lines; a predicate can reference multiple parameters. Nested SQL
+queries are retained as atomic parts of their enclosing predicate.
+Composites scan/encode via generated pgx methods
 (`ScanIndex`/`ScanNull`/`Index`/`IsNull` + `pgtype.CompositeIndexScanner/Getter`
 compile-assertions): composite columns → struct, composite params → encoded
 (getter), composite/enum arrays → `[]T` (`address[]` → `[]AppAddress`,

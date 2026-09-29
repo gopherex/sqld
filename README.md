@@ -148,7 +148,7 @@ const (
 
 type SearchUsersParams struct {
     Email    *string             // nil → condition omitted
-    Ids      []int64             // empty → condition omitted
+    Ids      []int64             // required: nil/empty keeps the filter
     OrderBy  SearchUsersOrderBy
     OrderDir OrderDir            // OrderAsc | OrderDesc
 }
@@ -156,7 +156,7 @@ type SearchUsersParams struct {
 func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]SearchUsersRow, error)
 ```
 
-The builder assembles a clean `WHERE c1 AND c2` only when conditions are present, renumbers `$N` in append order, and appends `ORDER BY <enum> <dir>` from the allowlist — no string interpolation, no injection surface.
+The builder preserves `AND`, `OR`, `NOT`, and grouping, omitting only predicates with an unset explicit `@name?` parameter. `ANY(@ids)` always binds the array: nil or empty arrays do not disable the filter. Use `ANY(@ids?)` to make it optional: nil omits the predicate, while a non-nil empty slice keeps it. Repeated parameters share a bind position. Runtime `ORDER BY` is placed before pagination and locking clauses.
 
 ---
 

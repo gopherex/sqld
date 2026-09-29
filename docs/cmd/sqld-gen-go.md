@@ -221,16 +221,30 @@ ambiguous contexts can remain unresolved. Diagnostics are available on
 
 ### Optional parameters (`@name?`)
 
-Appending `?` to a parameter name marks it optional. Optional parameters become
-pointer fields in the `XParams` struct. The condition that uses an optional
-parameter is included in the SQL at runtime only when the field is non-nil.
+Appending `?` to a parameter name marks it optional. Optional scalar parameters
+become pointer fields in the `XParams` struct. A WHERE predicate that references
+optional parameters is included only when all of those fields are non-nil.
+Required predicates on the same line remain present. `AND`, `OR`, `NOT`, and
+parentheses retain their structure; empty groups disappear. If every predicate
+is explicitly optional and unset, the WHERE clause is omitted, including for
+UPDATE and DELETE.
+
+SQL comments, quoted text, subqueries, CASE expressions and BETWEEN bounds do
+not act as condition separators. Nested SQL queries within a predicate are
+kept as part of that predicate. Optional values outside the outer WHERE are
+bound as SQL arguments (nil becomes NULL); they do not remove SQL clauses.
+Nullable parameters without `?` are always bound and never disable a filter.
 
 ### Slice parameters (`ANY(@ids)`)
 
-A parameter written as `ANY(@ids)` declares a slice condition. The Go field is
-`[]T`; the condition is included at runtime only when the slice is non-empty.
-pgx passes a slice as a single `$N` argument and PostgreSQL's `= ANY($N)`
-expands it server-side.
+A parameter written as `ANY(@ids)` has a `[]T` Go field and is always bound as
+a single array argument. A non-nil empty slice makes `= ANY($N)` false; a nil
+slice is SQL NULL. Neither value removes the predicate. This also applies to
+casts and extra parentheses, such as `ANY((@ids::bigint[]))`.
+
+For an optional array filter, write `ANY(@ids?)`. The field is still `[]T`:
+nil omits the predicate, while a non-nil empty slice keeps it and matches no
+rows for `= ANY`. Array type and predicate optionality are independent.
 
 ### The `@orderby` annotation — typed dynamic ORDER BY
 
@@ -242,7 +256,8 @@ plugin, which generates:
 - a shared `OrderDir string` type with constants `OrderAsc` / `OrderDesc`;
 - `OrderBy XOrderBy` and `OrderDir OrderDir` fields on the params struct.
 
-The ORDER BY clause is appended at runtime only when `OrderBy` is non-empty.
+A non-empty `OrderBy` selects the runtime sort before LIMIT/OFFSET/FETCH and
+locking clauses. When unset, the original SQL ORDER BY is retained if present.
 
 A query is treated as **dynamic** (and uses the WHERE-aware runtime builder) if
 it has an `@orderby` annotation, any optional parameter, or any `ANY(@name)` slice
@@ -287,7 +302,7 @@ const (
 )
 type SearchUsersParams struct {
     Email    *string            // optional: non-nil → condition included
-    Ids      []int64            // slice: non-empty → condition included
+    Ids      []int64            // required: nil/empty keeps the filter
     OrderBy  SearchUsersOrderBy
     OrderDir OrderDir
 }
