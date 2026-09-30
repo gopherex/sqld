@@ -10,6 +10,7 @@
 package diff
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -223,19 +224,21 @@ func (c *DropSequence) sortKey() int    { return sortKeySequence }
 // --- tables ------------------------------------------------------------------
 
 // CreateTable creates a table with its columns and inline primary key.
-type CreateTable struct{ Table *irv1.Table }
+type CreateTable struct{ Table, Parent *irv1.Table }
 
-func (c *CreateTable) UpSQL() string   { return renderCreateTable(c.Table) }
+func (c *CreateTable) UpSQL() string   { return renderCreateTableWithParent(c.Table, c.Parent) }
 func (c *CreateTable) DownSQL() string { return renderDropTable(c.Table) }
 func (c *CreateTable) sortKey() int    { return sortKeyTable }
 
 // DropTable drops a table. The inverse re-creates it best-effort with a
 // data-loss warning.
-type DropTable struct{ Table *irv1.Table }
+type DropTable struct{ Table, Parent *irv1.Table }
 
-func (c *DropTable) UpSQL() string   { return renderDropTable(c.Table) }
-func (c *DropTable) DownSQL() string { return lossWarning + renderCreateTable(c.Table) }
-func (c *DropTable) sortKey() int    { return sortKeyTable }
+func (c *DropTable) UpSQL() string { return renderDropTable(c.Table) }
+func (c *DropTable) DownSQL() string {
+	return lossWarning + renderCreateTableWithParent(c.Table, c.Parent)
+}
+func (c *DropTable) sortKey() int { return sortKeyTable }
 
 // --- columns -----------------------------------------------------------------
 
@@ -353,6 +356,48 @@ func (c *DropDefault) DownSQL() string {
 		" SET DEFAULT " + renderExpr(c.Old) + ";"
 }
 func (c *DropDefault) sortKey() int { return sortKeyColumn }
+
+// AlterIdentity changes generation without dropping the column or its data.
+type AlterIdentity struct {
+	Table    *irv1.Table
+	Column   string
+	From, To *irv1.Identity
+}
+
+func (c *AlterIdentity) UpSQL() string   { return alterIdentity(c.Table, c.Column, c.From, c.To) }
+func (c *AlterIdentity) DownSQL() string { return alterIdentity(c.Table, c.Column, c.To, c.From) }
+func (c *AlterIdentity) sortKey() int    { return sortKeyColumn }
+
+func alterIdentity(t *irv1.Table, col string, from, to *irv1.Identity) string {
+	prefix := "ALTER TABLE " + tableQualified(t) + " ALTER COLUMN " + quoteIdent(col)
+	if to == nil {
+		return prefix + " DROP IDENTITY;"
+	}
+	if from == nil {
+		return prefix + " ADD " + renderIdentity(to) + ";"
+	}
+	out := prefix + " SET GENERATED " + identityKind(to) + ";"
+	if seq := to.GetOptions(); seq != nil {
+		// SET options preserves the current counter. START changes only the
+		// restart default; no RESTART or sequence recreation is performed.
+		options := []string{
+			fmt.Sprintf("INCREMENT BY %d", seq.GetIncrement()),
+			fmt.Sprintf("MINVALUE %d", seq.GetMinValue()),
+			fmt.Sprintf("MAXVALUE %d", seq.GetMaxValue()),
+			fmt.Sprintf("START WITH %d", seq.GetStart()),
+			fmt.Sprintf("CACHE %d", seq.GetCache()),
+		}
+		if seq.GetCycle() {
+			options = append(options, "CYCLE")
+		} else {
+			options = append(options, "NO CYCLE")
+		}
+		for _, option := range options {
+			out += "\n" + prefix + " SET " + option + ";"
+		}
+	}
+	return out
+}
 
 // --- constraints -------------------------------------------------------------
 

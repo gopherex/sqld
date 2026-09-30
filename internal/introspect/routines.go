@@ -46,7 +46,8 @@ JOIN pg_catalog.pg_class tc ON tc.oid = i.indrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = tc.relnamespace
 JOIN pg_catalog.pg_am am ON am.oid = ic.relam
 WHERE n.nspname = ANY($1)
-  AND tc.relkind = 'r'
+  AND tc.relkind IN ('r', 'p')
+  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_inherits inh WHERE inh.inhrelid = i.indexrelid)
   AND i.indexrelid NOT IN (
         SELECT con.conindid FROM pg_catalog.pg_constraint con WHERE con.conindid <> 0)
 ORDER BY n.nspname, tc.relname, ic.relname`

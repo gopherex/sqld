@@ -22,14 +22,20 @@ func (b *builder) loadTables(ctx context.Context, schemas []string) error {
 	b.tableByKey = make(map[tableKey]*irv1.Table)
 
 	const q = `
-SELECT c.oid, n.nspname, c.relname, c.relpersistence::text
+SELECT c.oid, n.nspname, c.relname, c.relpersistence::text,
+       COALESCE(pg_catalog.pg_get_partkeydef(c.oid), ''),
+       COALESCE(pn.nspname, ''), COALESCE(pc.relname, ''),
+       COALESCE(pg_catalog.pg_get_expr(c.relpartbound, c.oid), '')
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_catalog.pg_inherits inh ON inh.inhrelid = c.oid AND c.relispartition
+LEFT JOIN pg_catalog.pg_class pc ON pc.oid = inh.inhparent
+LEFT JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
 LEFT JOIN pg_catalog.pg_depend d
        ON d.classid = 'pg_catalog.pg_class'::regclass
       AND d.objid = c.oid
       AND d.deptype = 'e'
-WHERE c.relkind = 'r'
+WHERE c.relkind IN ('r', 'p')
   AND n.nspname = ANY($1)
   AND d.objid IS NULL
 ORDER BY n.nspname, c.relname`
@@ -38,15 +44,20 @@ ORDER BY n.nspname, c.relname`
 		return err
 	}
 	type relRow struct {
-		oid    uint32
-		schema string
-		name   string
-		persis string
+		oid          uint32
+		schema       string
+		name         string
+		persis       string
+		partitionBy  string
+		parentSchema string
+		parentName   string
+		bound        string
 	}
 	var rels []relRow
 	for rows.Next() {
 		var r relRow
-		if err := rows.Scan(&r.oid, &r.schema, &r.name, &r.persis); err != nil {
+		if err := rows.Scan(&r.oid, &r.schema, &r.name, &r.persis,
+			&r.partitionBy, &r.parentSchema, &r.parentName, &r.bound); err != nil {
 			rows.Close()
 			return err
 		}
@@ -59,9 +70,14 @@ ORDER BY n.nspname, c.relname`
 
 	for _, r := range rels {
 		tbl := &irv1.Table{
-			Id:          r.schema + "." + r.name,
-			Name:        qname(r.schema, r.name),
-			Persistence: persistence(r.persis),
+			Id:             r.schema + "." + r.name,
+			Name:           qname(r.schema, r.name),
+			Persistence:    persistence(r.persis),
+			PartitionBy:    r.partitionBy,
+			PartitionBound: r.bound,
+		}
+		if r.parentName != "" {
+			tbl.PartitionOf = qname(r.parentSchema, r.parentName)
 		}
 		sch := b.getSchema(r.schema)
 		sch.Tables = append(sch.Tables, tbl)
@@ -145,6 +161,9 @@ ORDER BY a.attnum`
 		case "d":
 			col.Identity = &irv1.Identity{Kind: irv1.IdentityKind_IDENTITY_KIND_BY_DEFAULT}
 		}
+		if col.Identity != nil {
+			col.Identity.Options = b.identitySequences[col.GetId()]
+		}
 
 		tbl.Columns = append(tbl.Columns, col)
 	}
@@ -188,7 +207,8 @@ LEFT JOIN pg_catalog.pg_namespace fn ON fn.oid = fc.relnamespace
 LEFT JOIN pg_catalog.pg_index ci ON ci.indexrelid = con.conindid
 WHERE rn.nspname = ANY($1)
   AND con.contype IN ('p','f','u','c','x')
-  AND rc.relkind = 'r'
+  AND rc.relkind IN ('r', 'p')
+  AND con.conparentid = 0 AND con.conislocal
 ORDER BY rn.nspname, rc.relname, con.conname`
 	rows, err := b.conn.Query(ctx, q, schemas)
 	if err != nil {
@@ -286,7 +306,8 @@ ORDER BY rn.nspname, rc.relname, con.conname`
 	return rows.Err()
 }
 
-// loadSequences reads relkind 'S' relations into Schema.Sequences.
+// loadSequences reads standalone sequences into Schema.Sequences. Identity
+// sequences belong to their column definition and must not be created twice.
 func (b *builder) loadSequences(ctx context.Context, schemas []string) error {
 	const q = `
 SELECT n.nspname,
@@ -298,10 +319,18 @@ SELECT n.nspname,
        s.seqmin,
        s.seqmax,
        s.seqcache,
-       s.seqcycle
+       s.seqcycle,
+       COALESCE(d.deptype::text, ''),
+       COALESCE(tn.nspname || '.' || tc.relname || '.' || a.attname, '')
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_catalog.pg_sequence s ON s.seqrelid = c.oid
+LEFT JOIN pg_catalog.pg_depend d
+       ON d.classid = 'pg_catalog.pg_class'::regclass AND d.objid = c.oid
+      AND d.refclassid = 'pg_catalog.pg_class'::regclass AND d.deptype = 'i'
+LEFT JOIN pg_catalog.pg_class tc ON tc.oid = d.refobjid
+LEFT JOIN pg_catalog.pg_namespace tn ON tn.oid = tc.relnamespace
+LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = tc.oid AND a.attnum = d.refobjsubid
 WHERE c.relkind = 'S'
   AND n.nspname = ANY($1)
 ORDER BY n.nspname, c.relname`
@@ -313,19 +342,21 @@ ORDER BY n.nspname, c.relname`
 
 	for rows.Next() {
 		var (
-			schema    string
-			name      string
-			typoid    uint32
-			formatted string
-			start     int64
-			increment int64
-			minv      int64
-			maxv      int64
-			cache     int64
-			cycle     bool
+			schema     string
+			name       string
+			typoid     uint32
+			formatted  string
+			start      int64
+			increment  int64
+			minv       int64
+			maxv       int64
+			cache      int64
+			cycle      bool
+			dependency string
+			columnID   string
 		)
 		if err := rows.Scan(&schema, &name, &typoid, &formatted, &start,
-			&increment, &minv, &maxv, &cache, &cycle); err != nil {
+			&increment, &minv, &maxv, &cache, &cycle, &dependency, &columnID); err != nil {
 			return err
 		}
 		seq := &irv1.Sequence{
@@ -338,6 +369,10 @@ ORDER BY n.nspname, c.relname`
 			MaxValue:  maxv,
 			Cache:     cache,
 			Cycle:     cycle,
+		}
+		if dependency == "i" {
+			b.identitySequences[columnID] = seq
+			continue
 		}
 		sch := b.getSchema(schema)
 		sch.Sequences = append(sch.Sequences, seq)

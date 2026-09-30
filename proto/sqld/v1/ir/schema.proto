@@ -31,6 +31,11 @@ message Table {
   // Trigger is defined in routine.proto; referenced here by id to keep the
   // file dependency one-directional. Resolve against the catalog's trigger set.
   repeated ObjectRef triggers = 8;
+  // PostgreSQL partition key definition, e.g. RANGE (created_at).
+  string partition_by = 9;
+  QualifiedName partition_of = 10;
+  // DEFAULT or FOR VALUES ..., as deparsed by PostgreSQL.
+  string partition_bound = 11;
   Metadata meta = 15;
 }
 
@@ -44,6 +49,7 @@ enum IdentityKind {
 message Identity {
   IdentityKind kind = 1;
   ObjectRef sequence = 2; // backing sequence, when known
+  Sequence options = 3; // backing sequence definition, not a standalone object
 }
 
 // GeneratedColumn: GENERATED ALWAYS AS (expr) STORED.

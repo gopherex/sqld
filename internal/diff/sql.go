@@ -163,7 +163,7 @@ func renderLiteral(l *irv1.Literal) string {
 	return ""
 }
 
-// renderColumn renders a column definition: `"col" type [NOT NULL] [DEFAULT expr]`.
+// renderColumn includes nullability, defaults and generated/identity clauses.
 func renderColumn(c *irv1.Column) string {
 	var b strings.Builder
 	b.WriteString(quoteIdent(c.GetName()))
@@ -172,11 +172,40 @@ func renderColumn(c *irv1.Column) string {
 	if !c.GetNullable() {
 		b.WriteString(" NOT NULL")
 	}
-	if d := renderExpr(c.GetDefaultExpr()); d != "" {
+	if id := c.GetIdentity(); id != nil {
+		b.WriteString(" " + renderIdentity(id))
+	} else if g := c.GetGenerated(); g != nil {
+		b.WriteString(" GENERATED ALWAYS AS (" + renderExpr(g.GetExpression()) + ") STORED")
+	} else if d := renderExpr(c.GetDefaultExpr()); d != "" {
 		b.WriteString(" DEFAULT ")
 		b.WriteString(d)
 	}
 	return b.String()
+}
+
+func identityKind(id *irv1.Identity) string {
+	if id.GetKind() == irv1.IdentityKind_IDENTITY_KIND_BY_DEFAULT {
+		return "BY DEFAULT"
+	}
+	return "ALWAYS"
+}
+
+func renderIdentity(id *irv1.Identity) string {
+	s := "GENERATED " + identityKind(id) + " AS IDENTITY"
+	if seq := id.GetOptions(); seq != nil {
+		s += " (SEQUENCE NAME " + qname(seq.GetName()) + " " + identitySequenceOptions(seq) + ")"
+	}
+	return s
+}
+
+// Introspection records all options, including valid zero/negative values.
+func identitySequenceOptions(seq *irv1.Sequence) string {
+	s := fmt.Sprintf("INCREMENT BY %d MINVALUE %d MAXVALUE %d START WITH %d CACHE %d",
+		seq.GetIncrement(), seq.GetMinValue(), seq.GetMaxValue(), seq.GetStart(), seq.GetCache())
+	if seq.GetCycle() {
+		return s + " CYCLE"
+	}
+	return s + " NO CYCLE"
 }
 
 // --- schema ------------------------------------------------------------------
@@ -301,8 +330,51 @@ func renderDropSequence(s *irv1.Sequence) string {
 
 // renderCreateTable renders a CREATE TABLE with columns and an inline PRIMARY
 // KEY clause when the table has a primary-key constraint. Other constraints and
-// indexes are handled by the follow-up task.
+// indexes are emitted as separate changes.
 func renderCreateTable(t *irv1.Table) string {
+	return renderCreateTableWithParent(t, nil)
+}
+
+func renderCreateTableWithParent(t, parentTable *irv1.Table) string {
+	suffix := ""
+	if t.GetPartitionBy() != "" {
+		suffix = " PARTITION BY " + t.GetPartitionBy()
+	}
+	if parent := t.GetPartitionOf(); parent != nil {
+		parentColumns := indexColumns(parentTable)
+		var overrides []string
+		for _, c := range t.GetColumns() {
+			p := parentColumns[c.GetName()]
+			var options []string
+			if !c.GetNullable() && (p == nil || p.GetNullable()) {
+				options = append(options, "NOT NULL")
+			}
+			if !defaultsEqual(c.GetDefaultExpr(), p.GetDefaultExpr()) {
+				d := renderExpr(c.GetDefaultExpr())
+				if d == "" {
+					d = "NULL"
+				}
+				options = append(options, "DEFAULT "+d)
+			}
+			if c.GetGenerated() != nil && renderExpr(c.GetGenerated().GetExpression()) != renderExpr(p.GetGenerated().GetExpression()) {
+				options = append(options, "GENERATED ALWAYS AS ("+renderExpr(c.GetGenerated().GetExpression())+") STORED")
+			}
+			if len(options) > 0 {
+				overrides = append(overrides, quoteIdent(c.GetName())+" "+strings.Join(options, " "))
+			}
+		}
+		for _, c := range t.GetConstraints() {
+			if c.GetPrimaryKey() != nil {
+				overrides = append(overrides, "CONSTRAINT "+quoteIdent(c.GetName())+" "+renderConstraintBody(c))
+			}
+		}
+		columns := ""
+		if len(overrides) > 0 {
+			columns = " (" + strings.Join(overrides, ", ") + ")"
+		}
+		return "CREATE TABLE " + tableQualified(t) + " PARTITION OF " + qname(parent) +
+			columns + " " + t.GetPartitionBound() + suffix + ";"
+	}
 	var lines []string
 	for _, c := range t.GetColumns() {
 		lines = append(lines, "  "+renderColumn(c))
@@ -314,7 +386,7 @@ func renderCreateTable(t *irv1.Table) string {
 		}
 		lines = append(lines, "  PRIMARY KEY ("+strings.Join(cols, ", ")+")")
 	}
-	return "CREATE TABLE " + tableQualified(t) + " (\n" + strings.Join(lines, ",\n") + "\n);"
+	return "CREATE TABLE " + tableQualified(t) + " (\n" + strings.Join(lines, ",\n") + "\n)" + suffix + ";"
 }
 
 func renderDropTable(t *irv1.Table) string {

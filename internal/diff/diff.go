@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -28,7 +29,9 @@ func Diff(from, to *irv1.Catalog) (*Plan, error) {
 	diffComposites(p, f, t)
 	diffRanges(p, f, t)
 	diffSequences(p, f, t)
-	diffTables(p, f, t)
+	if err := diffTables(p, f, t); err != nil {
+		return nil, err
+	}
 	diffViews(p, f, t)
 	diffMatViews(p, f, t)
 	diffFunctions(p, f, t)
@@ -282,15 +285,16 @@ func diffSequences(p *Plan, f, t *catalogIndex) {
 	}
 }
 
-func diffTables(p *Plan, f, t *catalogIndex) {
-	for _, k := range sortedKeys(t.tables) {
+func diffTables(p *Plan, f, t *catalogIndex) error {
+	for _, k := range partitionTableKeys(t.tables) {
 		tt := t.tables[k]
 		ft, ok := f.tables[k]
 		if !ok {
 			// New table: CreateTable carries the inline PRIMARY KEY; its other
 			// constraints (FK/UNIQUE/CHECK/EXCLUSION) and indexes are emitted as
 			// separate changes so they sort after every table is created.
-			p.Changes = append(p.Changes, &CreateTable{Table: tt})
+			parent := tt.GetPartitionOf()
+			p.Changes = append(p.Changes, &CreateTable{Table: tt, Parent: t.tables[parent.GetSchema()+"."+parent.GetName()]})
 			for _, c := range tt.GetConstraints() {
 				if isInlineConstraint(c) {
 					continue
@@ -305,15 +309,101 @@ func diffTables(p *Plan, f, t *catalogIndex) {
 			}
 			continue
 		}
-		diffColumns(p, ft, tt)
+		if ft.GetPartitionBy() != tt.GetPartitionBy() ||
+			qname(ft.GetPartitionOf()) != qname(tt.GetPartitionOf()) ||
+			ft.GetPartitionBound() != tt.GetPartitionBound() {
+			return fmt.Errorf("table %s: changing partition key, parent or bounds is not supported; use an explicit migration", k)
+		}
+		fcols := indexColumns(ft)
+		for _, col := range tt.GetColumns() {
+			oldSeq := fcols[col.GetName()].GetIdentity().GetOptions()
+			newSeq := col.GetIdentity().GetOptions()
+			if oldSeq != nil && newSeq != nil && !proto.Equal(oldSeq.GetName(), newSeq.GetName()) {
+				return fmt.Errorf("column %s.%s: renaming an identity sequence is not supported; use an explicit migration", k, col.GetName())
+			}
+		}
+		if parent := tt.GetPartitionOf(); parent != nil {
+			pk := parent.GetSchema() + "." + parent.GetName()
+			diffPartitionColumns(p, ft, tt, f.tables[pk], t.tables[pk])
+		} else {
+			diffColumns(p, ft, tt)
+		}
 		diffConstraints(p, ft, tt)
 		diffIndexes(p, ft, tt)
 	}
-	for _, k := range sortedKeys(f.tables) {
+	keys := partitionTableKeys(f.tables)
+	for i := len(keys) - 1; i >= 0; i-- {
+		k := keys[i]
 		if _, ok := t.tables[k]; !ok {
-			p.Changes = append(p.Changes, &DropTable{Table: f.tables[k]})
+			parent := f.tables[k].GetPartitionOf()
+			p.Changes = append(p.Changes, &DropTable{Table: f.tables[k], Parent: f.tables[parent.GetSchema()+"."+parent.GetName()]})
 		}
 	}
+	return nil
+}
+
+// Parents precede their partitions, including across schemas and multiple
+// levels. Lexical ordering alone can create a child before its parent.
+func partitionTableKeys(tables map[string]*irv1.Table) []string {
+	var out []string
+	seen := make(map[string]bool)
+	var visit func(string)
+	visit = func(k string) {
+		if seen[k] {
+			return
+		}
+		t, ok := tables[k]
+		if !ok {
+			return
+		}
+		seen[k] = true
+		if parent := t.GetPartitionOf(); parent != nil {
+			visit(parent.GetSchema() + "." + parent.GetName())
+		}
+		out = append(out, k)
+	}
+	for _, k := range sortedKeys(tables) {
+		visit(k)
+	}
+	return out
+}
+
+// PostgreSQL propagates parent column changes to partitions. Only emit a
+// child change when it differs from what its parent already provides.
+func diffPartitionColumns(p *Plan, from, to, fromParent, toParent *irv1.Table) {
+	fp, tp := indexColumns(fromParent), indexColumns(toParent)
+	fc, tc := indexColumns(from), indexColumns(to)
+	inherited := make(map[string]bool)
+	for name := range fp {
+		inherited[name] = true
+	}
+	for name := range tp {
+		inherited[name] = true
+	}
+	for name := range inherited {
+		inherited[name] = columnsMatch(fc[name], fp[name]) && columnsMatch(tc[name], tp[name])
+	}
+	f := proto.Clone(from).(*irv1.Table)
+	t := proto.Clone(to).(*irv1.Table)
+	f.Columns, t.Columns = nil, nil
+	for _, col := range from.GetColumns() {
+		if !inherited[col.GetName()] {
+			f.Columns = append(f.Columns, col)
+		}
+	}
+	for _, col := range to.GetColumns() {
+		if !inherited[col.GetName()] {
+			t.Columns = append(t.Columns, col)
+		}
+	}
+	diffColumns(p, f, t)
+}
+
+func columnsMatch(a, b *irv1.Column) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return renderColumn(a) == renderColumn(b)
 }
 
 // tableSchema returns the schema a table lives in (defaulting to public).
@@ -585,6 +675,10 @@ func indexColumns(t *irv1.Table) map[string]*irv1.Column {
 // diffColumn emits the changes needed to turn column `from` into `to` on table
 // `tbl`: type change, nullability change, default change.
 func diffColumn(p *Plan, tbl *irv1.Table, from, to *irv1.Column) {
+	// DROP IDENTITY must precede dropping NOT NULL or setting a default.
+	if from.GetIdentity() != nil && to.GetIdentity() == nil {
+		p.Changes = append(p.Changes, &AlterIdentity{Table: tbl, Column: to.GetName(), From: from.GetIdentity()})
+	}
 	if !typesEqual(from.GetType(), to.GetType()) {
 		p.Changes = append(p.Changes, &AlterColumnType{
 			Table:  tbl,
@@ -609,6 +703,10 @@ func diffColumn(p *Plan, tbl *irv1.Table, from, to *irv1.Column) {
 		case fd != nil:
 			p.Changes = append(p.Changes, &DropDefault{Table: tbl, Column: to.GetName(), Old: fd})
 		}
+	}
+	// ADD IDENTITY requires NOT NULL and no default; run after those changes.
+	if to.GetIdentity() != nil && !proto.Equal(from.GetIdentity(), to.GetIdentity()) {
+		p.Changes = append(p.Changes, &AlterIdentity{Table: tbl, Column: to.GetName(), From: from.GetIdentity(), To: to.GetIdentity()})
 	}
 }
 

@@ -19,14 +19,16 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 	"github.com/jackc/pgx/v5"
 )
 
-// DBTX is the minimal pgx query surface the introspector needs. Both
-// *pgx.Conn and *pgxpool.Pool satisfy it.
+// DBTX pins introspection to a transaction on one connection. *pgx.Conn,
+// *pgxpool.Pool and pgx.Tx satisfy it.
 type DBTX interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
@@ -44,8 +46,9 @@ type builder struct {
 
 	// Relation lookups populated by loadTables and consumed by
 	// loadConstraints / loadIndexes / loadTriggers.
-	relTables  map[uint32]*irv1.Table   // relOID -> table
-	tableByKey map[tableKey]*irv1.Table // (schema,name) -> table
+	relTables         map[uint32]*irv1.Table    // relOID -> table
+	tableByKey        map[tableKey]*irv1.Table  // (schema,name) -> table
+	identitySequences map[string]*irv1.Sequence // owning column id -> sequence
 }
 
 // typeInfo is a cached classification of a pg_type row.
@@ -72,10 +75,27 @@ func (b *builder) getSchema(name string) *irv1.Schema {
 // restricted to the given schemas. When schemas is empty it defaults to
 // "public" plus every non-system, non-temp schema. It never panics.
 func Introspect(ctx context.Context, conn DBTX, schemas []string) (*irv1.Catalog, error) {
+	// Pin a single connection even when called with a pool. SET LOCAL makes
+	// PostgreSQL deparse qualified names without changing the caller's session.
+	// Rollback also restores the setting when conn is an existing transaction
+	// (pgx implements a nested transaction with a savepoint).
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("introspect: begin: %w", err)
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanup)
+	}()
+	if _, err := tx.Exec(ctx, `SET LOCAL search_path = ''`); err != nil {
+		return nil, fmt.Errorf("introspect: search_path: %w", err)
+	}
 	b := &builder{
-		conn:      conn,
-		schemas:   make(map[string]*irv1.Schema),
-		oidToType: make(map[uint32]typeInfo),
+		conn:              tx,
+		schemas:           make(map[string]*irv1.Schema),
+		oidToType:         make(map[uint32]typeInfo),
+		identitySequences: make(map[string]*irv1.Sequence),
 	}
 
 	wanted, err := b.discoverSchemas(ctx, schemas)
