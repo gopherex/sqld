@@ -28,6 +28,7 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 
 	// Build alias→table lookup from the catalog for fast resolution.
 	catIdx := buildCatalogIndex(cat)
+	catIdx.diags = d
 
 	// ------------------------------------------------------------------ //
 	// 1. Collect all parameter refs and explicit cast types from the full AST.
@@ -74,7 +75,7 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 		inferUpdateSetParamNames(q.Ast.GetUpdate(), paramMap, catIdx)
 	}
 	if ins := q.Ast.GetInsert(); ins != nil {
-		tbl := catIdx.lookupTable(ins.GetTableName().GetName())
+		tbl := catIdx.lookupRelation(ins.GetTableName())
 		inferInsertParamTypes(ins, paramMap, tbl)
 	}
 
@@ -96,6 +97,9 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 		sel := q.Ast.GetSelect()
 		ss := sel.GetSelect()
 		if ss == nil {
+			for _, col := range output {
+				q.Columns = append(q.Columns, &pluginv1.QueryColumn{Name: col.GetName(), Type: col.GetType(), Nullable: col.GetNullable()})
+			}
 			return
 		}
 
@@ -125,7 +129,7 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 			return
 		}
 		// Resolve aliasMap from the target table.
-		tbl := catIdx.lookupTable(ins.GetTableName().GetName())
+		tbl := catIdx.lookupRelation(ins.GetTableName())
 		aliasMap := make(map[string]*irv1.Table)
 		if tbl != nil {
 			aliasMap[strings.ToLower(ins.GetTableName().GetName())] = tbl
@@ -148,7 +152,7 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 		if len(returning) == 0 {
 			return
 		}
-		tbl := catIdx.lookupTable(upd.GetTableName().GetName())
+		tbl := catIdx.lookupRelation(upd.GetTableName())
 		aliasMap := make(map[string]*irv1.Table)
 		if tbl != nil {
 			aliasMap[strings.ToLower(upd.GetTableName().GetName())] = tbl
@@ -171,7 +175,7 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 		if len(returning) == 0 {
 			return
 		}
-		tbl := catIdx.lookupTable(del.GetTableName().GetName())
+		tbl := catIdx.lookupRelation(del.GetTableName())
 		aliasMap := make(map[string]*irv1.Table)
 		if tbl != nil {
 			aliasMap[strings.ToLower(del.GetTableName().GetName())] = tbl
@@ -239,29 +243,6 @@ func inferInsertParamTypes(ins *irv1.InsertStmt, paramMap map[uint32]*pluginv1.Q
 // ---------------------------------------------------------------------------
 // Catalog index
 // ---------------------------------------------------------------------------
-
-// catalogIndex maps lower-cased table name → *irv1.Table (first match wins).
-type catalogIndex map[string]*irv1.Table
-
-func buildCatalogIndex(cat *irv1.Catalog) catalogIndex {
-	idx := make(catalogIndex)
-	if cat == nil {
-		return idx
-	}
-	for _, schema := range cat.GetSchemas() {
-		for _, tbl := range schema.GetTables() {
-			name := strings.ToLower(tbl.GetName().GetName())
-			if _, exists := idx[name]; !exists {
-				idx[name] = tbl
-			}
-		}
-	}
-	return idx
-}
-
-func (ci catalogIndex) lookupTable(name string) *irv1.Table {
-	return ci[strings.ToLower(name)]
-}
 
 func (ci catalogIndex) lookupColumn(tbl *irv1.Table, colName string) *irv1.Column {
 	if tbl == nil {
@@ -339,7 +320,7 @@ func inferUpdateSetParamNames(upd *irv1.UpdateStmt, paramMap map[uint32]*pluginv
 	if upd == nil {
 		return
 	}
-	tbl := catIdx.lookupTable(upd.GetTableName().GetName())
+	tbl := catIdx.lookupRelation(upd.GetTableName())
 	for _, assign := range upd.GetSet() {
 		cols := assign.GetColumns()
 		if len(cols) != 1 {
@@ -408,16 +389,21 @@ func resolveColumnRef(cr *irv1.ColumnRef, aliasMap map[string]*irv1.Table, catId
 			return col
 		}
 	}
+	// A FROM scope must not borrow a same-named column from an unrelated
+	// catalog relation when local resolution fails.
+	if len(aliasMap) > 0 {
+		return nil
+	}
 
 	// Last resort: search all tables in stable (sorted) order to ensure
 	// deterministic resolution when the column name is ambiguous.
-	tableNames := make([]string, 0, len(catIdx))
-	for name := range catIdx {
+	tableNames := make([]string, 0, len(catIdx.tables))
+	for name := range catIdx.tables {
 		tableNames = append(tableNames, name)
 	}
 	sort.Strings(tableNames)
 	for _, name := range tableNames {
-		col := catIdx.lookupColumn(catIdx[name], colName)
+		col := catIdx.lookupColumn(catIdx.lookupTable(name), colName)
 		if col != nil {
 			return col
 		}
@@ -439,7 +425,7 @@ func buildAliasMap(from []*irv1.FromItem, catIdx catalogIndex) map[string]*irv1.
 		if tr := fi.GetTable(); tr != nil {
 			tblName := tr.GetName().GetName()
 			alias := tr.GetAlias()
-			tbl := catIdx.lookupTable(tblName)
+			tbl := catIdx.lookupRelation(tr.GetName())
 			key := strings.ToLower(tblName)
 			if tbl != nil {
 				m[key] = tbl
@@ -493,7 +479,7 @@ func resolveFromItemTable(fi *irv1.FromItem, catIdx catalogIndex) *irv1.Table {
 		return nil
 	}
 	if tr := fi.GetTable(); tr != nil {
-		return catIdx.lookupTable(tr.GetName().GetName())
+		return catIdx.lookupRelation(tr.GetName())
 	}
 	return nil
 }
@@ -660,7 +646,7 @@ func exprNullable(expr *irv1.Expr, resolve func(string, string) *irv1.Column) bo
 				}
 			}
 			return true
-		case "lower", "upper", "length", "char_length", "character_length", "octet_length", "bit_length",
+		case "to_jsonb", "to_json", "row_to_json", "lower", "upper", "length", "char_length", "character_length", "octet_length", "bit_length",
 			"trim", "ltrim", "rtrim", "btrim", "replace", "initcap", "reverse":
 			for _, arg := range fc.GetArguments() {
 				if exprNullable(arg, resolve) {
@@ -901,9 +887,9 @@ func inferFunctionType(fc *irv1.FunctionCall, resolve func(qualifier, col string
 			ArrayDimensions: 1,
 			Element:         elem,
 		}
-	case "jsonb_agg":
+	case "jsonb_agg", "to_jsonb":
 		return scalarType("jsonb")
-	case "json_agg":
+	case "json_agg", "to_json", "row_to_json":
 		return scalarType("json")
 
 	// --- Common scalar functions → text ------------------------------- //

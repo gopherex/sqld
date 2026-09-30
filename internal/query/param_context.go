@@ -13,10 +13,11 @@ import (
 // Parameter inference has its own lexical scopes. Catalog-wide column fallback
 // is not valid here: it can silently give a bind parameter an unrelated type.
 type paramScope struct {
-	parent *paramScope
-	tables map[string]*irv1.Table
-	ctes   map[string]*irv1.Table
-	order  []string
+	parent       *paramScope
+	tables       map[string]*irv1.Table
+	ctes         map[string]*irv1.Table
+	order        []string
+	nullableRows map[string]bool
 }
 
 type paramInference struct {
@@ -28,21 +29,34 @@ type paramInference struct {
 	output   []*irv1.Column
 	root     *paramScope
 	// Input constraints are accumulated independently of type discovery order.
-	inputNulls  map[uint32]inputNullability
-	joinSources map[*irv1.Column]*irv1.Column
+	inputNulls     map[uint32]inputNullability
+	joinSources    map[*irv1.Column]*irv1.Column
+	unknownOutputs map[*irv1.Column]bool
 }
 
 func inferParamTypes(stmt *irv1.Statement, params map[uint32]*pluginv1.QueryParameter, casts map[uint32]bool, cat catalogIndex, name string, d *catalog.Diagnostics) *paramInference {
-	i := &paramInference{params: params, catalog: cat, query: name, diags: d, reported: make(map[string]bool), inputNulls: make(map[uint32]inputNullability), joinSources: make(map[*irv1.Column]*irv1.Column)}
+	i := &paramInference{params: params, catalog: cat, query: name, diags: d, reported: make(map[string]bool), inputNulls: make(map[uint32]inputNullability), joinSources: make(map[*irv1.Column]*irv1.Column), unknownOutputs: make(map[*irv1.Column]bool)}
 	for number := range casts {
 		i.inputNulls[number] = inputNullability{cast: true}
 	}
 	i.statement(stmt)
+	i.resolveUnknownOutputs(i.output)
 	for number, p := range params {
 		constraint := i.inputNulls[number]
 		p.Nullable = p.GetOptional() || constraint.isNullable()
 	}
 	return i
+}
+
+// A completed SELECT/CTE/derived relation exposes unknown literals as text.
+// UNION inputs defer this until their common type has been selected.
+func (i *paramInference) resolveUnknownOutputs(cols []*irv1.Column) {
+	for _, col := range cols {
+		if i.unknownOutputs[col] {
+			col.Type = scalarType("text")
+			delete(i.unknownOutputs, col)
+		}
+	}
 }
 
 func (i *paramInference) diagnostic(message string) {
@@ -61,6 +75,7 @@ func (i *paramInference) scope(parent *paramScope, with []*irv1.CommonTableExpr)
 	}
 	for _, cte := range with {
 		cols := i.selectQuery(cte.GetQuery(), s)
+		i.resolveUnknownOutputs(cols)
 		for n, name := range cte.GetColumns() {
 			if n < len(cols) {
 				cols[n].Name = name
@@ -99,6 +114,11 @@ func (i *paramInference) column(cr *irv1.ColumnRef, s *paramScope) *irv1.Column 
 		if found != nil {
 			return found
 		}
+		// A bare relation alias denotes its whole row (e.g. to_jsonb(f)).
+		key := strings.ToLower(cr.GetColumn())
+		if tbl := scope.tables[key]; tbl != nil {
+			return &irv1.Column{Name: cr.GetColumn(), Type: scalarType("record"), Nullable: scope.nullableRows[key]}
+		}
 	}
 	i.diagnostic("column " + cr.GetQualifier() + "." + cr.GetColumn() + " unresolved")
 	return nil
@@ -106,9 +126,12 @@ func (i *paramInference) column(cr *irv1.ColumnRef, s *paramScope) *irv1.Column 
 
 func (i *paramInference) addTable(s *paramScope, name *irv1.QualifiedName, alias string) *irv1.Table {
 	key := strings.ToLower(name.GetName())
-	tbl := s.ctes[key]
+	var tbl *irv1.Table
+	if name.GetSchema() == "" {
+		tbl = s.ctes[key]
+	}
 	if tbl == nil {
-		tbl = i.catalog.lookupTable(name.GetName())
+		tbl = i.catalog.lookupRelation(name)
 	}
 	if alias != "" {
 		key = strings.ToLower(alias)
@@ -145,6 +168,7 @@ func (i *paramInference) from(items []*irv1.FromItem, s *paramScope) {
 				parent = s
 			}
 			cols := i.selectQuery(q.GetQuery(), parent)
+			i.resolveUnknownOutputs(cols)
 			for n, name := range q.GetColumnAliases() {
 				if n < len(cols) {
 					cols[n].Name = name
@@ -187,10 +211,19 @@ func (i *paramInference) targets(targets []*irv1.SelectTarget, s *paramScope) []
 		name := target.GetAlias()
 		if name == "" {
 			name = e.GetColumnRef().GetColumn()
+			if name == "" {
+				name = defaultColumnName(e)
+			}
 		}
 		col := &irv1.Column{Name: name, Type: typ, Nullable: exprNullable(e, func(q, col string) *irv1.Column {
 			return i.column(&irv1.ColumnRef{Qualifier: q, Column: col}, s)
 		})}
+		if lit := e.GetLiteral(); lit != nil {
+			switch lit.GetValue().(type) {
+			case *irv1.Literal_NullValue, *irv1.Literal_StringValue:
+				i.unknownOutputs[col] = true
+			}
+		}
 		if cr := e.GetColumnRef(); cr != nil {
 			if source := i.column(cr, s); source != nil {
 				col.Id = source.GetId()
@@ -205,6 +238,12 @@ func (i *paramInference) targets(targets []*irv1.SelectTarget, s *paramScope) []
 // Outer joins add NULL rows to one or both input sides. Copy the relation so
 // another alias of the same table, other queries and the catalog stay intact.
 func (i *paramInference) nullExtend(s *paramScope, names []string) {
+	if s.nullableRows == nil {
+		s.nullableRows = make(map[string]bool)
+	}
+	for _, name := range names {
+		s.nullableRows[name] = true
+	}
 	for _, name := range names {
 		if tbl := s.tables[name]; tbl != nil {
 			copy := proto.Clone(tbl).(*irv1.Table)
@@ -247,6 +286,11 @@ func (i *paramInference) selectQuery(sel *irv1.SelectStmt, parent *paramScope) [
 		for n, col := range cols {
 			if n >= len(right) {
 				break
+			}
+			col.Type = setResultType(col.GetType(), right[n].GetType(), i.unknownOutputs[col], i.unknownOutputs[right[n]])
+			delete(i.unknownOutputs, col) // A nested UNION has already resolved unknown inputs.
+			if col.GetType() == nil {
+				i.diagnostic("set-operation column type unresolved")
 			}
 			switch set.GetKind() {
 			case irv1.SetOpKind_SET_OP_KIND_UNION:
