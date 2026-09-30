@@ -71,6 +71,30 @@ INSERT INTO backplane.b VALUES ('00000000-0000-0000-0000-000000000002','2026-09-
 	if err != nil || len(nulls) != 2 || nulls[0].ID != nil || nulls[1].ID == nil || *nulls[1].ID != plain[0].ID {
 		t.Fatalf("nullable: %v %v", nulls, err)
 	}
+	fields, err := q.AuditFields(ctx)
+	if err != nil || len(fields) != 1 || fields[0].Attribute != "n" || fields[0].Count != 2 {
+		t.Fatalf("audit fields: %v %v", fields, err)
+	}
+	facets, err := q.AuditFacet(ctx)
+	if err != nil || len(facets) != 2 || string(facets[0].Value) != "1" || string(facets[1].Value) != "2" || string(facets[0].Fallback) != "{}" || facets[0].Missing != nil {
+		t.Fatalf("audit facets: %v %v", facets, err)
+	}
+	left, err := q.AuditKeysLeft(ctx)
+	if err != nil || len(left) != 2 || left[0].Key != nil || left[0].Pos != nil {
+		t.Fatalf("left keys: %v %v", left, err)
+	}
+	empty, err := q.AuditKeysNull(ctx)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("null input keys: %v %v", empty, err)
+	}
+	ordinal, err := q.AuditKeysOrdinality(ctx)
+	if err != nil || len(ordinal) != 1 || ordinal[0].Key != "n" || ordinal[0].Pos != 1 {
+		t.Fatalf("ordinal keys: %v %v", ordinal, err)
+	}
+	elements, err := q.AuditElements(ctx)
+	if err != nil || len(elements) != 2 || elements[0].Value != nil || elements[1].Value == nil || *elements[1].Value != "x" {
+		t.Fatalf("text elements: %v %v", elements, err)
+	}
 	source := "b"
 	for _, tc := range []struct {
 		params FeedOptionalParams

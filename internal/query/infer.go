@@ -635,6 +635,8 @@ func exprNullable(expr *irv1.Expr, resolve func(string, string) *irv1.Column) bo
 		if schema := fc.GetName().GetSchema(); schema != "" && schema != "pg_catalog" {
 			return true
 		}
+		// SRF nullability is established for FROM relations. In a SELECT
+		// list, multiple SRFs can pad each other's output with SQL NULL.
 		switch funcName(fc) {
 		case "count":
 			return false
@@ -661,6 +663,9 @@ func exprNullable(expr *irv1.Expr, resolve func(string, string) *irv1.Column) bo
 		switch strings.ToUpper(op.GetSymbol()) {
 		case "IS NULL", "IS NOT NULL", "IS TRUE", "IS FALSE", "IS NOT TRUE", "IS NOT FALSE", "IS DISTINCT FROM", "IS NOT DISTINCT FROM", "EXISTS":
 			return false
+		case "->", "->>", "#>", "#>>":
+			// Missing keys/paths produce SQL NULL even for NOT NULL inputs.
+			return true
 		case "=", "<", ">", "<=", ">=", "<>", "!=", "+", "-", "*", "/", "%", "^", "||", "AND", "OR", "NOT", "LIKE", "ILIKE":
 			for _, arg := range op.GetOperands() {
 				if exprNullable(arg, resolve) {
@@ -821,6 +826,9 @@ func inferExprType(e *irv1.Expr, resolve func(qualifier, col string) *irv1.Colum
 	case e.GetOperator() != nil:
 		op := e.GetOperator()
 		sym := op.GetSymbol()
+		if isJSONExtraction(sym) && len(op.GetOperands()) == 2 {
+			return jsonExtractionType(sym, inferExprType(op.GetOperands()[0], resolve))
+		}
 		if isBoolOperator(sym) {
 			return scalarType("bool")
 		}
@@ -835,6 +843,9 @@ func inferExprType(e *irv1.Expr, resolve func(qualifier, col string) *irv1.Colum
 
 // inferFunctionType maps a function call to its result type.
 func inferFunctionType(fc *irv1.FunctionCall, resolve func(qualifier, col string) *irv1.Column) *irv1.TypeRef {
+	if typ, _ := jsonSetResult(fc); typ != nil {
+		return typ
+	}
 	name := funcName(fc)
 	args := fc.GetArguments()
 

@@ -41,6 +41,24 @@ SELECT f.id,x.attributes FROM backplane.feed f CROSS JOIN LATERAL (SELECT f.attr
 SELECT to_jsonb(f) AS payload FROM backplane.feed f ORDER BY f.source;
 -- name: FeedNullable :many
 SELECT f.id FROM backplane.nullable_feed f ORDER BY f.id NULLS FIRST;
+-- name: AuditFields :many
+SELECT k.key::text AS attribute, count(*) AS count
+FROM backplane.feed f, LATERAL jsonb_object_keys(f.attributes) AS k(key)
+GROUP BY k.key ORDER BY k.key;
+-- name: AuditFacet :many
+SELECT COALESCE(f.attributes -> 'missing', f.attributes -> 'n') AS value,
+ COALESCE(f.attributes #> '{missing}', '{}') AS fallback,
+ f.attributes ->> 'missing' AS missing
+FROM backplane.feed f ORDER BY f.source;
+-- name: AuditKeysLeft :many
+SELECT k.key, k.pos FROM backplane.feed f
+LEFT JOIN LATERAL jsonb_object_keys('{}'::jsonb) WITH ORDINALITY k(key, pos) ON true;
+-- name: AuditKeysNull :many
+SELECT k.key FROM jsonb_object_keys(NULL::jsonb) k(key);
+-- name: AuditKeysOrdinality :many
+SELECT k.* FROM jsonb_object_keys('{"n": null}'::jsonb) WITH ORDINALITY k(key, pos);
+-- name: AuditElements :many
+SELECT e.value FROM jsonb_array_elements_text('[null, "x"]'::jsonb) e;
 -- name: FeedOptional :many
 SELECT f.id FROM backplane.feed f WHERE f.source = @source?::text AND f.id = ANY(@ids?::uuid[]) ORDER BY f.source;
 `, "feed.sql")
@@ -75,7 +93,11 @@ SELECT f.id FROM backplane.feed f WHERE f.source = @source?::text AND f.id = ANY
 			}
 		}
 	}
-	for field, want := range map[string]string{"FeedLateralRow.ID": "uuid.UUID", "FeedLateralRow.Attributes": "json.RawMessage", "FeedPayloadRow.Payload": "json.RawMessage", "FeedNullableRow.ID": "*uuid.UUID", "FeedOptionalParams.Source": "*string", "FeedOptionalParams.Ids": "[]uuid.UUID"} {
+	for field, want := range map[string]string{"AuditFieldsRow.Attribute": "string", "AuditFieldsRow.Count": "int64",
+		"AuditFacetRow.Value": "json.RawMessage", "AuditFacetRow.Fallback": "json.RawMessage", "AuditFacetRow.Missing": "*string",
+		"AuditKeysLeftRow.Key": "*string", "AuditKeysLeftRow.Pos": "*int64",
+		"AuditKeysNullRow.Key": "string", "AuditKeysOrdinalityRow.Key": "string", "AuditKeysOrdinalityRow.Pos": "int64", "AuditElementsRow.Value": "*string",
+		"FeedLateralRow.ID": "uuid.UUID", "FeedLateralRow.Attributes": "json.RawMessage", "FeedPayloadRow.Payload": "json.RawMessage", "FeedNullableRow.ID": "*uuid.UUID", "FeedOptionalParams.Source": "*string", "FeedOptionalParams.Ids": "[]uuid.UUID"} {
 		if got[field] != want {
 			t.Errorf("%s: got %q, want %s", field, got[field], want)
 		}

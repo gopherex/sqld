@@ -177,7 +177,33 @@ func (i *paramInference) from(items []*irv1.FromItem, s *paramScope) {
 			s.tables[strings.ToLower(q.GetAlias())] = &irv1.Table{Columns: cols}
 			s.order = append(s.order, strings.ToLower(q.GetAlias()))
 		case item.GetFunction() != nil:
-			i.expr(item.GetFunction().GetCall(), s, nil, nil)
+			f := item.GetFunction()
+			i.expr(f.GetCall(), s, nil, nil)
+			fc := f.GetCall().GetFunctionCall()
+			typ, nullable := jsonSetResult(fc)
+			if typ == nil {
+				continue
+			}
+			alias := f.GetAlias()
+			if alias == "" {
+				alias = funcName(fc)
+			}
+			name := alias
+			if strings.Contains(funcName(fc), "array_elements") {
+				name = "value" // Named OUT parameter in PostgreSQL.
+			}
+			cols := []*irv1.Column{{Name: name, Type: typ, Nullable: nullable}}
+			if f.GetWithOrdinality() {
+				cols = append(cols, &irv1.Column{Name: "ordinality", Type: scalarType("int8")})
+			}
+			for n, name := range f.GetColumnAliases() {
+				if n < len(cols) {
+					cols[n].Name = name
+				}
+			}
+			key := strings.ToLower(alias)
+			s.tables[key] = &irv1.Table{Columns: cols}
+			s.order = append(s.order, key)
 		case item.GetValues() != nil:
 			v := item.GetValues()
 			cols := i.values(v.GetValues(), s, nil)
@@ -595,6 +621,10 @@ func (i *paramInference) function(fc *irv1.FunctionCall, s *paramScope) *irv1.Ty
 	}
 	var signature []string
 	switch name {
+	case "json_object_keys", "json_array_elements", "json_array_elements_text":
+		signature = []string{"json"}
+	case "jsonb_object_keys", "jsonb_array_elements", "jsonb_array_elements_text":
+		signature = []string{"jsonb"}
 	case "lower", "upper", "initcap", "reverse":
 		signature = []string{"text"}
 	case "replace":
@@ -654,6 +684,19 @@ func (i *paramInference) operator(op *irv1.OperatorExpr, s *paramScope) *irv1.Ty
 		return nil
 	}
 	left, right := i.expr(args[0], s, nil, nil), i.expr(args[1], s, nil, nil)
+	if isJSONExtraction(sym) {
+		// JSON operands have different types: never propagate the document
+		// type to a key/index parameter as for a homogeneous comparison.
+		if typePgName(left) == "json" || typePgName(left) == "jsonb" {
+			if sym == "#>" || sym == "#>>" {
+				i.expect(args[1], arrayType(scalarType("text")), nil)
+			} else if right == nil {
+				// PostgreSQL selects the text overload for an unknown key.
+				i.expect(args[1], scalarType("text"), nil)
+			}
+		}
+		return jsonExtractionType(sym, left)
+	}
 	if sym == "=" {
 		i.literalInput(args[0], args[1])
 		i.literalInput(args[1], args[0])
