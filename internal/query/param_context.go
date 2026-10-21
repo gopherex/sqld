@@ -39,7 +39,7 @@ func inferParamTypes(stmt *irv1.Statement, params map[uint32]*pluginv1.QueryPara
 	for number := range casts {
 		i.inputNulls[number] = inputNullability{cast: true}
 	}
-	i.statement(stmt)
+	i.output = i.statement(stmt, nil)
 	i.resolveUnknownOutputs(i.output)
 	for number, p := range params {
 		constraint := i.inputNulls[number]
@@ -74,7 +74,12 @@ func (i *paramInference) scope(parent *paramScope, with []*irv1.CommonTableExpr)
 		}
 	}
 	for _, cte := range with {
-		cols := i.selectQuery(cte.GetQuery(), s)
+		var cols []*irv1.Column
+		if cte.GetStatement() != nil {
+			cols = i.statement(cte.GetStatement(), s)
+		} else {
+			cols = i.selectQuery(cte.GetQuery(), s)
+		}
 		i.resolveUnknownOutputs(cols)
 		for n, name := range cte.GetColumns() {
 			if n < len(cols) {
@@ -347,32 +352,44 @@ func (i *paramInference) selectQuery(sel *irv1.SelectStmt, parent *paramScope) [
 	return cols
 }
 
-func (i *paramInference) statement(stmt *irv1.Statement) {
+// A DML target is a catalog relation even when a CTE has the same name.
+func (i *paramInference) addDMLTable(s *paramScope, name *irv1.QualifiedName, alias string) *irv1.Table {
+	tbl := i.catalog.lookupRelation(name)
+	if alias == "" {
+		alias = name.GetName()
+	}
+	key := strings.ToLower(alias)
+	s.tables[key] = tbl
+	s.order = append(s.order, key)
+	return tbl
+}
+
+func (i *paramInference) statement(stmt *irv1.Statement, parent *paramScope) []*irv1.Column {
 	if stmt == nil {
-		return
+		return nil
 	}
 	switch {
 	case stmt.GetSelect() != nil:
-		i.output = i.selectQuery(stmt.GetSelect(), nil)
+		return i.selectQuery(stmt.GetSelect(), parent)
 	case stmt.GetUpdate() != nil:
 		u := stmt.GetUpdate()
-		s := i.scope(nil, u.GetWith())
-		tbl := i.addTable(s, u.GetTableName(), u.GetAlias())
+		s := i.scope(parent, u.GetWith())
+		tbl := i.addDMLTable(s, u.GetTableName(), u.GetAlias())
 		i.from(u.GetFrom(), s)
 		i.assignments(u.GetSet(), tbl, s)
 		i.expr(u.GetWhere(), s, scalarType("bool"), nil)
-		i.output = i.targets(u.GetReturning(), s)
+		return i.targets(u.GetReturning(), s)
 	case stmt.GetDelete() != nil:
 		d := stmt.GetDelete()
-		s := i.scope(nil, d.GetWith())
-		i.addTable(s, d.GetTableName(), d.GetAlias())
+		s := i.scope(parent, d.GetWith())
+		i.addDMLTable(s, d.GetTableName(), d.GetAlias())
 		i.from(d.GetUsing(), s)
 		i.expr(d.GetWhere(), s, scalarType("bool"), nil)
-		i.output = i.targets(d.GetReturning(), s)
+		return i.targets(d.GetReturning(), s)
 	case stmt.GetInsert() != nil:
 		ins := stmt.GetInsert()
-		s := i.scope(nil, ins.GetWith())
-		tbl := i.addTable(s, ins.GetTableName(), ins.GetAlias())
+		s := i.scope(parent, ins.GetWith())
+		tbl := i.addDMLTable(s, ins.GetTableName(), ins.GetAlias())
 		columns := tbl.GetColumns()
 		if len(ins.GetColumns()) > 0 {
 			columns = nil
@@ -390,8 +407,9 @@ func (i *paramInference) statement(stmt *irv1.Statement) {
 			i.expr(conflict.GetUpdateWhere(), s, scalarType("bool"), nil)
 			delete(s.tables, "excluded")
 		}
-		i.output = i.targets(ins.GetReturning(), s)
+		return i.targets(ins.GetReturning(), s)
 	}
+	return nil
 }
 
 func (i *paramInference) assignments(assigns []*irv1.Assignment, tbl *irv1.Table, s *paramScope) {
@@ -512,7 +530,13 @@ func (i *paramInference) expr(e *irv1.Expr, s *paramScope, expected *irv1.TypeRe
 		return i.column(e.GetColumnRef(), s).GetType()
 	case e.GetCast() != nil:
 		c := e.GetCast()
-		i.expr(c.GetExpr(), s, nil, nil)
+		// A type-preserving cast still writes this column, so its override
+		// applies to a direct parameter. A conversion must not replace the
+		// input type with the destination column's representation.
+		if !proto.Equal(c.GetTargetType(), origin.GetType()) {
+			origin = nil
+		}
+		i.expr(c.GetExpr(), s, nil, origin)
 		return c.GetTargetType()
 	case e.GetLiteral() != nil:
 		return inferExprType(e, nil)
@@ -804,6 +828,9 @@ func (i *paramInference) expect(e *irv1.Expr, typ *irv1.TypeRef, col *irv1.Colum
 	}
 	if p := e.GetParameter(); p != nil {
 		i.bind(p, typ, col)
+	}
+	if cast := e.GetCast(); cast != nil && col != nil && proto.Equal(cast.GetTargetType(), col.GetType()) {
+		i.expect(cast.GetExpr(), nil, col)
 	}
 	if list := e.GetList(); list != nil {
 		for _, item := range list.GetElements() {

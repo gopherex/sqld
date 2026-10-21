@@ -694,10 +694,13 @@ func mapWithClause(wc *pg.WithClause, id nodeid.Builder) ([]*irv1.CommonTableExp
 				irCte.Columns = append(irCte.Columns, s)
 			}
 		}
-		// Query — must be a SelectStmt node
+		// Keep SELECT in the original field for wire compatibility. DML CTEs
+		// need their complete statement, including parameters and RETURNING.
 		if pgCte.GetCtequery() != nil {
 			if inner := pgCte.GetCtequery().GetSelectStmt(); inner != nil {
 				irCte.Query = mapSelectStmt(inner, cid.Child("query"))
+			} else {
+				irCte.Statement = MapStatement(pgCte.GetCtequery(), cid.Child("statement"))
 			}
 		}
 		// Materialization

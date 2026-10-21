@@ -6,6 +6,7 @@ import (
 	"github.com/gopherex/sqld/internal/nodeid"
 	"github.com/gopherex/sqld/internal/parse"
 	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
+	"google.golang.org/protobuf/proto"
 )
 
 // stmtFor parses the given SQL, maps the first statement, and returns it.
@@ -215,5 +216,62 @@ func TestMapNodeIdsPresent(t *testing.T) {
 	ss := sel.GetSelect()
 	if ss.GetNodeId() == "" {
 		t.Fatal("simpleselect node_id empty")
+	}
+}
+
+func TestMapDataModifyingCTE(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"insert", `INSERT INTO t(id) VALUES($1) ON CONFLICT(id) DO UPDATE SET id=$2 RETURNING id`},
+		{"update", `UPDATE t SET id=$1 WHERE id=$2 RETURNING id`},
+		{"delete", `DELETE FROM t WHERE id=$1 RETURNING id`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stmt := stmtFor(t, "WITH changed(value) AS ("+tc.body+") SELECT value FROM changed")
+			cte := stmt.GetSelect().GetWith()[0]
+			body := cte.GetStatement()
+			if body == nil || cte.GetQuery() != nil || cte.GetName() != "changed" || len(cte.GetColumns()) != 1 || cte.GetColumns()[0] != "value" {
+				t.Fatalf("CTE body or aliases lost: %v", cte)
+			}
+			switch tc.name {
+			case "insert":
+				ins := body.GetInsert()
+				if ins == nil || ins.GetValues().GetRows()[0].GetValues()[0].GetParameter().GetPosition() != 1 || ins.GetOnConflict().GetSet()[0].GetValue().GetParameter().GetPosition() != 2 || len(ins.GetReturning()) != 1 {
+					t.Fatalf("INSERT lost: %v", body)
+				}
+			case "update":
+				upd := body.GetUpdate()
+				if upd == nil || upd.GetSet()[0].GetValue().GetParameter().GetPosition() != 1 || upd.GetWhere() == nil || len(upd.GetReturning()) != 1 {
+					t.Fatalf("UPDATE lost: %v", body)
+				}
+			case "delete":
+				del := body.GetDelete()
+				if del == nil || del.GetWhere() == nil || len(del.GetReturning()) != 1 {
+					t.Fatalf("DELETE lost: %v", body)
+				}
+			}
+			wire, err := proto.Marshal(stmt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded := &irv1.Statement{}
+			if err := proto.Unmarshal(wire, decoded); err != nil {
+				t.Fatal(err)
+			}
+			if !proto.Equal(stmt, decoded) {
+				t.Fatal("CTE lost in protobuf roundtrip")
+			}
+			if body.GetNodeId() == "" || body.GetNodeId() == stmt.GetNodeId() {
+				t.Fatal("CTE statement node id missing or duplicated")
+			}
+		})
+	}
+	// Preserve the field used by existing clients for SELECT CTEs.
+	stmt := stmtFor(t, "WITH selected AS (SELECT $1::text AS value) SELECT value FROM selected")
+	cte := stmt.GetSelect().GetWith()[0]
+	if cte.GetQuery() == nil || cte.GetStatement() != nil {
+		t.Fatalf("SELECT compatibility: %v", cte)
+	}
+	if got := cte.ProtoReflect().Descriptor().Fields().ByName("query").Number(); got != 3 {
+		t.Fatalf("query wire field changed to %d", got)
 	}
 }
