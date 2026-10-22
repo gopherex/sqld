@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gopherex/sqld/pkg/config"
@@ -40,5 +41,36 @@ func TestGenerateWritesFiles(t *testing.T) {
 	}
 	if string(b) != "hi" {
 		t.Fatalf("contents=%q", b)
+	}
+}
+
+func TestGenerateRejectsQueryErrorsBeforePlugins(t *testing.T) {
+	for _, body := range []string{`SELECT sqlc.embed(t) FROM t`, `SELECT sqlc.narg(42)`, `SELECT sqlc.arg('x') OVER ()`, `not valid sql !!!`} {
+		t.Run(body, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "queries.sql")
+			if err := os.WriteFile(path, []byte("-- name: Bad :one\n"+body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg := &config.Config{Engine: config.EnginePostgreSQL,
+				Schema:  []config.Source{{Inline: "CREATE TABLE t (id bigint);"}},
+				Queries: []config.Source{{File: path}},
+				// Opening this plugin would fail with an unrelated error. The query
+				// diagnostic must take precedence, leaving existing output untouched.
+				Plugins: []config.PluginConfig{{Name: "go", Binary: filepath.Join(dir, "missing-plugin"), Out: dir}},
+			}
+			output := filepath.Join(dir, "queries.go")
+			if err := os.WriteFile(output, []byte("existing output"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := Generate(cfg)
+			if err == nil || !strings.Contains(err.Error(), path+": query Bad:") {
+				t.Fatalf("err=%v", err)
+			}
+			got, err := os.ReadFile(output)
+			if err != nil || string(got) != "existing output" {
+				t.Fatalf("output=%q err=%v", got, err)
+			}
+		})
 	}
 }

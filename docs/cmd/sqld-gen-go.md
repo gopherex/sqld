@@ -233,6 +233,33 @@ resolver. Unmodelled functions (including schema-qualified user functions) and
 ambiguous contexts can remain unresolved. Diagnostics are available on
 `core.Result`; use an explicit parameter cast to remove uncertainty.
 
+### sqlc parameter macros
+
+`sqlc.arg('name')` (or `sqlc.arg(name)`) declares the same named binding as
+`@name`. `sqlc.narg('name')` always makes that binding nullable, including
+when compared with a `NOT NULL` column or used with an explicit cast. In
+pointer mode, `sqlc.narg('name')::text` accepts `*string`.
+
+```sql
+-- name: UpdateName :exec
+UPDATE profiles
+SET name = COALESCE(sqlc.narg('name'), name)
+WHERE id = sqlc.arg('id');
+```
+
+Repeated uses of the same name across these forms share one positional
+parameter. Any `narg` occurrence makes that shared binding nullable. Passing
+nil binds SQL NULL; it does not remove a WHERE predicate. This differs from
+`@name?`, which makes predicates optional. Combining `sqlc.narg('name')` and
+`@name?` for the same name is an error.
+
+Names may be string literals or single identifiers. Named bindings are numbered
+in source order after any explicit `$N` bindings, so the two forms do not collide.
+Malformed macros and unsupported `sqlc` macros (including `sqlc.embed` and
+`sqlc.slice`) stop generation with the source file and query name. Invalid SQL
+also stops generation rather than silently omitting the query. Comments and
+string literals containing macro-like text remain unchanged.
+
 ### Optional parameters (`@name?`)
 
 Appending `?` to a parameter name marks it optional. Optional scalar parameters

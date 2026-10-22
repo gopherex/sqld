@@ -154,6 +154,16 @@ func Generate(cfg *config.Config) error {
 		return err
 	}
 
+	var diagnosticErrors []error
+	for _, d := range r.Diagnostics.Items {
+		if d.Severity == "error" {
+			diagnosticErrors = append(diagnosticErrors, errors.New(d.Message))
+		}
+	}
+	if err := errors.Join(diagnosticErrors...); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 
 	for _, pc := range cfg.Plugins {

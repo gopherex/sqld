@@ -126,6 +126,8 @@ message QueryParameter {
   // optional marks a dynamic-query parameter declared with the `@name?` suffix:
   // the WHERE condition using it is included only when the caller supplies it.
   bool optional = 6;
+  // sqlc.narg forces a nullable binding, without making predicates optional.
+  bool force_nullable = 7;
 }
 
 // QueryColumn is an inferred output column of a query.

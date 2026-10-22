@@ -3,7 +3,9 @@
 package query
 
 import (
+	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/gopherex/sqld/internal/mapper"
@@ -29,8 +31,8 @@ var commentRe = regexp.MustCompile(`^--`)
 //
 //	-- name: QueryName :command
 //
-// and extends until the next header (or EOF). If a body fails to parse it is
-// silently skipped; the caller may emit a diagnostic.
+// and extends until the next header (or EOF). Invalid SQL or parameter macros
+// return an error identifying the source file and query.
 func ParseQueries(sql, sourceFile string) ([]*pluginv1.Query, error) {
 	lines := splitLines(sql)
 
@@ -139,15 +141,23 @@ func ParseQueries(sql, sourceFile string) ([]*pluginv1.Query, error) {
 			continue
 		}
 
-		// Rewrite @ident named params → $N before parsing, so that
+		// Rewrite @ident and sqlc parameter macros → $N before parsing, so that
 		// libpg_query only sees positional placeholders it understands.
 		// optional[pos] == true when the param was declared with the @name? suffix.
-		rewritten, names, optional := rewriteNamedParams(body)
+		rewritten, names, optional, nullable, err := rewriteNamedParams(body)
+		if err != nil {
+			return nil, fmt.Errorf("%s: query %s: %w", sourceFile, b.name, err)
+		}
 
 		stmts, err := parse.Statements(rewritten)
-		if err != nil || len(stmts) == 0 {
-			// Skip unparseable bodies silently.
+		if err != nil {
+			return nil, fmt.Errorf("%s: query %s: %w", sourceFile, b.name, err)
+		}
+		if len(stmts) == 0 {
 			continue
+		}
+		if err := rejectUnexpandedSQLCMacros(stmts); err != nil {
+			return nil, fmt.Errorf("%s: query %s: %w", sourceFile, b.name, err)
 		}
 
 		first := stmts[0]
@@ -157,18 +167,18 @@ func ParseQueries(sql, sourceFile string) ([]*pluginv1.Query, error) {
 		// slice is always in order even before Infer runs).
 		var seededParams []*pluginv1.QueryParameter
 		if len(names) > 0 {
-			var maxPos uint32
+			positions := make([]uint32, 0, len(names))
 			for pos := range names {
-				if pos > maxPos {
-					maxPos = pos
-				}
+				positions = append(positions, pos)
 			}
-			for n := uint32(1); n <= maxPos; n++ {
+			sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
+			for _, n := range positions {
 				if name, ok := names[n]; ok {
 					seededParams = append(seededParams, &pluginv1.QueryParameter{
-						Number:   n,
-						Name:     name,
-						Optional: optional[n],
+						Number:        n,
+						Name:          name,
+						Optional:      optional[n],
+						ForceNullable: nullable[n],
 					})
 				}
 			}

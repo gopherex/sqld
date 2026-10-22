@@ -43,7 +43,7 @@ func inferParamTypes(stmt *irv1.Statement, params map[uint32]*pluginv1.QueryPara
 	i.resolveUnknownOutputs(i.output)
 	for number, p := range params {
 		constraint := i.inputNulls[number]
-		p.Nullable = p.GetOptional() || constraint.isNullable()
+		p.Nullable = p.GetForceNullable() || p.GetOptional() || constraint.isNullable()
 	}
 	return i
 }

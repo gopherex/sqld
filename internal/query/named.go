@@ -1,260 +1,189 @@
 package query
 
-// rewriteNamedParams replaces @ident named parameters in sql with positional
-// $N placeholders that libpg_query understands, and returns the mapping from
-// position → original name and position → optional flag.
-//
-// The lexer tracks context so that @ident inside string literals, identifiers,
-// comments, and dollar-quoted strings is left untouched.  Bare operator tokens
-// like @>, @@, @-@, @? are also left untouched because the character following
-// @ is not an identifier-start character.
-//
-// A trailing ? immediately after @ident (e.g. @email?) marks the parameter as
-// optional. The ? is consumed and NOT emitted into the rewritten SQL. A name
-// is considered optional if ANY occurrence uses the ? suffix.
-func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, optional map[uint32]bool) {
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/gopherex/sqld/internal/parse"
+	pg "github.com/pganalyze/pg_query_go/v6"
+	pgquery "github.com/wasilibs/go-pgquery"
+	"google.golang.org/protobuf/reflect/protopath"
+	"google.golang.org/protobuf/reflect/protorange"
+	"google.golang.org/protobuf/reflect/protoreflect"
+)
+
+// rewriteNamedParams shares one positional binding across @name, sqlc.arg(name)
+// and sqlc.narg(name). PostgreSQL's scanner protects strings, quoted identifiers,
+// nested comments and operators. Source text outside parameter spans is retained.
+// Nullable inputs (narg) and optional predicates (@name?) are distinct contracts.
+func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, optional, nullable map[uint32]bool, err error) {
 	names = make(map[uint32]string)
 	optional = make(map[uint32]bool)
-	// nameToPos maps a name seen before to its assigned $N position so that
-	// repeated occurrences of the same name get the same placeholder.
-	nameToPos := make(map[string]uint32)
-	var nextPos uint32 = 1
-
-	// Lexer state constants.
-	const (
-		stateNormal       = iota
-		stateLineComment  // after --
-		stateBlockComment // inside /* … */
-		stateSingleQuote  // inside '…'
-		stateDoubleQuote  // inside "…"
-		stateDollarQuote  // inside $tag$…$tag$
-	)
-
-	state := stateNormal
-	out := make([]byte, 0, len(sql))
-	s := sql
-	var dollarTag string // the full tag including both $ delimiters, e.g. "$fmt$"
-
-	for i := 0; i < len(s); {
-		ch := s[i]
-
-		switch state {
-		// ------------------------------------------------------------------ //
-		// Normal state
-		// ------------------------------------------------------------------ //
-		case stateNormal:
-			// Check for line comment start.
-			if ch == '-' && i+1 < len(s) && s[i+1] == '-' {
-				out = append(out, '-', '-')
-				i += 2
-				state = stateLineComment
-				continue
+	nullable = make(map[uint32]bool)
+	scanned, err := pgquery.Scan(sql)
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+	var tokens []*pg.ScanToken
+	var next uint32 = 1
+	for _, tok := range scanned.GetTokens() {
+		if tok.GetToken() == pg.Token_SQL_COMMENT || tok.GetToken() == pg.Token_C_COMMENT {
+			continue
+		}
+		tokens = append(tokens, tok)
+		// Reserve explicit positional bindings before allocating named parameters.
+		if tok.GetToken() == pg.Token_PARAM {
+			n, e := strconv.ParseUint(sql[tok.Start+1:tok.End], 10, 31)
+			if e != nil || n == 0 {
+				return "", nil, nil, nil, fmt.Errorf("invalid positional parameter %s", sql[tok.Start:tok.End])
 			}
-			// Check for block comment start.
-			if ch == '/' && i+1 < len(s) && s[i+1] == '*' {
-				out = append(out, '/', '*')
-				i += 2
-				state = stateBlockComment
-				continue
+			if uint32(n) >= next {
+				next = uint32(n) + 1
 			}
-			// Check for single-quoted string.
-			if ch == '\'' {
-				out = append(out, '\'')
-				i++
-				state = stateSingleQuote
-				continue
-			}
-			// Check for double-quoted identifier.
-			if ch == '"' {
-				out = append(out, '"')
-				i++
-				state = stateDoubleQuote
-				continue
-			}
-			// Check for dollar-quoted string: $[tag]$
-			if ch == '$' {
-				if tag, tagLen := scanDollarTag(s, i); tagLen > 0 {
-					dollarTag = tag
-					out = append(out, s[i:i+tagLen]...)
-					i += tagLen
-					state = stateDollarQuote
-					continue
-				}
-				// Not a dollar-quote tag; treat as ordinary character (e.g. $1).
-				out = append(out, ch)
-				i++
-				continue
-			}
-			// Check for named parameter: @ followed by identifier-start char.
-			if ch == '@' && i+1 < len(s) && isIdentStart(s[i+1]) {
-				// Consume the identifier.
-				j := i + 1
-				for j < len(s) && isIdentCont(s[j]) {
-					j++
-				}
-				name := s[i+1 : j]
-				// Check for optional marker: ? immediately following the identifier.
-				isOptional := j < len(s) && s[j] == '?'
-				if isOptional {
-					j++ // consume the '?', do not emit it
-				}
-				// Assign or look up position.
-				pos, seen := nameToPos[name]
-				if !seen {
-					pos = nextPos
-					nextPos++
-					nameToPos[name] = pos
-					names[pos] = name
-				}
-				// A name is optional if ANY occurrence uses the ? suffix.
-				if isOptional {
-					optional[pos] = true
-				}
-				// Write $N placeholder.
-				out = appendUint(append(out, '$'), pos)
-				i = j
-				continue
-			}
-			// Any other character passes through unchanged.
-			out = append(out, ch)
-			i++
-
-		// ------------------------------------------------------------------ //
-		// Line comment: everything until EOL passes through unchanged.
-		// ------------------------------------------------------------------ //
-		case stateLineComment:
-			out = append(out, ch)
-			i++
-			if ch == '\n' {
-				state = stateNormal
-			}
-
-		// ------------------------------------------------------------------ //
-		// Block comment: pass through until */ is seen.
-		// ------------------------------------------------------------------ //
-		case stateBlockComment:
-			if ch == '*' && i+1 < len(s) && s[i+1] == '/' {
-				out = append(out, '*', '/')
-				i += 2
-				state = stateNormal
-				continue
-			}
-			out = append(out, ch)
-			i++
-
-		// ------------------------------------------------------------------ //
-		// Single-quoted string: handle '' escape and \ not used in standard SQL
-		// but we just need to skip past the closing '.
-		// ------------------------------------------------------------------ //
-		case stateSingleQuote:
-			if ch == '\'' {
-				out = append(out, '\'')
-				i++
-				// '' is an escaped quote, stay in string.
-				if i < len(s) && s[i] == '\'' {
-					out = append(out, '\'')
-					i++
-					continue
-				}
-				state = stateNormal
-				continue
-			}
-			out = append(out, ch)
-			i++
-
-		// ------------------------------------------------------------------ //
-		// Double-quoted identifier.
-		// ------------------------------------------------------------------ //
-		case stateDoubleQuote:
-			if ch == '"' {
-				out = append(out, '"')
-				i++
-				// "" escape stays inside.
-				if i < len(s) && s[i] == '"' {
-					out = append(out, '"')
-					i++
-					continue
-				}
-				state = stateNormal
-				continue
-			}
-			out = append(out, ch)
-			i++
-
-		// ------------------------------------------------------------------ //
-		// Dollar-quoted string: scan until the matching closing tag.
-		// ------------------------------------------------------------------ //
-		case stateDollarQuote:
-			// Check if the closing tag starts here.
-			if ch == '$' && len(s)-i >= len(dollarTag) && s[i:i+len(dollarTag)] == dollarTag {
-				out = append(out, s[i:i+len(dollarTag)]...)
-				i += len(dollarTag)
-				state = stateNormal
-				dollarTag = ""
-				continue
-			}
-			out = append(out, ch)
-			i++
 		}
 	}
-
-	if len(names) == 0 {
-		return sql, names, optional
-	}
-	return string(out), names, optional
-}
-
-// scanDollarTag checks whether the substring starting at pos in s is a
-// dollar-quote opening tag of the form $[identifier]$.  It returns the tag
-// string (e.g. "$fmt$") and its byte length.  If pos does not start a valid
-// dollar-quote tag, tagLen is 0.
-func scanDollarTag(s string, pos int) (tag string, tagLen int) {
-	if pos >= len(s) || s[pos] != '$' {
-		return "", 0
-	}
-	j := pos + 1
-	// Optional identifier between the two $ signs (may be empty → $$).
-	for j < len(s) && s[j] != '$' {
-		if !isIdentContOrDigit(s[j]) {
-			return "", 0 // not a valid tag character
+	raw := func(n int) string { return sql[tokens[n].Start:tokens[n].End] }
+	positions := make(map[string]uint32)
+	var out strings.Builder
+	last := 0
+	for n := 0; n < len(tokens); n++ {
+		tok := tokens[n]
+		start, end := int(tok.Start), int(tok.End)
+		name := ""
+		isOptional, isNullable := false, false
+		word := raw(n)
+		if tok.GetToken() == pg.Token_Op && strings.HasSuffix(word, "@") && !strings.HasSuffix(word, "@@") && end < len(sql) && isIdentStart(sql[end]) {
+			start = end - 1
+			for end < len(sql) && isIdentCont(sql[end]) {
+				end++
+			}
+			name = sql[start+1 : end]
+			if end < len(sql) && sql[end] == '?' {
+				isOptional = true
+				end++
+			}
+		} else if sqlIdentifier(word) == "sqlc" && (n == 0 || raw(n-1) != ".") && n+3 < len(tokens) && raw(n+1) == "." && raw(n+3) == "(" {
+			macro := sqlIdentifier(raw(n + 2))
+			if macro != "arg" && macro != "narg" {
+				return "", nil, nil, nil, fmt.Errorf("unsupported sqlc macro sqlc.%s at byte %d; supported macros: sqlc.arg, sqlc.narg", macro, start)
+			}
+			depth, close := 1, n+4
+			for ; close < len(tokens); close++ {
+				switch raw(close) {
+				case "(":
+					depth++
+				case ")":
+					depth--
+				}
+				if depth == 0 {
+					break
+				}
+			}
+			if close == len(tokens) {
+				return "", nil, nil, nil, fmt.Errorf("unterminated sqlc.%s at byte %d", macro, start)
+			}
+			end = int(tokens[close].End)
+			name, err = macroParameterName(sql[start:end])
+			if err != nil {
+				return "", nil, nil, nil, fmt.Errorf("sqlc.%s at byte %d: %w", macro, start, err)
+			}
+			isNullable = macro == "narg"
+			n = close
 		}
-		j++
+		if name == "" {
+			continue
+		}
+		pos, exists := positions[name]
+		if !exists {
+			if next > 1<<31-1 {
+				return "", nil, nil, nil, fmt.Errorf("named parameter %q exceeds PostgreSQL parameter number range", name)
+			}
+			pos = next
+			next++
+			positions[name] = pos
+			names[pos] = name
+		}
+		if isOptional {
+			optional[pos] = true
+		}
+		if isNullable {
+			nullable[pos] = true
+		}
+		if optional[pos] && nullable[pos] {
+			return "", nil, nil, nil, fmt.Errorf("parameter %q combines sqlc.narg with @name?: nullable binding and optional predicate cannot be combined", name)
+		}
+		out.WriteString(sql[last:start])
+		fmt.Fprintf(&out, "$%d", pos)
+		last = end
+		// Skip tokens fully consumed by the parameter, leaving a trailing operator
+		// (e.g. the '=' in @x?=1) in the original source for the next copy.
+		for n+1 < len(tokens) && int(tokens[n+1].End) <= end {
+			n++
+		}
 	}
-	if j >= len(s) {
-		return "", 0 // no closing $
+	if last == 0 {
+		return sql, names, optional, nullable, nil
 	}
-	// j points at the second $
-	tag = s[pos : j+1]
-	return tag, len(tag)
+	out.WriteString(sql[last:])
+	return out.String(), names, optional, nullable, nil
 }
 
-// isIdentStart reports whether b can be the first byte of a SQL identifier.
+func sqlIdentifier(s string) string {
+	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
+		return strings.ReplaceAll(s[1:len(s)-1], "\"\"", "\"")
+	}
+	return strings.ToLower(s)
+}
+
+// Parse the argument with PostgreSQL so escaped strings and quoted names have
+// exactly SQL's spelling rules. Expressions and aggregate modifiers are invalid.
+func macroParameterName(call string) (string, error) {
+	parsed, err := pgquery.Parse("SELECT " + call)
+	if err != nil {
+		return "", err
+	}
+	fc := parsed.GetStmts()[0].GetStmt().GetSelectStmt().GetTargetList()[0].GetResTarget().GetVal().GetFuncCall()
+	if len(fc.GetArgs()) == 1 && !fc.GetAggStar() && !fc.GetAggDistinct() && !fc.GetAggWithinGroup() && !fc.GetFuncVariadic() && len(fc.GetAggOrder()) == 0 {
+		arg := fc.GetArgs()[0]
+		if literal := arg.GetAConst(); literal != nil && literal.GetSval() != nil && literal.GetSval().GetSval() != "" {
+			return literal.GetSval().GetSval(), nil
+		}
+		if ref := arg.GetColumnRef(); ref != nil && len(ref.GetFields()) == 1 && ref.GetFields()[0].GetString_() != nil {
+			return ref.GetFields()[0].GetString_().GetSval(), nil
+		}
+	}
+	return "", fmt.Errorf("expected one non-empty string literal or identifier as parameter name")
+}
+
+// Validate the parsed tree as well: PostgreSQL can spell identifiers using
+// Unicode escapes (including UESCAPE), which the textual recognizer does not
+// expand. Never let an unexpanded sqlc call reach a generated query as SQL.
+func rejectUnexpandedSQLCMacros(stmts []parse.Stmt) error {
+	for _, stmt := range stmts {
+		err := (protorange.Options{Stable: true}).Range(stmt.Node.ProtoReflect(), func(path protopath.Values) error {
+			msg, ok := path.Index(-1).Value.Interface().(protoreflect.Message)
+			if !ok {
+				return nil
+			}
+			call, ok := msg.Interface().(*pg.FuncCall)
+			if !ok {
+				return nil
+			}
+			name := call.GetFuncname()
+			if len(name) == 2 && name[0].GetString_().GetSval() == "sqlc" {
+				return fmt.Errorf("unexpanded sqlc.%s at byte %d: unsupported macro or spelling; use sqlc.arg('name') or sqlc.narg('name')", name[1].GetString_().GetSval(), call.GetLocation())
+			}
+			return nil
+		}, nil)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func isIdentStart(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '_'
 }
-
-// isIdentCont reports whether b can continue a SQL identifier.
-func isIdentCont(b byte) bool {
-	return isIdentStart(b) || (b >= '0' && b <= '9')
-}
-
-// isIdentContOrDigit is used for dollar-tag scanning (allows digits after the
-// first character, same rules as isIdentCont).
-func isIdentContOrDigit(b byte) bool {
-	return isIdentCont(b)
-}
-
-// appendUint appends the decimal representation of n to buf.
-func appendUint(buf []byte, n uint32) []byte {
-	if n == 0 {
-		return append(buf, '0')
-	}
-	var tmp [10]byte
-	pos := len(tmp)
-	for n > 0 {
-		pos--
-		tmp[pos] = byte('0' + n%10)
-		n /= 10
-	}
-	return append(buf, tmp[pos:]...)
-}
+func isIdentCont(b byte) bool { return isIdentStart(b) || (b >= '0' && b <= '9') }

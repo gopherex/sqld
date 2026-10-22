@@ -6,7 +6,10 @@ import (
 )
 
 func TestRewriteNamedParamsBasic(t *testing.T) {
-	rewritten, names, optional := rewriteNamedParams("email = @email AND org = @org")
+	rewritten, names, optional, _, err := rewriteNamedParams("email = @email AND org = @org")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "email = $1 AND org = $2"
 	if rewritten != want {
 		t.Errorf("rewritten=%q want=%q", rewritten, want)
@@ -21,7 +24,10 @@ func TestRewriteNamedParamsBasic(t *testing.T) {
 }
 
 func TestRewriteNamedParamsRepeated(t *testing.T) {
-	rewritten, names, optional := rewriteNamedParams("@x OR a = @x")
+	rewritten, names, optional, _, err := rewriteNamedParams("@x OR a = @x")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "$1 OR a = $1"
 	if rewritten != want {
 		t.Errorf("rewritten=%q want=%q", rewritten, want)
@@ -38,7 +44,10 @@ func TestRewriteNamedParamsRepeated(t *testing.T) {
 func TestRewriteNamedParamsSkipOperator(t *testing.T) {
 	// @> is a PostgreSQL operator (contains); should NOT be rewritten.
 	// @t after the operator IS a named param.
-	rewritten, names, optional := rewriteNamedParams("tags @> @t")
+	rewritten, names, optional, _, err := rewriteNamedParams("tags @> @t")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "tags @> $1"
 	if rewritten != want {
 		t.Errorf("rewritten=%q want=%q", rewritten, want)
@@ -56,7 +65,10 @@ func TestRewriteNamedParamsSkipStringAndComment(t *testing.T) {
 	// @b inside single-quoted string, @c inside block comment, @d inside line
 	// comment must NOT be rewritten.  Only @real at the end is a param.
 	sql := "'a@b' /* @c */ -- @d\n= @real"
-	rewritten, names, optional := rewriteNamedParams(sql)
+	rewritten, names, optional, _, err := rewriteNamedParams(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "'a@b' /* @c */ -- @d\n= $1"
 	if rewritten != want {
 		t.Errorf("rewritten=%q want=%q", rewritten, want)
@@ -72,7 +84,10 @@ func TestRewriteNamedParamsSkipStringAndComment(t *testing.T) {
 
 func TestRewriteNamedParamsNoParams(t *testing.T) {
 	sql := "SELECT id FROM users WHERE id = $1"
-	rewritten, names, optional := rewriteNamedParams(sql)
+	rewritten, names, optional, _, err := rewriteNamedParams(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if rewritten != sql {
 		t.Errorf("rewritten=%q want unchanged", rewritten)
 	}
@@ -87,7 +102,10 @@ func TestRewriteNamedParamsNoParams(t *testing.T) {
 func TestRewriteNamedParamsDollarQuote(t *testing.T) {
 	// @inside inside a dollar-quoted string must be left alone.
 	sql := "$fmt$@inside$fmt$ = @outside"
-	rewritten, names, optional := rewriteNamedParams(sql)
+	rewritten, names, optional, _, err := rewriteNamedParams(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "$fmt$@inside$fmt$ = $1"
 	if rewritten != want {
 		t.Errorf("rewritten=%q want=%q", rewritten, want)
@@ -103,7 +121,10 @@ func TestRewriteNamedParamsDollarQuote(t *testing.T) {
 
 func TestRewriteNamedParamsDoubleAt(t *testing.T) {
 	// @@ is a text-search operator; neither @ starts an identifier.
-	rewritten, names, optional := rewriteNamedParams("to_tsvector('english', body) @@ @query")
+	rewritten, names, optional, _, err := rewriteNamedParams("to_tsvector('english', body) @@ @query")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "to_tsvector('english', body) @@ $1"
 	if rewritten != want {
 		t.Errorf("rewritten=%q want=%q", rewritten, want)
@@ -118,7 +139,10 @@ func TestRewriteNamedParamsDoubleAt(t *testing.T) {
 
 func TestRewriteNamedParamsOptional(t *testing.T) {
 	// @email? is optional (? suffix consumed), @org is plain (not optional).
-	rewritten, names, optional := rewriteNamedParams("email = @email? AND org = @org")
+	rewritten, names, optional, _, err := rewriteNamedParams("email = @email? AND org = @org")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "email = $1 AND org = $2"
 	if rewritten != want {
 		t.Errorf("rewritten=%q want=%q", rewritten, want)

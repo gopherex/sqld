@@ -1,6 +1,7 @@
 package query
 
 import (
+	"strings"
 	"testing"
 
 	pluginv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/plugin"
@@ -97,17 +98,10 @@ func TestParseQueriesComment(t *testing.T) {
 	}
 }
 
-func TestParseQueriesInvalidBodySkipped(t *testing.T) {
-	// second query has invalid SQL body; should return only the first
+func TestParseQueriesInvalidBodyReturnsError(t *testing.T) {
 	sql := "-- name: Q1 :one\nSELECT 1;\n-- name: Q2 :exec\nnot valid sql !!!;\n"
 	qs, err := ParseQueries(sql, "f.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(qs) != 1 {
-		t.Fatalf("queries=%d", len(qs))
-	}
-	if qs[0].GetName() != "Q1" {
-		t.Fatalf("name=%q", qs[0].GetName())
+	if err == nil || !strings.Contains(err.Error(), "f.sql: query Q2:") {
+		t.Fatalf("queries=%v error=%v", qs, err)
 	}
 }
