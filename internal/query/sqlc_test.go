@@ -26,7 +26,7 @@ func TestSQLCParameterRewrite(t *testing.T) {
 		{`SELECT id FROM t WHERE id=@id AND name=@name?='x'`, `SELECT id FROM t WHERE id=$1 AND name=$2='x'`, map[uint32]string{1: "id", 2: "name"}, map[uint32]bool{}},
 	} {
 		t.Run(tc.sql, func(t *testing.T) {
-			got, names, _, nullable, err := rewriteNamedParams(tc.sql)
+			got, names, _, nullable, _, err := rewriteNamedParams(tc.sql)
 			if err != nil || got != tc.want || !reflect.DeepEqual(names, tc.names) || !reflect.DeepEqual(nullable, tc.nullable) {
 				t.Fatalf("sql=%q names=%v nullable=%v err=%v; want %q %v %v", got, names, nullable, err, tc.want, tc.names, tc.nullable)
 			}
@@ -42,7 +42,7 @@ func TestSQLCParameterLexicalBoundaries(t *testing.T) {
 		"SELECT 1 /* sqlc.narg('x') /* nested */ @x */ -- sqlc.embed(t) @x\n",
 		`SELECT doc @> '{}'::jsonb, doc @? '$.a', ts @@ query FROM t`,
 	} {
-		got, names, _, _, err := rewriteNamedParams(sql)
+		got, names, _, _, _, err := rewriteNamedParams(sql)
 		if err != nil || got != sql || len(names) != 0 {
 			t.Errorf("sql=%q names=%v err=%v; want unchanged %q", got, names, err, sql)
 		}
@@ -124,5 +124,80 @@ func TestSQLCMacroInference(t *testing.T) {
 	}
 	if len(d.Items) != 0 {
 		t.Fatal(d.Items)
+	}
+}
+
+func TestNullElementsMacroInference(t *testing.T) {
+	for _, sql := range []string{
+		`SELECT sqld.nullelems('x')::bigint[]`,
+		`SELECT @x::bigint[], sqld.nullelems(x)::bigint[]`,
+		`SELECT sqlc.narg(x)::bigint[], sqld.nullelems('x')::bigint[]`,
+	} {
+		qs, err := ParseQueries("-- name: Q :one\n"+sql, "q.sql")
+		if err != nil || len(qs) != 1 {
+			t.Fatalf("queries=%v err=%v", qs, err)
+		}
+		wire, err := proto.Marshal(qs[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := &pluginv1.Query{}
+		if err := proto.Unmarshal(wire, q); err != nil {
+			t.Fatal(err)
+		}
+		d := &catalog.Diagnostics{}
+		Infer(q, nil, d)
+		Infer(q, nil, d)
+		if len(d.Items) != 0 {
+			t.Fatal(d.Items)
+		}
+		if len(q.Parameters) != 1 || !q.Parameters[0].GetNullableElements() || q.Parameters[0].GetForceNullable() != strings.Contains(sql, "sqlc.narg") {
+			t.Fatalf("parameter flags=%v", q.Parameters)
+		}
+		if len(qs[0].Parameters) != 1 || strings.Contains(qs[0].Sql, "sqld.") {
+			t.Fatalf("query=%v", qs[0])
+		}
+	}
+}
+
+func TestNullElementsMacroErrors(t *testing.T) {
+	for _, body := range []string{
+		`SELECT sqld.other('x')`, `SELECT sqld.arg(x)`,
+		`SELECT sqld.nullelems()`, `SELECT sqld.nullelems('')`,
+		`SELECT sqld.nullelems(42)`, `SELECT sqld.nullelems(x,y)`,
+		`SELECT sqld.nullelems(t.x)`, `SELECT sqld.nullelems(lower('x'))`,
+		`SELECT sqld.nullelems(DISTINCT x)`, `SELECT sqld.nullelems(*)`,
+		`SELECT sqld.nullelems('x') OVER ()`, `SELECT sqld.nullelems('x'`,
+		`SELECT sqld.nullelems(x), @x?`, `SELECT @x?, sqld.nullelems(x)`,
+		`SELECT U&"sq\006cd".nullelems(x)`,
+		`SELECT U&"sq!006cd" UESCAPE '!'.other(x)`,
+	} {
+		_, err := ParseQueries("-- name: Bad :one\n"+body, "macros.sql")
+		if err == nil || !strings.Contains(err.Error(), "macros.sql: query Bad:") {
+			t.Fatalf("%s: err=%v", body, err)
+		}
+		if strings.Contains(body, "sqld.other") && !strings.Contains(err.Error(), "supported macros: sqld.nullelems") {
+			t.Fatalf("missing supported macros: %v", err)
+		}
+	}
+}
+
+func TestNullElementsRequiresArray(t *testing.T) {
+	for _, expr := range []string{`sqld.nullelems(x)::text`, `sqld.nullelems(x)::bigint`, `sqld.nullelems(x)`} {
+		qs, err := ParseQueries("-- name: Q :one\nSELECT "+expr, "q.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := &catalog.Diagnostics{}
+		Infer(qs[0], nil, d)
+		found := false
+		for _, diag := range d.Items {
+			if diag.Severity == "error" && strings.Contains(diag.Message, `sqld.nullelems parameter "x" ($1) must have an array type`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s: diagnostics=%v", expr, d.Items)
+		}
 	}
 }

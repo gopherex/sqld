@@ -260,6 +260,30 @@ Malformed macros and unsupported `sqlc` macros (including `sqlc.embed` and
 also stops generation rather than silently omitting the query. Comments and
 string literals containing macro-like text remain unchanged.
 
+#### Nullable array elements (`sqld.nullelems`)
+
+`sqld.nullelems('name')` (or `sqld.nullelems(name)`) shares the binding of
+`@name` and allows NULL elements in an array parameter:
+
+```sql
+-- name: InsertHeads :exec
+INSERT INTO heads (kind, summary_type)
+SELECT * FROM unnest(@kinds::text[], sqld.nullelems('summary_types')::bigint[]);
+```
+
+`SummaryTypes` becomes `[]*int64`; text and timestamp arrays similarly accept
+`[]*string` and `[]*time.Time`. Elements that already represent NULL, such as
+`[]byte` and `json.RawMessage`, keep their existing types. Parameters use pointer
+wrapping even with `nullMode: opt`. The outer slice remains a plain slice:
+nil binds a SQL NULL array, an empty slice binds an empty array, and nil elements
+bind NULL elements.
+
+The flag applies to every occurrence of the same name, including `@name`,
+`sqlc.arg` and `sqlc.narg`. It can be combined with `sqlc.narg` but not `@name?`.
+Non-array parameters and unsupported `sqld` macros are errors; the supported
+`sqld` macro is `sqld.nullelems`. Name spelling follows the sqlc macros above.
+`@name?::text[]` without this macro still accepts `[]string`.
+
 ### Optional parameters (`@name?`)
 
 Appending `?` to a parameter name marks it optional. Optional scalar parameters

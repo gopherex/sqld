@@ -83,6 +83,9 @@ func Infer(q *pluginv1.Query, cat *irv1.Catalog, d *catalog.Diagnostics) {
 	// Order by position (1-based).
 	ordered := orderedParams(paramMap)
 	for _, p := range ordered {
+		if p.GetNullableElements() && p.GetType().GetKind() != irv1.TypeKind_TYPE_KIND_ARRAY {
+			d.Add("error", fmt.Sprintf("sqld.nullelems parameter %q ($%d) must have an array type in query %s", p.GetName(), p.GetNumber(), q.GetName()))
+		}
 		if p.GetType() == nil {
 			d.Add("info", fmt.Sprintf("param $%d type unresolved in query %s", p.GetNumber(), q.GetName()))
 		}

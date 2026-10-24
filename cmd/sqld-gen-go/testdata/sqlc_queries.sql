@@ -27,3 +27,13 @@ SELECT id, name, bio FROM inserted;
 
 -- name: MixedPositional :one
 SELECT $1::bigint + sqlc.arg('amount')::bigint AS value;
+
+-- name: InsertHeads :exec
+INSERT INTO heads (kind, summary_type)
+SELECT * FROM unnest(@kinds::text[], sqld.nullelems('summary_types')::bigint[]);
+
+-- name: FindKinds :many
+SELECT kind FROM heads WHERE kind = ANY(sqld.nullelems(kinds)::text[]) ORDER BY kind;
+
+-- name: OptionalKinds :many
+SELECT kind FROM heads WHERE kind = ANY(@kinds?::text[]) ORDER BY kind;

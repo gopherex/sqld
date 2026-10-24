@@ -176,8 +176,9 @@ func (m *Mapper) GoType(columnID string, t *irv1.TypeRef, nullable bool) (goExpr
 // caller passes the composite by value (e.g. SetAddressParams{Address: AppAddress{...}}).
 //
 // An override (by column id or type name) wins, otherwise it falls back to the
-// composite-aware default mapping.
-func (m *Mapper) ParamType(columnID string, t *irv1.TypeRef, nullable bool) (goExpr string, imports []string) {
+// composite-aware default mapping. The optional nullableElements flag applies
+// nullable wrapping to array elements, not the slice itself.
+func (m *Mapper) ParamType(columnID string, t *irv1.TypeRef, nullable bool, nullableElements ...bool) (goExpr string, imports []string) {
 	if m.ov != nil {
 		if columnID != "" {
 			if v, ok := m.ov[columnID]; ok {
@@ -186,7 +187,8 @@ func (m *Mapper) ParamType(columnID string, t *irv1.TypeRef, nullable bool) (goE
 		}
 	}
 	if t != nil && t.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
-		elemExpr, elemImports := m.ParamType("", t.GetElement(), false)
+		elemNullable := len(nullableElements) > 0 && nullableElements[0]
+		elemExpr, elemImports := m.ParamType("", t.GetElement(), elemNullable)
 		return "[]" + elemExpr, elemImports
 	}
 	if m.ov != nil {

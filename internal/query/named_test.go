@@ -6,7 +6,7 @@ import (
 )
 
 func TestRewriteNamedParamsBasic(t *testing.T) {
-	rewritten, names, optional, _, err := rewriteNamedParams("email = @email AND org = @org")
+	rewritten, names, optional, _, _, err := rewriteNamedParams("email = @email AND org = @org")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestRewriteNamedParamsBasic(t *testing.T) {
 }
 
 func TestRewriteNamedParamsRepeated(t *testing.T) {
-	rewritten, names, optional, _, err := rewriteNamedParams("@x OR a = @x")
+	rewritten, names, optional, _, _, err := rewriteNamedParams("@x OR a = @x")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestRewriteNamedParamsRepeated(t *testing.T) {
 func TestRewriteNamedParamsSkipOperator(t *testing.T) {
 	// @> is a PostgreSQL operator (contains); should NOT be rewritten.
 	// @t after the operator IS a named param.
-	rewritten, names, optional, _, err := rewriteNamedParams("tags @> @t")
+	rewritten, names, optional, _, _, err := rewriteNamedParams("tags @> @t")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestRewriteNamedParamsSkipStringAndComment(t *testing.T) {
 	// @b inside single-quoted string, @c inside block comment, @d inside line
 	// comment must NOT be rewritten.  Only @real at the end is a param.
 	sql := "'a@b' /* @c */ -- @d\n= @real"
-	rewritten, names, optional, _, err := rewriteNamedParams(sql)
+	rewritten, names, optional, _, _, err := rewriteNamedParams(sql)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestRewriteNamedParamsSkipStringAndComment(t *testing.T) {
 
 func TestRewriteNamedParamsNoParams(t *testing.T) {
 	sql := "SELECT id FROM users WHERE id = $1"
-	rewritten, names, optional, _, err := rewriteNamedParams(sql)
+	rewritten, names, optional, _, _, err := rewriteNamedParams(sql)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestRewriteNamedParamsNoParams(t *testing.T) {
 func TestRewriteNamedParamsDollarQuote(t *testing.T) {
 	// @inside inside a dollar-quoted string must be left alone.
 	sql := "$fmt$@inside$fmt$ = @outside"
-	rewritten, names, optional, _, err := rewriteNamedParams(sql)
+	rewritten, names, optional, _, _, err := rewriteNamedParams(sql)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestRewriteNamedParamsDollarQuote(t *testing.T) {
 
 func TestRewriteNamedParamsDoubleAt(t *testing.T) {
 	// @@ is a text-search operator; neither @ starts an identifier.
-	rewritten, names, optional, _, err := rewriteNamedParams("to_tsvector('english', body) @@ @query")
+	rewritten, names, optional, _, _, err := rewriteNamedParams("to_tsvector('english', body) @@ @query")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestRewriteNamedParamsDoubleAt(t *testing.T) {
 
 func TestRewriteNamedParamsOptional(t *testing.T) {
 	// @email? is optional (? suffix consumed), @org is plain (not optional).
-	rewritten, names, optional, _, err := rewriteNamedParams("email = @email? AND org = @org")
+	rewritten, names, optional, _, _, err := rewriteNamedParams("email = @email? AND org = @org")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,6 +163,33 @@ func TestRewriteNamedParamsOptional(t *testing.T) {
 		if ch == '?' {
 			t.Errorf("rewritten SQL contains '?': %q", rewritten)
 			break
+		}
+	}
+}
+
+func TestRewriteNullElements(t *testing.T) {
+	for _, sql := range []string{
+		`SELECT sqld.nullelems('x'), @x, sqlc.arg(x), sqlc.narg(x), $2`,
+		`SELECT SQLD /* comment */ . NULLELEMS ( x ), @x, sqlc.arg('x'), sqlc.narg(x), $2`,
+		`SELECT "sqld"."nullelems"("x"), @x, sqlc.arg(x), sqlc.narg(x), $2`,
+		`SELECT sqld.nullelems(E'\x78'), @x, sqlc.arg(x), sqlc.narg(x), $2`,
+	} {
+		got, names, optional, nullable, elements, err := rewriteNamedParams(sql)
+		if err != nil || got != `SELECT $3, $3, $3, $3, $2` || names[3] != "x" || len(names) != 1 || len(optional) != 0 || !nullable[3] || !elements[3] {
+			t.Fatalf("sql=%q names=%v optional=%v nullable=%v elements=%v err=%v", got, names, optional, nullable, elements, err)
+		}
+	}
+}
+
+func TestNullElementsLexicalBoundaries(t *testing.T) {
+	for _, sql := range []string{
+		`SELECT 'sqld.nullelems(''x'')', $$sqld.other(x)$$`,
+		`SELECT "sqld.nullelems(x)", "SQLD".nullelems(x), app.sqld.nullelems(x)`,
+		"SELECT 1 /* sqld.other(x) /* nested */ */ -- sqld.nullelems(x)\n",
+	} {
+		got, names, _, _, elements, err := rewriteNamedParams(sql)
+		if err != nil || got != sql || len(names) != 0 || len(elements) != 0 {
+			t.Fatalf("sql=%q names=%v elements=%v err=%v", got, names, elements, err)
 		}
 	}
 }

@@ -14,16 +14,17 @@ import (
 )
 
 // rewriteNamedParams shares one positional binding across @name, sqlc.arg(name)
-// and sqlc.narg(name). PostgreSQL's scanner protects strings, quoted identifiers,
-// nested comments and operators. Source text outside parameter spans is retained.
+// and sqlc.narg(name), plus sqld.nullelems(name). PostgreSQL's scanner protects
+// strings, quoted identifiers, nested comments and operators. Source text outside parameter spans is retained.
 // Nullable inputs (narg) and optional predicates (@name?) are distinct contracts.
-func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, optional, nullable map[uint32]bool, err error) {
+func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, optional, nullable, nullableElements map[uint32]bool, err error) {
 	names = make(map[uint32]string)
 	optional = make(map[uint32]bool)
 	nullable = make(map[uint32]bool)
+	nullableElements = make(map[uint32]bool)
 	scanned, err := pgquery.Scan(sql)
 	if err != nil {
-		return "", nil, nil, nil, err
+		return "", nil, nil, nil, nil, err
 	}
 	var tokens []*pg.ScanToken
 	var next uint32 = 1
@@ -36,7 +37,7 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, 
 		if tok.GetToken() == pg.Token_PARAM {
 			n, e := strconv.ParseUint(sql[tok.Start+1:tok.End], 10, 31)
 			if e != nil || n == 0 {
-				return "", nil, nil, nil, fmt.Errorf("invalid positional parameter %s", sql[tok.Start:tok.End])
+				return "", nil, nil, nil, nil, fmt.Errorf("invalid positional parameter %s", sql[tok.Start:tok.End])
 			}
 			if uint32(n) >= next {
 				next = uint32(n) + 1
@@ -51,7 +52,7 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, 
 		tok := tokens[n]
 		start, end := int(tok.Start), int(tok.End)
 		name := ""
-		isOptional, isNullable := false, false
+		isOptional, isNullable, isNullableElements := false, false, false
 		word := raw(n)
 		if tok.GetToken() == pg.Token_Op && strings.HasSuffix(word, "@") && !strings.HasSuffix(word, "@@") && end < len(sql) && isIdentStart(sql[end]) {
 			start = end - 1
@@ -63,10 +64,17 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, 
 				isOptional = true
 				end++
 			}
-		} else if sqlIdentifier(word) == "sqlc" && (n == 0 || raw(n-1) != ".") && n+3 < len(tokens) && raw(n+1) == "." && raw(n+3) == "(" {
+		} else if (sqlIdentifier(word) == "sqlc" || sqlIdentifier(word) == "sqld") && (n == 0 || raw(n-1) != ".") && n+3 < len(tokens) && raw(n+1) == "." && raw(n+3) == "(" {
+			namespace := sqlIdentifier(word)
 			macro := sqlIdentifier(raw(n + 2))
-			if macro != "arg" && macro != "narg" {
-				return "", nil, nil, nil, fmt.Errorf("unsupported sqlc macro sqlc.%s at byte %d; supported macros: sqlc.arg, sqlc.narg", macro, start)
+			supported := "sqlc.arg, sqlc.narg"
+			valid := macro == "arg" || macro == "narg"
+			if namespace == "sqld" {
+				supported = "sqld.nullelems"
+				valid = macro == "nullelems"
+			}
+			if !valid {
+				return "", nil, nil, nil, nil, fmt.Errorf("unsupported %s macro %s.%s at byte %d; supported macros: %s", namespace, namespace, macro, start, supported)
 			}
 			depth, close := 1, n+4
 			for ; close < len(tokens); close++ {
@@ -81,14 +89,15 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, 
 				}
 			}
 			if close == len(tokens) {
-				return "", nil, nil, nil, fmt.Errorf("unterminated sqlc.%s at byte %d", macro, start)
+				return "", nil, nil, nil, nil, fmt.Errorf("unterminated %s.%s at byte %d", namespace, macro, start)
 			}
 			end = int(tokens[close].End)
 			name, err = macroParameterName(sql[start:end])
 			if err != nil {
-				return "", nil, nil, nil, fmt.Errorf("sqlc.%s at byte %d: %w", macro, start, err)
+				return "", nil, nil, nil, nil, fmt.Errorf("%s.%s at byte %d: %w", namespace, macro, start, err)
 			}
-			isNullable = macro == "narg"
+			isNullable = namespace == "sqlc" && macro == "narg"
+			isNullableElements = namespace == "sqld" && macro == "nullelems"
 			n = close
 		}
 		if name == "" {
@@ -97,7 +106,7 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, 
 		pos, exists := positions[name]
 		if !exists {
 			if next > 1<<31-1 {
-				return "", nil, nil, nil, fmt.Errorf("named parameter %q exceeds PostgreSQL parameter number range", name)
+				return "", nil, nil, nil, nil, fmt.Errorf("named parameter %q exceeds PostgreSQL parameter number range", name)
 			}
 			pos = next
 			next++
@@ -110,8 +119,14 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, 
 		if isNullable {
 			nullable[pos] = true
 		}
+		if isNullableElements {
+			nullableElements[pos] = true
+		}
+		if optional[pos] && nullableElements[pos] {
+			return "", nil, nil, nil, nil, fmt.Errorf("parameter %q combines sqld.nullelems with @name?: nullable elements and optional predicate cannot be combined", name)
+		}
 		if optional[pos] && nullable[pos] {
-			return "", nil, nil, nil, fmt.Errorf("parameter %q combines sqlc.narg with @name?: nullable binding and optional predicate cannot be combined", name)
+			return "", nil, nil, nil, nil, fmt.Errorf("parameter %q combines sqlc.narg with @name?: nullable binding and optional predicate cannot be combined", name)
 		}
 		out.WriteString(sql[last:start])
 		fmt.Fprintf(&out, "$%d", pos)
@@ -123,10 +138,10 @@ func rewriteNamedParams(sql string) (rewritten string, names map[uint32]string, 
 		}
 	}
 	if last == 0 {
-		return sql, names, optional, nullable, nil
+		return sql, names, optional, nullable, nullableElements, nil
 	}
 	out.WriteString(sql[last:])
-	return out.String(), names, optional, nullable, nil
+	return out.String(), names, optional, nullable, nullableElements, nil
 }
 
 func sqlIdentifier(s string) string {
@@ -158,7 +173,7 @@ func macroParameterName(call string) (string, error) {
 
 // Validate the parsed tree as well: PostgreSQL can spell identifiers using
 // Unicode escapes (including UESCAPE), which the textual recognizer does not
-// expand. Never let an unexpanded sqlc call reach a generated query as SQL.
+// expand. Never let an unexpanded sqlc or sqld call reach generated SQL.
 func rejectUnexpandedSQLCMacros(stmts []parse.Stmt) error {
 	for _, stmt := range stmts {
 		err := (protorange.Options{Stable: true}).Range(stmt.Node.ProtoReflect(), func(path protopath.Values) error {
@@ -171,6 +186,9 @@ func rejectUnexpandedSQLCMacros(stmts []parse.Stmt) error {
 				return nil
 			}
 			name := call.GetFuncname()
+			if len(name) == 2 && name[0].GetString_().GetSval() == "sqld" {
+				return fmt.Errorf("unexpanded sqld.%s at byte %d: unsupported macro or spelling; supported macros: sqld.nullelems('name')", name[1].GetString_().GetSval(), call.GetLocation())
+			}
 			if len(name) == 2 && name[0].GetString_().GetSval() == "sqlc" {
 				return fmt.Errorf("unexpanded sqlc.%s at byte %d: unsupported macro or spelling; use sqlc.arg('name') or sqlc.narg('name')", name[1].GetString_().GetSval(), call.GetLocation())
 			}

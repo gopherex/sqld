@@ -32,8 +32,8 @@ func resolveGoType(reg *udtRegistry, ov overrides, columnID string, t *irv1.Type
 	return gotypes.NewMapper2(reg, ov, goNullMode).GoType(columnID, t, nullable)
 }
 
-func resolveGoParamType(reg *udtRegistry, ov overrides, columnID string, t *irv1.TypeRef, nullable bool) (string, []string) {
-	return gotypes.NewMapper2(reg, ov, gotypes.Pointer).ParamType(columnID, t, nullable)
+func resolveGoParamType(reg *udtRegistry, ov overrides, columnID string, t *irv1.TypeRef, nullable bool, nullableElements ...bool) (string, []string) {
+	return gotypes.NewMapper2(reg, ov, gotypes.Pointer).ParamType(columnID, t, nullable, nullableElements...)
 }
 
 func isCompositeType(reg *udtRegistry, t *irv1.TypeRef) bool {

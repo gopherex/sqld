@@ -128,6 +128,8 @@ message QueryParameter {
   bool optional = 6;
   // sqlc.narg forces a nullable binding, without making predicates optional.
   bool force_nullable = 7;
+  // sqld.nullelems allows NULL array elements without changing array nullability.
+  bool nullable_elements = 8;
 }
 
 // QueryColumn is an inferred output column of a query.

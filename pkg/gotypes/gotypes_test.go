@@ -178,3 +178,32 @@ func TestGoTypeOptMode(t *testing.T) {
 		})
 	}
 }
+
+func TestParamTypeNullableElements(t *testing.T) {
+	for _, tc := range []struct{ pg, want string }{
+		{"int8", "[]*int64"}, {"int4", "[]*int32"}, {"int2", "[]*int16"},
+		{"text", "[]*string"}, {"bool", "[]*bool"}, {"float8", "[]*float64"},
+		{"timestamptz", "[]*time.Time"}, {"date", "[]*time.Time"},
+		{"bytea", "[][]byte"}, {"jsonb", "[]json.RawMessage"},
+	} {
+		t.Run(tc.pg, func(t *testing.T) {
+			m := NewMapper2(nil, nil, Pointer)
+			a := &irv1.TypeRef{Kind: irv1.TypeKind_TYPE_KIND_ARRAY, Element: scalarRef(tc.pg)}
+			for _, nullable := range []bool{false, true} {
+				got, imps := m.ParamType("", a, nullable, true)
+				if got != tc.want {
+					t.Fatalf("type=%s want %s", got, tc.want)
+				}
+				_, wantImports := m.ParamType("", a.Element, true)
+				if !importsEqual(imps, wantImports) {
+					t.Fatalf("imports=%v want %v", imps, wantImports)
+				}
+			}
+			plain, _ := m.ParamType("", a, true)
+			unwrapped, _ := m.ParamType("", a.Element, false)
+			if plain != "[]"+unwrapped {
+				t.Fatalf("array nullability changed elements: %s", plain)
+			}
+		})
+	}
+}

@@ -144,7 +144,7 @@ func ParseQueries(sql, sourceFile string) ([]*pluginv1.Query, error) {
 		// Rewrite @ident and sqlc parameter macros → $N before parsing, so that
 		// libpg_query only sees positional placeholders it understands.
 		// optional[pos] == true when the param was declared with the @name? suffix.
-		rewritten, names, optional, nullable, err := rewriteNamedParams(body)
+		rewritten, names, optional, nullable, nullableElements, err := rewriteNamedParams(body)
 		if err != nil {
 			return nil, fmt.Errorf("%s: query %s: %w", sourceFile, b.name, err)
 		}
@@ -175,10 +175,11 @@ func ParseQueries(sql, sourceFile string) ([]*pluginv1.Query, error) {
 			for _, n := range positions {
 				if name, ok := names[n]; ok {
 					seededParams = append(seededParams, &pluginv1.QueryParameter{
-						Number:        n,
-						Name:          name,
-						Optional:      optional[n],
-						ForceNullable: nullable[n],
+						Number:           n,
+						Name:             name,
+						Optional:         optional[n],
+						ForceNullable:    nullable[n],
+						NullableElements: nullableElements[n],
 					})
 				}
 			}

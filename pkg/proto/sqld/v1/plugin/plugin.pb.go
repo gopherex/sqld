@@ -629,8 +629,10 @@ type QueryParameter struct {
 	Optional bool `protobuf:"varint,6,opt,name=optional,proto3" json:"optional,omitempty"`
 	// sqlc.narg forces a nullable binding, without making predicates optional.
 	ForceNullable bool `protobuf:"varint,7,opt,name=force_nullable,json=forceNullable,proto3" json:"force_nullable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// sqld.nullelems allows NULL array elements without changing array nullability.
+	NullableElements bool `protobuf:"varint,8,opt,name=nullable_elements,json=nullableElements,proto3" json:"nullable_elements,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *QueryParameter) Reset() {
@@ -708,6 +710,13 @@ func (x *QueryParameter) GetOptional() bool {
 func (x *QueryParameter) GetForceNullable() bool {
 	if x != nil {
 		return x.ForceNullable
+	}
+	return false
+}
+
+func (x *QueryParameter) GetNullableElements() bool {
+	if x != nil {
+		return x.NullableElements
 	}
 	return false
 }
@@ -1037,7 +1046,7 @@ const file_sqld_v1_plugin_plugin_proto_rawDesc = "" +
 	"\bseverity\x18\x01 \x01(\x0e2\".sqld.v1.plugin.DiagnosticSeverityR\bseverity\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12.\n" +
 	"\x06source\x18\x03 \x01(\v2\x16.sqld.v1.ir.SourceSpanR\x06source\x12\x12\n" +
-	"\x04code\x18\x04 \x01(\tR\x04code\"\xf3\x01\n" +
+	"\x04code\x18\x04 \x01(\tR\x04code\"\xa0\x02\n" +
 	"\x0eQueryParameter\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12'\n" +
@@ -1045,7 +1054,8 @@ const file_sqld_v1_plugin_plugin_proto_rawDesc = "" +
 	"\bnullable\x18\x04 \x01(\bR\bnullable\x12-\n" +
 	"\x06column\x18\x05 \x01(\v2\x15.sqld.v1.ir.ObjectRefR\x06column\x12\x1a\n" +
 	"\boptional\x18\x06 \x01(\bR\boptional\x12%\n" +
-	"\x0eforce_nullable\x18\a \x01(\bR\rforceNullable\"\xde\x01\n" +
+	"\x0eforce_nullable\x18\a \x01(\bR\rforceNullable\x12+\n" +
+	"\x11nullable_elements\x18\b \x01(\bR\x10nullableElements\"\xde\x01\n" +
 	"\vQueryColumn\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
 	"\x04type\x18\x02 \x01(\v2\x13.sqld.v1.ir.TypeRefR\x04type\x12\x1a\n" +

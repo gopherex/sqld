@@ -23,6 +23,45 @@ func TestSQLCBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := New(conn)
+	summary := int64(42)
+	if err := q.InsertHeads(ctx, InsertHeadsParams{Kinds: []string{"a", "b"}, SummaryTypes: []*int64{nil, &summary}}); err != nil {
+		t.Fatal(err)
+	}
+	rowsHeads, err := conn.Query(ctx, "SELECT kind, summary_type FROM heads ORDER BY kind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summaries []*int64
+	for rowsHeads.Next() {
+		var kind string
+		var value *int64
+		if err := rowsHeads.Scan(&kind, &value); err != nil {
+			t.Fatal(err)
+		}
+		summaries = append(summaries, value)
+	}
+	rowsHeads.Close()
+	if err := rowsHeads.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 2 || summaries[0] != nil || summaries[1] == nil || *summaries[1] != summary {
+		t.Fatalf("nullable elements did not round-trip: %v", summaries)
+	}
+	kind := "b"
+	kinds, err := q.FindKinds(ctx, FindKindsParams{Kinds: []*string{nil, &kind}})
+	if err != nil || len(kinds) != 1 || kinds[0].Kind != kind {
+		t.Fatalf("nullable text elements: %v %v", kinds, err)
+	}
+	for _, filter := range [][]string{nil, {}, {"b"}} {
+		kinds, err := q.OptionalKinds(ctx, OptionalKindsParams{Kinds: filter})
+		want := len(filter)
+		if filter == nil {
+			want = 2
+		}
+		if err != nil || len(kinds) != want {
+			t.Fatalf("optional array %v: %v %v", filter, kinds, err)
+		}
+	}
 	name := "alice"
 	rows, err := q.FindName(ctx, nil)
 	if err != nil || len(rows) != 0 {

@@ -770,7 +770,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 		// their Params struct in writeDynamicQueryCode, which discards imports —
 		// so an override import on a dynamic param must be gathered here).
 		for _, p := range q.GetParameters() {
-			_, imps := resolveGoParamType(reg, ov, p.GetColumn().GetId(), p.GetType(), p.GetNullable())
+			_, imps := resolveGoParamType(reg, ov, p.GetColumn().GetId(), p.GetType(), p.GetNullable(), p.GetNullableElements())
 			allImports = append(allImports, imps...)
 		}
 
@@ -813,7 +813,7 @@ func generateQueries(pkg string, queries []*pluginv1.Query, annotations []*irv1.
 					pName = fmt.Sprintf("arg%d", p.GetNumber())
 				}
 			}
-			gt, imps := resolveGoParamType(reg, ov, p.GetColumn().GetId(), p.GetType(), p.GetNullable())
+			gt, imps := resolveGoParamType(reg, ov, p.GetColumn().GetId(), p.GetType(), p.GetNullable(), p.GetNullableElements())
 			allImports = append(allImports, imps...)
 			params = append(params, qParam{goName: lowerCamel(pName), goType: gt})
 		}
@@ -1412,9 +1412,9 @@ func buildConditionInfo(sql string, paramByNum map[uint32]*pluginv1.QueryParamet
 				if tr != nil && tr.GetKind() == irv1.TypeKind_TYPE_KIND_ARRAY {
 					tr = tr.GetElement()
 				}
-				cp.goType, _ = resolveGoType(reg, ov, colID, tr, false)
+				cp.goType, _ = resolveGoParamType(reg, ov, colID, tr, p.GetNullableElements())
 			} else {
-				cp.goType, _ = resolveGoParamType(reg, ov, colID, p.GetType(), p.GetNullable() && !p.GetOptional())
+				cp.goType, _ = resolveGoParamType(reg, ov, colID, p.GetType(), p.GetNullable() && !p.GetOptional(), p.GetNullableElements())
 			}
 		}
 		info.params = append(info.params, cp)
