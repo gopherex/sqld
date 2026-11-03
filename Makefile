@@ -200,6 +200,5 @@ example-bob: build build-bob ## Generate the bob ORM (cmd/sqld-gen-bob module) +
 	go build ./cmd/sqld-gen-bob/...
 
 protocols: # Generate Go + TS code from proto
-	cd proto && easyp mod update && easyp mod vendor
 	rm -rf $(CURDIR)/pkg/proto
 	cd proto && easyp generate

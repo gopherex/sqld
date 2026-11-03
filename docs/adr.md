@@ -432,8 +432,10 @@ over source-span correlation for robustness.
 
 **Context:** Need generated Go from the proto IR + plugin service.
 
-**Decision:** `make protocols` runs `easyp mod update && easyp mod vendor`, wipes
-`pkg/proto`, then `easyp generate` (config: `proto/easyp.yaml`). Plugins `go` and
+**Decision:** `make protocols` wipes `pkg/proto`, then runs `easyp generate`
+(easyp v1 config in `proto/`: `protobuf.mod` declares the module,
+`easyp.gen.yaml` the generation, `easyp.yaml` lint/breaking; no dependencies,
+so there is nothing to vendor). Plugins `go` and
 `go-grpc` emit to `pkg/proto` with `paths: source_relative`, mirroring
 `sqld/v1/{ir,config,plugin}`. Go packages: `irv1`, `configv1`, `pluginv1`. The
 gRPC service generates `GeneratorServer` / `GeneratorClient`.
@@ -817,7 +819,7 @@ types themselves to align (then a nullable composite result column scans via
 ### Repository layout
 
 ```
-proto/                  proto sources; proto/easyp.yaml is the codegen config
+proto/                  proto sources; proto/easyp.gen.yaml is the codegen config
   sqld/v1/{ir,config,plugin}/*.proto
 pkg/proto/              generated Go (irv1 / configv1 / pluginv1) — do not edit
 pkg/migrate/            importable migrator API (ADR-0024)
