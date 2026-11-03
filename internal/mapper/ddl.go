@@ -604,6 +604,22 @@ func typeNodeListToQualifiedName(nodes []*pg.Node) *irv1.QualifiedName {
 	return qn
 }
 
+// MapCreateExtension converts a pg.CreateExtensionStmt to an IR Extension: the
+// name and the SCHEMA option. VERSION and CASCADE are not modeled. Returns nil
+// for nil input.
+func MapCreateExtension(es *pg.CreateExtensionStmt) *irv1.Extension {
+	if es == nil {
+		return nil
+	}
+	ext := &irv1.Extension{Name: es.GetExtname()}
+	for _, opt := range es.GetOptions() {
+		if de := opt.GetDefElem(); de.GetDefname() == "schema" {
+			ext.Schema = de.GetArg().GetString_().GetSval()
+		}
+	}
+	return ext
+}
+
 // ---------------------------------------------------------------------------
 // MapCreateSequence
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ package catalog
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/gopherex/sqld/internal/mapper"
 	"github.com/gopherex/sqld/internal/parse"
@@ -47,6 +48,7 @@ type builder struct {
 	diag        *Diagnostics
 	schemas     map[string]*schemaState // keyed by schema name
 	schemaOrder []string                // first-seen order
+	extensions  []*irv1.Extension       // first-seen order, unique by name
 }
 
 func newBuilder() *builder {
@@ -112,6 +114,7 @@ func Build(stmts []parse.Stmt) (*irv1.Catalog, *Diagnostics) {
 	cat := &irv1.Catalog{
 		DefaultSchema: "public",
 		Schemas:       schemas,
+		Extensions:    b.extensions,
 	}
 	return cat, b.diag
 }
@@ -127,6 +130,10 @@ func (b *builder) dispatch(stmt parse.Stmt) {
 	// CREATE SCHEMA
 	case node.GetCreateSchemaStmt() != nil:
 		b.handleCreateSchema(node.GetCreateSchemaStmt())
+
+	// CREATE EXTENSION
+	case node.GetCreateExtensionStmt() != nil:
+		b.handleCreateExtension(node.GetCreateExtensionStmt())
 
 	// CREATE TABLE
 	case node.GetCreateStmt() != nil:
@@ -309,6 +316,26 @@ func (b *builder) handleCreateSchema(cs *pg.CreateSchemaStmt) {
 }
 
 // ---------------------------------------------------------------------------
+// CREATE EXTENSION
+// ---------------------------------------------------------------------------
+
+// handleCreateExtension records an extension once: a repeated CREATE EXTENSION
+// (IF NOT EXISTS) of an installed one changes nothing in PostgreSQL either.
+func (b *builder) handleCreateExtension(es *pg.CreateExtensionStmt) {
+	ext := mapper.MapCreateExtension(es)
+	if ext.GetName() == "" {
+		b.diag.Add("warning", "CREATE EXTENSION: empty name, skipping")
+		return
+	}
+	for _, e := range b.extensions {
+		if e.GetName() == ext.GetName() {
+			return
+		}
+	}
+	b.extensions = append(b.extensions, ext)
+}
+
+// ---------------------------------------------------------------------------
 // CREATE DOMAIN
 // ---------------------------------------------------------------------------
 
@@ -437,6 +464,13 @@ func (b *builder) handleCreateTableAs(cta *pg.CreateTableAsStmt) {
 
 func (b *builder) handleDrop(ds *pg.DropStmt) {
 	switch ds.GetRemoveType() {
+	case pg.ObjectType_OBJECT_EXTENSION:
+		for _, obj := range ds.GetObjects() {
+			name := obj.GetString_().GetSval()
+			b.extensions = slices.DeleteFunc(b.extensions, func(e *irv1.Extension) bool { return e.GetName() == name })
+			b.diag.Add("info", fmt.Sprintf("DROP EXTENSION %q", name))
+		}
+
 	case pg.ObjectType_OBJECT_TABLE:
 		for _, obj := range ds.GetObjects() {
 			name, schemaName := dropObjName(obj)

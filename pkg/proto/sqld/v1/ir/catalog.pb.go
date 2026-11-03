@@ -178,6 +178,61 @@ func (x *Schema) GetMeta() *Metadata {
 	return nil
 }
 
+// Extension is an installed extension. Its identity is the name; schema is
+// where its objects live (empty when the DDL does not say). The version is not
+// modeled: declarative DDL rarely pins it.
+type Extension struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Schema        string                 `protobuf:"bytes,2,opt,name=schema,proto3" json:"schema,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Extension) Reset() {
+	*x = Extension{}
+	mi := &file_sqld_v1_ir_catalog_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Extension) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Extension) ProtoMessage() {}
+
+func (x *Extension) ProtoReflect() protoreflect.Message {
+	mi := &file_sqld_v1_ir_catalog_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Extension.ProtoReflect.Descriptor instead.
+func (*Extension) Descriptor() ([]byte, []int) {
+	return file_sqld_v1_ir_catalog_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Extension) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Extension) GetSchema() string {
+	if x != nil {
+		return x.Schema
+	}
+	return ""
+}
+
 // Catalog is the whole database snapshot.
 type Catalog struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -189,14 +244,16 @@ type Catalog struct {
 	Schemas         []*Schema              `protobuf:"bytes,6,rep,name=schemas,proto3" json:"schemas,omitempty"`
 	// Derived relationship graph spanning all schemas (see relation.proto).
 	Relationships []*Relationship `protobuf:"bytes,7,rep,name=relationships,proto3" json:"relationships,omitempty"`
-	Meta          *Metadata       `protobuf:"bytes,15,opt,name=meta,proto3" json:"meta,omitempty"`
+	// Installed extensions, database-wide. plpgsql (always installed) is omitted.
+	Extensions    []*Extension `protobuf:"bytes,8,rep,name=extensions,proto3" json:"extensions,omitempty"`
+	Meta          *Metadata    `protobuf:"bytes,15,opt,name=meta,proto3" json:"meta,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Catalog) Reset() {
 	*x = Catalog{}
-	mi := &file_sqld_v1_ir_catalog_proto_msgTypes[1]
+	mi := &file_sqld_v1_ir_catalog_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -208,7 +265,7 @@ func (x *Catalog) String() string {
 func (*Catalog) ProtoMessage() {}
 
 func (x *Catalog) ProtoReflect() protoreflect.Message {
-	mi := &file_sqld_v1_ir_catalog_proto_msgTypes[1]
+	mi := &file_sqld_v1_ir_catalog_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -221,7 +278,7 @@ func (x *Catalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Catalog.ProtoReflect.Descriptor instead.
 func (*Catalog) Descriptor() ([]byte, []int) {
-	return file_sqld_v1_ir_catalog_proto_rawDescGZIP(), []int{1}
+	return file_sqld_v1_ir_catalog_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Catalog) GetName() string {
@@ -273,6 +330,13 @@ func (x *Catalog) GetRelationships() []*Relationship {
 	return nil
 }
 
+func (x *Catalog) GetExtensions() []*Extension {
+	if x != nil {
+		return x.Extensions
+	}
+	return nil
+}
+
 func (x *Catalog) GetMeta() *Metadata {
 	if x != nil {
 		return x.Meta
@@ -306,7 +370,10 @@ const file_sqld_v1_ir_catalog_proto_rawDesc = "" +
 	"composites\x18\r \x03(\v2\x19.sqld.v1.ir.CompositeTypeR\n" +
 	"composites\x12-\n" +
 	"\x06ranges\x18\x0e \x03(\v2\x15.sqld.v1.ir.RangeTypeR\x06ranges\x12(\n" +
-	"\x04meta\x18\x14 \x01(\v2\x14.sqld.v1.ir.MetadataR\x04meta\"\xc7\x02\n" +
+	"\x04meta\x18\x14 \x01(\v2\x14.sqld.v1.ir.MetadataR\x04meta\"7\n" +
+	"\tExtension\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06schema\x18\x02 \x01(\tR\x06schema\"\xfe\x02\n" +
 	"\aCatalog\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12)\n" +
 	"\x10database_version\x18\x02 \x01(\tR\x0fdatabaseVersion\x12\x1d\n" +
@@ -316,7 +383,10 @@ const file_sqld_v1_ir_catalog_proto_rawDesc = "" +
 	"\vsearch_path\x18\x05 \x03(\tR\n" +
 	"searchPath\x12,\n" +
 	"\aschemas\x18\x06 \x03(\v2\x12.sqld.v1.ir.SchemaR\aschemas\x12>\n" +
-	"\rrelationships\x18\a \x03(\v2\x18.sqld.v1.ir.RelationshipR\rrelationships\x12(\n" +
+	"\rrelationships\x18\a \x03(\v2\x18.sqld.v1.ir.RelationshipR\rrelationships\x125\n" +
+	"\n" +
+	"extensions\x18\b \x03(\v2\x15.sqld.v1.ir.ExtensionR\n" +
+	"extensions\x12(\n" +
 	"\x04meta\x18\x0f \x01(\v2\x14.sqld.v1.ir.MetadataR\x04metaB4Z2github.com/gopherex/sqld/pkg/proto/sqld/v1/ir;irv1b\x06proto3"
 
 var (
@@ -331,45 +401,47 @@ func file_sqld_v1_ir_catalog_proto_rawDescGZIP() []byte {
 	return file_sqld_v1_ir_catalog_proto_rawDescData
 }
 
-var file_sqld_v1_ir_catalog_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_sqld_v1_ir_catalog_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_sqld_v1_ir_catalog_proto_goTypes = []any{
 	(*Schema)(nil),           // 0: sqld.v1.ir.Schema
-	(*Catalog)(nil),          // 1: sqld.v1.ir.Catalog
-	(*Table)(nil),            // 2: sqld.v1.ir.Table
-	(*View)(nil),             // 3: sqld.v1.ir.View
-	(*MaterializedView)(nil), // 4: sqld.v1.ir.MaterializedView
-	(*Sequence)(nil),         // 5: sqld.v1.ir.Sequence
-	(*Function)(nil),         // 6: sqld.v1.ir.Function
-	(*Procedure)(nil),        // 7: sqld.v1.ir.Procedure
-	(*Trigger)(nil),          // 8: sqld.v1.ir.Trigger
-	(*EnumType)(nil),         // 9: sqld.v1.ir.EnumType
-	(*DomainType)(nil),       // 10: sqld.v1.ir.DomainType
-	(*CompositeType)(nil),    // 11: sqld.v1.ir.CompositeType
-	(*RangeType)(nil),        // 12: sqld.v1.ir.RangeType
-	(*Metadata)(nil),         // 13: sqld.v1.ir.Metadata
-	(*Relationship)(nil),     // 14: sqld.v1.ir.Relationship
+	(*Extension)(nil),        // 1: sqld.v1.ir.Extension
+	(*Catalog)(nil),          // 2: sqld.v1.ir.Catalog
+	(*Table)(nil),            // 3: sqld.v1.ir.Table
+	(*View)(nil),             // 4: sqld.v1.ir.View
+	(*MaterializedView)(nil), // 5: sqld.v1.ir.MaterializedView
+	(*Sequence)(nil),         // 6: sqld.v1.ir.Sequence
+	(*Function)(nil),         // 7: sqld.v1.ir.Function
+	(*Procedure)(nil),        // 8: sqld.v1.ir.Procedure
+	(*Trigger)(nil),          // 9: sqld.v1.ir.Trigger
+	(*EnumType)(nil),         // 10: sqld.v1.ir.EnumType
+	(*DomainType)(nil),       // 11: sqld.v1.ir.DomainType
+	(*CompositeType)(nil),    // 12: sqld.v1.ir.CompositeType
+	(*RangeType)(nil),        // 13: sqld.v1.ir.RangeType
+	(*Metadata)(nil),         // 14: sqld.v1.ir.Metadata
+	(*Relationship)(nil),     // 15: sqld.v1.ir.Relationship
 }
 var file_sqld_v1_ir_catalog_proto_depIdxs = []int32{
-	2,  // 0: sqld.v1.ir.Schema.tables:type_name -> sqld.v1.ir.Table
-	3,  // 1: sqld.v1.ir.Schema.views:type_name -> sqld.v1.ir.View
-	4,  // 2: sqld.v1.ir.Schema.materialized_views:type_name -> sqld.v1.ir.MaterializedView
-	5,  // 3: sqld.v1.ir.Schema.sequences:type_name -> sqld.v1.ir.Sequence
-	6,  // 4: sqld.v1.ir.Schema.functions:type_name -> sqld.v1.ir.Function
-	7,  // 5: sqld.v1.ir.Schema.procedures:type_name -> sqld.v1.ir.Procedure
-	8,  // 6: sqld.v1.ir.Schema.triggers:type_name -> sqld.v1.ir.Trigger
-	9,  // 7: sqld.v1.ir.Schema.enums:type_name -> sqld.v1.ir.EnumType
-	10, // 8: sqld.v1.ir.Schema.domains:type_name -> sqld.v1.ir.DomainType
-	11, // 9: sqld.v1.ir.Schema.composites:type_name -> sqld.v1.ir.CompositeType
-	12, // 10: sqld.v1.ir.Schema.ranges:type_name -> sqld.v1.ir.RangeType
-	13, // 11: sqld.v1.ir.Schema.meta:type_name -> sqld.v1.ir.Metadata
+	3,  // 0: sqld.v1.ir.Schema.tables:type_name -> sqld.v1.ir.Table
+	4,  // 1: sqld.v1.ir.Schema.views:type_name -> sqld.v1.ir.View
+	5,  // 2: sqld.v1.ir.Schema.materialized_views:type_name -> sqld.v1.ir.MaterializedView
+	6,  // 3: sqld.v1.ir.Schema.sequences:type_name -> sqld.v1.ir.Sequence
+	7,  // 4: sqld.v1.ir.Schema.functions:type_name -> sqld.v1.ir.Function
+	8,  // 5: sqld.v1.ir.Schema.procedures:type_name -> sqld.v1.ir.Procedure
+	9,  // 6: sqld.v1.ir.Schema.triggers:type_name -> sqld.v1.ir.Trigger
+	10, // 7: sqld.v1.ir.Schema.enums:type_name -> sqld.v1.ir.EnumType
+	11, // 8: sqld.v1.ir.Schema.domains:type_name -> sqld.v1.ir.DomainType
+	12, // 9: sqld.v1.ir.Schema.composites:type_name -> sqld.v1.ir.CompositeType
+	13, // 10: sqld.v1.ir.Schema.ranges:type_name -> sqld.v1.ir.RangeType
+	14, // 11: sqld.v1.ir.Schema.meta:type_name -> sqld.v1.ir.Metadata
 	0,  // 12: sqld.v1.ir.Catalog.schemas:type_name -> sqld.v1.ir.Schema
-	14, // 13: sqld.v1.ir.Catalog.relationships:type_name -> sqld.v1.ir.Relationship
-	13, // 14: sqld.v1.ir.Catalog.meta:type_name -> sqld.v1.ir.Metadata
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	15, // 13: sqld.v1.ir.Catalog.relationships:type_name -> sqld.v1.ir.Relationship
+	1,  // 14: sqld.v1.ir.Catalog.extensions:type_name -> sqld.v1.ir.Extension
+	14, // 15: sqld.v1.ir.Catalog.meta:type_name -> sqld.v1.ir.Metadata
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_sqld_v1_ir_catalog_proto_init() }
@@ -387,7 +459,7 @@ func file_sqld_v1_ir_catalog_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sqld_v1_ir_catalog_proto_rawDesc), len(file_sqld_v1_ir_catalog_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -1743,5 +1743,13 @@
       },
       "suggestedName": "roles"
     }
+  ],
+  "extensions": [
+    {
+      "name": "hstore"
+    },
+    {
+      "name": "ltree"
+    }
   ]
 }

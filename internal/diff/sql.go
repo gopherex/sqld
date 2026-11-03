@@ -218,6 +218,22 @@ func renderDropSchema(s *irv1.Schema) string {
 	return "DROP SCHEMA " + quoteIdent(s.GetName()) + ";"
 }
 
+// --- extensions --------------------------------------------------------------
+
+// renderCreateExtension is IF NOT EXISTS: an extension is database-wide, so a
+// database may already have it (installed by an operator or another schema).
+func renderCreateExtension(e *irv1.Extension) string {
+	s := "CREATE EXTENSION IF NOT EXISTS " + quoteIdent(e.GetName())
+	if sc := e.GetSchema(); sc != "" {
+		s += " SCHEMA " + quoteIdent(sc)
+	}
+	return s + ";"
+}
+
+func renderDropExtension(e *irv1.Extension) string {
+	return "DROP EXTENSION " + quoteIdent(e.GetName()) + ";"
+}
+
 // --- types -------------------------------------------------------------------
 
 func renderDropType(n *irv1.QualifiedName) string {

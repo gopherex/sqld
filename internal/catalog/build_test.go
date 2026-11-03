@@ -263,3 +263,32 @@ func TestBuildCreateRange(t *testing.T) {
 		t.Fatalf("range subtype=%v", rt.GetSubtype())
 	}
 }
+
+func TestBuildExtensions(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, ddl string
+		want      []string // name:schema
+	}{
+		{name: "bare", ddl: `CREATE EXTENSION pg_trgm;`, want: []string{"pg_trgm:"}},
+		{name: "if not exists with schema", ddl: `CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA ext;`, want: []string{"uuid-ossp:ext"}},
+		{name: "repeated keeps first", ddl: `CREATE EXTENSION pg_trgm SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm;`, want: []string{"pg_trgm:public"}},
+		{name: "dropped by a later migration", ddl: `CREATE EXTENSION pg_trgm; CREATE EXTENSION hstore; DROP EXTENSION IF EXISTS pg_trgm;`, want: []string{"hstore:"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stmts, err := parse.Statements(tc.ddl)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, _ := Build(stmts)
+			var got []string
+			for _, e := range c.GetExtensions() {
+				got = append(got, e.GetName()+":"+e.GetSchema())
+			}
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Fatalf("extensions=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}

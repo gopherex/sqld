@@ -28,9 +28,6 @@ func TestRegisterTypesHstoreRoundTrip(t *testing.T) {
 	}
 	defer dev.Close()
 
-	if err := dev.Apply(ctx, "CREATE EXTENSION IF NOT EXISTS hstore; CREATE EXTENSION IF NOT EXISTS ltree;"); err != nil {
-		t.Fatalf("create extensions: %v", err)
-	}
 	schema, err := os.ReadFile("schema.sql")
 	if err != nil {
 		t.Fatal(err)

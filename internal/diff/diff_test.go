@@ -519,3 +519,55 @@ func TestDiffViewPrefersRawSQL(t *testing.T) {
 		t.Fatalf("up should use the raw_sql view body:\n%s", up)
 	}
 }
+
+func TestDiffExtensions(t *testing.T) {
+	t.Parallel()
+	const (
+		create = `CREATE EXTENSION IF NOT EXISTS "pg_trgm" SCHEMA "public";`
+		drop   = `DROP EXTENSION "pg_trgm";`
+		index  = `CREATE INDEX "docs_body" ON "public"."docs" USING gin ("body" gin_trgm_ops);`
+		table  = "CREATE TABLE docs(body text);"
+		trgm   = "CREATE EXTENSION pg_trgm SCHEMA public;"
+		gin    = "CREATE INDEX docs_body ON docs USING gin (body gin_trgm_ops);"
+	)
+	for _, tc := range []struct {
+		name, from, to string
+		up, down       []string // statements in order
+	}{
+		{name: "create before the objects using it", from: "", to: table + trgm + gin,
+			up: []string{create, "CREATE TABLE", index}, down: []string{`DROP INDEX "public"."docs_body";`, "DROP TABLE", drop}},
+		{name: "drop after the objects using it", from: table + trgm + gin, to: table,
+			up: []string{`DROP INDEX "public"."docs_body";`, drop}, down: []string{create, index}},
+		{name: "bare create renders without schema", from: "", to: "CREATE EXTENSION hstore;",
+			up: []string{`CREATE EXTENSION IF NOT EXISTS "hstore";`}, down: []string{`DROP EXTENSION "hstore";`}},
+		{name: "same name, schema unspecified on one side", from: trgm, to: "CREATE EXTENSION IF NOT EXISTS pg_trgm;"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p, err := Diff(cat(t, tc.from), cat(t, tc.to))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.up == nil {
+				if !p.Empty() {
+					t.Fatalf("want no changes, got:\n%s", p.UpSQL())
+				}
+				return
+			}
+			for dir, sql := range map[string]string{"up": p.UpSQL(), "down": p.DownSQL()} {
+				want := tc.up
+				if dir == "down" {
+					want = tc.down
+				}
+				at := 0
+				for _, w := range want {
+					i := strings.Index(sql[at:], w)
+					if i < 0 {
+						t.Fatalf("%s: %q missing or out of order:\n%s", dir, w, sql)
+					}
+					at += i + len(w)
+				}
+			}
+		})
+	}
+}

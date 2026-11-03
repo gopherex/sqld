@@ -69,7 +69,8 @@ canonical PostgreSQL names (`int4`, `varchar`, `_int4`, ...). The proto package
 
 - `catalog.proto` — `Catalog` (database snapshot) → `Schema` (PG namespace) →
   tables, views, materialized views, sequences, functions, procedures,
-  triggers, and user-defined types; plus a derived `relationships` graph.
+  triggers, and user-defined types; plus a derived `relationships` graph and
+  the database-wide `extensions` (name and schema).
 - `schema.proto` — `Table` / `Column` / `Constraint` (primary key, foreign key,
   unique, check, exclusion, not-null) / `Index` / `Sequence`, with identity and
   generated columns, referential actions, match types, opclasses, partial and

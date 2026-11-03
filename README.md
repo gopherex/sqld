@@ -189,7 +189,7 @@ sqld migrate validate [-c sqld.yaml]
 sqld migrate generate add_orders --dev-url postgres://localhost:5432/scratch?sslmode=disable
 ```
 
-Without `--dev-url`, `sqld migrate` starts an ephemeral Postgres via testcontainers (requires Docker). The diff covers schemas, types, sequences, tables, columns, constraints, indexes, views, materialized views, functions, procedures, and triggers — in dependency order with a reverse `down`.
+Without `--dev-url`, `sqld migrate` starts an ephemeral Postgres via testcontainers (requires Docker). The diff covers schemas, extensions, types, sequences, tables, columns, constraints, indexes, views, materialized views, functions, procedures, and triggers — in dependency order with a reverse `down`.
 
 **Embed and auto-apply in your service:**
 

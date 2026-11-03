@@ -57,6 +57,38 @@ func TestIndexOpclassRoundTrip(t *testing.T) {
 	}
 }
 
+// Extensions are introspected (plpgsql omitted) and carried into the generated
+// migration ahead of the objects that use them, so an init migration applies
+// on a fresh database with no preamble and leaves no drift.
+func TestExtensionInitMigration(t *testing.T) {
+	const schema = `CREATE EXTENSION IF NOT EXISTS pg_trgm;
+		CREATE TABLE docs(body text);
+		CREATE INDEX docs_body ON docs USING gin (body gin_trgm_ops);`
+	desired := introspectDDL(t, schema, []string{"public"})
+	var got []string
+	for _, e := range desired.GetExtensions() {
+		got = append(got, e.GetName()+":"+e.GetSchema())
+	}
+	if strings.Join(got, ",") != "pg_trgm:public" {
+		t.Fatalf("extensions=%v, want [pg_trgm:public]", got)
+	}
+
+	plan, err := diff.Diff(introspectDDL(t, "", []string{"public"}), desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := plan.UpSQL()
+	applied := introspectDDL(t, up, []string{"public"})
+	drift, err := diff.Diff(applied, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !drift.Empty() {
+		t.Fatalf("drift after applying the init migration:\n%s\n--- init ---\n%s", drift.UpSQL(), up)
+	}
+	applyOnFreshPG(t, up+"\n"+plan.DownSQL())
+}
+
 func TestIntrospectMixedExpressionIndex(t *testing.T) {
 	cat := introspectDDL(t, `CREATE TABLE users(tenant_id bigint, email text, payload text);
 		CREATE INDEX users_email ON users (tenant_id DESC NULLS LAST, lower(email) DESC, (length(email) + 1) ASC NULLS FIRST) INCLUDE (payload)

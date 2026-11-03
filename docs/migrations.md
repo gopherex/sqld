@@ -73,11 +73,18 @@ If you already have a scratch database, pass `--dev-url`:
 sqld migrate generate add_orders --dev-url postgres://localhost:5432/scratch?sslmode=disable
 ```
 
-The diff covers schemas, types (enum/domain/composite/range), sequences, tables,
-columns, constraints (PK/FK/unique/check/exclusion), indexes, views, materialized
-views, functions, procedures, and triggers — in dependency order, with a reverse
-`down`. Letting Postgres realize the schema normalizes definitions before they
-are compared.
+The diff covers schemas, extensions, types (enum/domain/composite/range),
+sequences, tables, columns, constraints (PK/FK/unique/check/exclusion), indexes,
+views, materialized views, functions, procedures, and triggers — in dependency
+order, with a reverse `down`. Letting Postgres realize the schema normalizes
+definitions before they are compared.
+
+Extensions are matched by name. A new one renders as
+`CREATE EXTENSION IF NOT EXISTS "<name>" SCHEMA "<schema>"` right after the
+schemas, so an index on `gin_trgm_ops` or a column of an extension type finds
+it; a removed one renders as `DROP EXTENSION "<name>"` after everything else
+(no `CASCADE`: PostgreSQL refuses while something still uses it). `plpgsql`,
+the version and moving an extension to another schema are not tracked.
 
 Index introspection parses PostgreSQL's `CREATE INDEX` definition into
 individual keys. Mixed indexes such as `(tenant_id, lower(email))` retain the

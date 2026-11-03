@@ -4,6 +4,9 @@
 CREATE SCHEMA app;
 CREATE SCHEMA audit;
 
+CREATE EXTENSION IF NOT EXISTS hstore;
+CREATE EXTENSION IF NOT EXISTS ltree;
+
 CREATE TYPE app.user_status AS ENUM ('active', 'inactive', 'banned');
 CREATE DOMAIN app.email AS text NOT NULL CHECK (VALUE ~ '@');
 CREATE TYPE app.address AS (street text, city text, zip text);

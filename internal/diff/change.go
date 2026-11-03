@@ -23,6 +23,7 @@ import (
 // before an AddForeignKey at 70 reverses to fk-drop before table-drop).
 const (
 	sortKeySchema     = 0
+	sortKeyExtension  = 5 // after the schema it installs into, before its users
 	sortKeyType       = 10
 	sortKeySequence   = 20
 	sortKeyTable      = 30
@@ -33,6 +34,10 @@ const (
 	sortKeyView       = 80  // views and materialized views
 	sortKeyFunc       = 90  // functions and procedures
 	sortKeyTrigger    = 100 // triggers (depend on tables + functions)
+	// A dropped extension goes last: PostgreSQL refuses to drop it while an
+	// object dropped in the same plan (an index on its opclass) still uses it.
+	// The reversed down order then re-creates it before those objects.
+	sortKeyExtensionDrop = 110
 )
 
 // Change is a single reversible schema change.
@@ -116,6 +121,22 @@ type DropSchema struct{ Schema *irv1.Schema }
 func (c *DropSchema) UpSQL() string   { return renderDropSchema(c.Schema) }
 func (c *DropSchema) DownSQL() string { return renderCreateSchema(c.Schema) }
 func (c *DropSchema) sortKey() int    { return sortKeySchema }
+
+// --- extensions --------------------------------------------------------------
+
+// CreateExtension installs an extension.
+type CreateExtension struct{ Extension *irv1.Extension }
+
+func (c *CreateExtension) UpSQL() string   { return renderCreateExtension(c.Extension) }
+func (c *CreateExtension) DownSQL() string { return renderDropExtension(c.Extension) }
+func (c *CreateExtension) sortKey() int    { return sortKeyExtension }
+
+// DropExtension removes an extension.
+type DropExtension struct{ Extension *irv1.Extension }
+
+func (c *DropExtension) UpSQL() string   { return renderDropExtension(c.Extension) }
+func (c *DropExtension) DownSQL() string { return renderCreateExtension(c.Extension) }
+func (c *DropExtension) sortKey() int    { return sortKeyExtensionDrop }
 
 // --- enums -------------------------------------------------------------------
 

@@ -31,15 +31,6 @@ import (
 // polluted by the work-in-progress first database.
 func roundTrip(t *testing.T, schemas []string, fromSQL, toSQL string) {
 	t.Helper()
-	roundTripPreamble(t, schemas, "", fromSQL, toSQL)
-}
-
-// roundTripPreamble is roundTrip with a preamble (e.g. CREATE EXTENSION)
-// applied to both fresh dev databases before fromSQL/toSQL. The preamble is not
-// part of the diff: it sets up objects (extensions and their types) that the
-// schemas reference but that the generator never emits.
-func roundTripPreamble(t *testing.T, schemas []string, preamble, fromSQL, toSQL string) {
-	t.Helper()
 	ctx := context.Background()
 
 	dev1, err := devdb.Start(ctx)
@@ -53,15 +44,6 @@ func roundTripPreamble(t *testing.T, schemas []string, preamble, fromSQL, toSQL 
 		t.Skipf("docker: %v", err)
 	}
 	defer dev2.Close()
-
-	if preamble != "" {
-		if err := dev1.Apply(ctx, preamble); err != nil {
-			t.Fatalf("apply preamble to dev1: %v\n%s", err, preamble)
-		}
-		if err := dev2.Apply(ctx, preamble); err != nil {
-			t.Fatalf("apply preamble to dev2: %v\n%s", err, preamble)
-		}
-	}
 
 	// from := introspect(dev1 with fromSQL applied)
 	if fromSQL != "" {
@@ -213,12 +195,9 @@ func TestRoundTripFullCreate(t *testing.T) {
 		t.Fatalf("read example/schema.sql: %v", err)
 	}
 	// The example schema lives in schemas app + audit (and public is implicit).
-	// It references the hstore + ltree extension types, which must be installed
-	// in every dev database first. Extensions are objects we do not diff (their
-	// types are extension-owned and filtered out by the introspector), so they
-	// belong in a preamble applied to both the from and desired databases.
-	const ext = "CREATE EXTENSION IF NOT EXISTS hstore; CREATE EXTENSION IF NOT EXISTS ltree;"
-	roundTripPreamble(t, []string{"public", "app", "audit"}, ext, "", string(data))
+	// It declares the hstore + ltree extensions its columns use, so the up
+	// migration installs them before the tables and the down removes them last.
+	roundTrip(t, []string{"public", "app", "audit"}, "", string(data))
 }
 
 func TestRoundTripAddColumn(t *testing.T) {

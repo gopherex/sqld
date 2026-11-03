@@ -68,13 +68,14 @@ language. Schema evolution governed by proto field-number rules.
 
 **Context:** PostgreSQL surface is huge; modeling everything up front is wasteful.
 
-**Decision:** In scope: schemas (namespaces), tables, columns, types,
+**Decision:** In scope: schemas (namespaces), extensions (name and schema;
+database-wide, on `Catalog.extensions`), tables, columns, types,
 constraints (PK/FK/unique/check/exclusion/not-null/default), indexes, sequences;
 programmable objects (views, materialized views, functions, procedures,
 triggers, enum/domain/composite/range types); DML (SELECT/INSERT/UPDATE/DELETE);
 comments and object metadata.
 
-**Deferred:** RLS policies, partitioning, extensions, tablespaces, roles/grants,
+**Deferred:** RLS policies, partitioning, tablespaces, roles/grants,
 collation objects. Field numbers are reserved generously so these can be added
 without breaking the wire format.
 

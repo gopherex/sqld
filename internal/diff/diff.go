@@ -24,6 +24,7 @@ func Diff(from, to *irv1.Catalog) (*Plan, error) {
 	t := indexCatalog(to)
 
 	diffSchemas(p, f, t)
+	diffExtensions(p, from, to)
 	diffEnums(p, f, t)
 	diffDomains(p, f, t)
 	diffComposites(p, f, t)
@@ -185,6 +186,30 @@ func diffSchemas(p *Plan, f, t *catalogIndex) {
 		}
 		if _, ok := t.schemas[k]; !ok {
 			p.Changes = append(p.Changes, &DropSchema{Schema: f.schemas[k]})
+		}
+	}
+}
+
+// diffExtensions matches extensions by name only. The schema is not compared:
+// declarative DDL usually omits it while an introspected database always knows
+// it, and moving an extension (ALTER EXTENSION ... SET SCHEMA) is not modeled.
+func diffExtensions(p *Plan, from, to *irv1.Catalog) {
+	byName := func(c *irv1.Catalog) map[string]*irv1.Extension {
+		m := map[string]*irv1.Extension{}
+		for _, e := range c.GetExtensions() {
+			m[e.GetName()] = e
+		}
+		return m
+	}
+	f, t := byName(from), byName(to)
+	for _, k := range sortedKeys(t) {
+		if _, ok := f[k]; !ok {
+			p.Changes = append(p.Changes, &CreateExtension{Extension: t[k]})
+		}
+	}
+	for _, k := range sortedKeys(f) {
+		if _, ok := t[k]; !ok {
+			p.Changes = append(p.Changes, &DropExtension{Extension: f[k]})
 		}
 	}
 }

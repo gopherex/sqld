@@ -137,6 +137,11 @@ func Introspect(ctx context.Context, conn DBTX, schemas []string) (*irv1.Catalog
 		return nil, fmt.Errorf("introspect: triggers: %w", err)
 	}
 
+	extensions, err := b.loadExtensions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("introspect: extensions: %w", err)
+	}
+
 	dbName, dbVer := b.serverInfo(ctx)
 
 	out := make([]*irv1.Schema, 0, len(b.order))
@@ -149,7 +154,33 @@ func Introspect(ctx context.Context, conn DBTX, schemas []string) (*irv1.Catalog
 		DatabaseVersion: dbVer,
 		DefaultSchema:   "public",
 		Schemas:         out,
+		Extensions:      extensions,
 	}, nil
+}
+
+// loadExtensions reads every installed extension except plpgsql, which every
+// database has. Extensions are database-wide, so they are not filtered by the
+// requested schemas: one installed into another schema still serves them.
+func (b *builder) loadExtensions(ctx context.Context) ([]*irv1.Extension, error) {
+	rows, err := b.conn.Query(ctx, `
+SELECT e.extname, n.nspname
+FROM pg_catalog.pg_extension e
+JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace
+WHERE e.extname <> 'plpgsql'
+ORDER BY e.extname`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*irv1.Extension
+	for rows.Next() {
+		e := &irv1.Extension{}
+		if err := rows.Scan(&e.Name, &e.Schema); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // discoverSchemas resolves the effective schema list. When the caller passes

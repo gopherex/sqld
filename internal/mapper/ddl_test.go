@@ -289,6 +289,31 @@ func TestMapDDL_NilInputs(t *testing.T) {
 	}
 }
 
+func TestMapCreateExtension(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		sql, name, schema string
+	}{
+		{sql: `CREATE EXTENSION pg_trgm`, name: "pg_trgm"},
+		{sql: `CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA ext VERSION '1.1' CASCADE`, name: "uuid-ossp", schema: "ext"},
+	} {
+		t.Run(tc.sql, func(t *testing.T) {
+			t.Parallel()
+			stmts, err := parse.Statements(tc.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := MapCreateExtension(stmts[0].Node.GetCreateExtensionStmt())
+			if e.GetName() != tc.name || e.GetSchema() != tc.schema {
+				t.Fatalf("extension=%v, want %s in %q", e, tc.name, tc.schema)
+			}
+		})
+	}
+	if MapCreateExtension(nil) != nil {
+		t.Fatal("expected nil for nil CreateExtensionStmt")
+	}
+}
+
 // TestQualifiedNamesKeepObjectName checks that a schema-qualified operator class
 // or collation maps to the object name, never to its schema qualifier.
 func TestQualifiedNamesKeepObjectName(t *testing.T) {
