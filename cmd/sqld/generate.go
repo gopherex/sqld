@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/gopherex/sqld/pkg/sqld"
 )
@@ -29,6 +32,22 @@ func newGenerateCmd() *cobra.Command {
 	return cmd
 }
 
+// stableJSON renders m as indented JSON that is byte-stable across builds.
+// protojson deliberately randomizes its whitespace per binary, which turns a
+// committed IR dump into whole-file churn; json.Indent re-lays it out and
+// drops the insignificant whitespace.
+func stableJSON(m proto.Message) ([]byte, error) {
+	raw, err := protojson.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	if err := json.Indent(&out, raw, "", "  "); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
 func newCollectCmd() *cobra.Command {
 	var (
 		cfgPath string
@@ -47,7 +66,7 @@ func newCollectCmd() *cobra.Command {
 			var out []byte
 			switch format {
 			case "json", "":
-				out, err = protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(catalog)
+				out, err = stableJSON(catalog)
 			case "prototext":
 				out, err = prototext.MarshalOptions{Multiline: true}.Marshal(catalog)
 			default:
