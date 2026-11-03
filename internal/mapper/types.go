@@ -61,6 +61,19 @@ func extractPgName(tn *pg.TypeName) string {
 	return names[len(names)-1].GetString_().GetSval()
 }
 
+// objectName returns the object name of a possibly schema-qualified name list
+// (operator class, collation): its last element. The qualifier is dropped
+// because indexes and columns compare by rendered text, and the introspector
+// (empty search_path) qualifies names the declarative DDL usually writes bare;
+// keeping it would report drift for the same object and render the schema in
+// place of the name.
+func objectName(names []*pg.Node) string {
+	if len(names) == 0 {
+		return ""
+	}
+	return names[len(names)-1].GetString_().GetSval()
+}
+
 // buildModifier constructs a TypeModifier from Typmods nodes when applicable.
 // typmodInts reads A_Const integer values (the common case for all modifiers).
 func buildModifier(pgName string, typmods []*pg.Node) *irv1.TypeModifier {

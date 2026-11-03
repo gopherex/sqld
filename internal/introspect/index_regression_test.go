@@ -8,6 +8,55 @@ import (
 	irv1 "github.com/gopherex/sqld/pkg/proto/sqld/v1/ir"
 )
 
+// Operator classes survive both paths. The introspector runs with an empty
+// search_path, so pg_get_indexdef schema-qualifies extension opclasses
+// (public.gin_trgm_ops); parsing and introspection must still agree and the
+// generated DDL must run.
+func TestIndexOpclassRoundTrip(t *testing.T) {
+	const ext = "CREATE EXTENSION IF NOT EXISTS pg_trgm;\n"
+	for _, tc := range []struct {
+		name, ddl string
+	}{
+		{name: "bare opclass", ddl: `CREATE TABLE docs(body text, meta jsonb, code text);
+			CREATE INDEX docs_body ON docs USING gin (body gin_trgm_ops);
+			CREATE INDEX docs_meta ON docs USING gin (meta jsonb_path_ops);
+			CREATE INDEX docs_code ON docs (code text_pattern_ops DESC);`},
+		{name: "schema-qualified opclass", ddl: `CREATE TABLE docs(body text, meta jsonb, code text);
+			CREATE INDEX docs_body ON docs USING gin (body public.gin_trgm_ops);
+			CREATE INDEX docs_meta ON docs USING gin (meta pg_catalog.jsonb_path_ops);
+			CREATE INDEX docs_code ON docs (code pg_catalog.text_pattern_ops DESC);`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := map[string]string{"docs_body": "gin_trgm_ops", "docs_meta": "jsonb_path_ops", "docs_code": "text_pattern_ops"}
+			parsed := parseDDL(t, tc.ddl)
+			introspected := introspectDDL(t, ext+tc.ddl, []string{"public"})
+			for path, cat := range map[string]*irv1.Catalog{"parsed": parsed, "introspected": introspected} {
+				for _, idx := range tableIn(findSchemaCat(cat, "public"), "docs").GetIndexes() {
+					if got := idx.GetElements()[0].GetOpclass(); got != want[idx.GetName()] {
+						t.Errorf("%s %s opclass=%q, want %q", path, idx.GetName(), got, want[idx.GetName()])
+					}
+				}
+			}
+			drift, err := diff.Diff(introspected, parsed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if up := drift.UpSQL(); strings.Contains(up, "INDEX") {
+				t.Errorf("parsed and introspected indexes differ:\n%s", up)
+			}
+			plan, err := diff.Diff(&irv1.Catalog{}, parsed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			up := plan.UpSQL()
+			if !strings.Contains(up, `USING gin ("body" gin_trgm_ops)`) {
+				t.Errorf("opclass not rendered:\n%s", up)
+			}
+			applyOnFreshPG(t, ext+up)
+		})
+	}
+}
+
 func TestIntrospectMixedExpressionIndex(t *testing.T) {
 	cat := introspectDDL(t, `CREATE TABLE users(tenant_id bigint, email text, payload text);
 		CREATE INDEX users_email ON users (tenant_id DESC NULLS LAST, lower(email) DESC, (length(email) + 1) ASC NULLS FIRST) INCLUDE (payload)

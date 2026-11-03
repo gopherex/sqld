@@ -288,3 +288,36 @@ func TestMapDDL_NilInputs(t *testing.T) {
 		t.Error("expected nil for nil CreateSeqStmt")
 	}
 }
+
+// TestQualifiedNamesKeepObjectName checks that a schema-qualified operator class
+// or collation maps to the object name, never to its schema qualifier.
+func TestQualifiedNamesKeepObjectName(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, sql               string
+		opclass, collation, col string
+	}{
+		{name: "bare", sql: `CREATE INDEX i ON t USING gin (body gin_trgm_ops)`, opclass: "gin_trgm_ops"},
+		{name: "qualified opclass", sql: `CREATE INDEX i ON t USING gin (body public.gin_trgm_ops)`, opclass: "gin_trgm_ops"},
+		{name: "qualified collation", sql: `CREATE INDEX i ON t (body COLLATE public.ci text_pattern_ops)`, opclass: "text_pattern_ops", collation: "ci"},
+		{name: "column collation", sql: `CREATE TABLE t(body text COLLATE pg_catalog."C")`, col: "C"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stmts, err := parse.Statements(tc.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cs := stmts[0].Node.GetCreateStmt(); cs != nil {
+				if got := MapCreateTable(cs).GetColumns()[0].GetCollation(); got != tc.col {
+					t.Fatalf("column collation=%q, want %q", got, tc.col)
+				}
+				return
+			}
+			e := MapIndex(stmts[0].Node.GetIndexStmt()).GetElements()[0]
+			if e.GetOpclass() != tc.opclass || e.GetCollation() != tc.collation {
+				t.Fatalf("opclass=%q collation=%q, want %q %q", e.GetOpclass(), e.GetCollation(), tc.opclass, tc.collation)
+			}
+		})
+	}
+}

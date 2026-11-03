@@ -73,7 +73,11 @@ canonical PostgreSQL names (`int4`, `varchar`, `_int4`, ...). The proto package
 - `schema.proto` — `Table` / `Column` / `Constraint` (primary key, foreign key,
   unique, check, exclusion, not-null) / `Index` / `Sequence`, with identity and
   generated columns, referential actions, match types, opclasses, partial and
-  covering indexes.
+  covering indexes. Operator classes and collations hold the object name
+  without its schema (`gin_trgm_ops`, not `public.gin_trgm_ops`): parsed DDL
+  usually writes them bare while the introspector (empty `search_path`) gets
+  them qualified, and both must render the same text. They render bare and
+  resolve through the migration's `search_path`.
 - `type.proto` — `TypeRef`: a fully-resolved type reference at a use site,
   PG-faithful, with `TypeKind` (scalar/array/enum/domain/composite/range/
   pseudo/user-defined), array element + dimensions, parametrized modifiers

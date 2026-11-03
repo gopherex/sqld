@@ -169,12 +169,7 @@ func MapColumn(cd *pg.ColumnDef, pos uint32) *irv1.Column {
 
 	// Collation
 	if cc := cd.GetCollClause(); cc != nil {
-		for _, cn := range cc.GetCollname() {
-			if s := cn.GetString_().GetSval(); s != "" {
-				col.Collation = s
-				break
-			}
-		}
+		col.Collation = objectName(cc.GetCollname())
 	}
 
 	// Walk column-level constraints to set flags/identity/generated/default
@@ -459,21 +454,8 @@ func mapIndexElem(ie *pg.IndexElem, id nodeid.Builder) *irv1.IndexElement {
 		Nulls: mapNullsOrdering(ie.GetNullsOrdering()),
 	}
 
-	// Collation: first sval from collation list
-	for _, cn := range ie.GetCollation() {
-		if s := cn.GetString_().GetSval(); s != "" {
-			elem.Collation = s
-			break
-		}
-	}
-
-	// Opclass: first sval from opclass list
-	for _, op := range ie.GetOpclass() {
-		if s := op.GetString_().GetSval(); s != "" {
-			elem.Opclass = s
-			break
-		}
-	}
+	elem.Collation = objectName(ie.GetCollation())
+	elem.Opclass = objectName(ie.GetOpclass())
 
 	// Column or expression
 	if ie.GetName() != "" {

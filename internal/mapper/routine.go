@@ -104,12 +104,7 @@ func MapCreateDomain(ds *pg.CreateDomainStmt) *irv1.DomainType {
 
 	// Collation
 	if cc := ds.GetCollClause(); cc != nil {
-		for _, cn := range cc.GetCollname() {
-			if s := cn.GetString_().GetSval(); s != "" {
-				dt.Collation = s
-				break
-			}
-		}
+		dt.Collation = objectName(cc.GetCollname())
 	}
 
 	// Constraints
@@ -177,12 +172,7 @@ func MapCompositeType(cs *pg.CompositeTypeStmt) *irv1.CompositeType {
 		}
 		// Collation
 		if cc := cd.GetCollClause(); cc != nil {
-			for _, cn := range cc.GetCollname() {
-				if s := cn.GetString_().GetSval(); s != "" {
-					f.Collation = s
-					break
-				}
-			}
+			f.Collation = objectName(cc.GetCollname())
 		}
 		ct.Fields = append(ct.Fields, f)
 	}
