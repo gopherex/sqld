@@ -2,8 +2,10 @@ package migrate
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/gopherex/sqld/pkg/devdb"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -242,5 +244,63 @@ func TestDownNoDownSQL(t *testing.T) {
 	}
 	if err := m.Down(ctx, 1); err == nil {
 		t.Fatal("expected error reverting migration with no down SQL")
+	}
+}
+
+// A one-connection pool runs every operation: no step needs a second
+// connection while another is held.
+func TestOneConnectionPool(t *testing.T) {
+	pool, done := newDB(t)
+	defer done()
+	cfg := pool.Config().Copy()
+	cfg.MaxConns = 1
+	one, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer one.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	m := New(one, testMigrations())
+	for name, step := range map[string]func() error{
+		"up":     func() error { return m.Up(ctx) },
+		"to":     func() error { return m.To(ctx, "0001") },
+		"down":   func() error { return m.Down(ctx, 1) },
+		"status": func() error { _, err := m.Status(ctx); return err },
+	} {
+		if err := step(); err != nil {
+			t.Fatalf("%s on a one-connection pool: %v", name, err)
+		}
+	}
+	if tableExists(t, pool, "a") || tableExists(t, pool, "b") {
+		t.Fatal("after up, to 0001 and down 1 nothing should remain")
+	}
+}
+
+// Concurrent runners apply each migration exactly once, in order.
+func TestConcurrentUp(t *testing.T) {
+	pool, done := newDB(t)
+	defer done()
+	ctx := context.Background()
+	migs := []Migration{
+		{Version: "0001", Name: "a", UpSQL: "CREATE TABLE a(id int); INSERT INTO a VALUES (1);", Checksum: "c1"},
+		{Version: "0002", Name: "b", UpSQL: "INSERT INTO a VALUES (2);", Checksum: "c2"},
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() { errs <- New(pool, migs).Up(ctx) })
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var rows int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM a").Scan(&rows); err != nil || rows != 2 {
+		t.Fatalf("rows in a = %d, %v; want each migration applied once", rows, err)
 	}
 }

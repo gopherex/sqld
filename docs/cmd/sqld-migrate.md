@@ -79,8 +79,9 @@ sqld migrate apply [-c FILE] [--db DSN] [--to VERSION]
 
 Loads migrations from the configured directory, connects to the database, and
 applies every pending migration in ascending version order. Each migration runs
-in its own transaction. A session-level advisory lock serialises concurrent
-runs against the same database.
+in its own transaction that takes a transaction-scoped advisory lock and
+re-checks the version first, so concurrent runs serialise step by step and each
+migration applies once. A run never holds more than one connection.
 
 | Flag | Default | Description |
 |------|---------|-------------|

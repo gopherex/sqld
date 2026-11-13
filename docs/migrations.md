@@ -50,7 +50,8 @@ sqld migrate validate[-c sqld.yaml]                             # parse-check ev
 ```
 
 DSN comes from `--db` or `$DATABASE_URL`. Each migration applies in its own
-transaction under a session advisory lock; bookkeeping lives in a
+transaction under a transaction-scoped advisory lock (one connection per
+step, so a one-connection pool works); bookkeeping lives in a
 `sqld_migrations` table.
 
 ## Generating a migration

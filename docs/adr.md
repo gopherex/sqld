@@ -707,7 +707,8 @@ etc.). Spec: `docs/superpowers/specs/2026-05-26-sqld-migrate-design.md`.
 **Decision / outcome:**
 - **`pkg/migrate`** (importable): `Migration` model + `Load(dir)`; `Migrator`
   over a pgx `DBTX` with `Up`/`Down`/`To`/`Status`/`Applied`/`Pending`. Each
-  migration runs in its own transaction under a session advisory lock; a
+  migration runs in its own transaction under a transaction-scoped advisory
+  lock and re-checks its version there (one connection per step); a
   `sqld_migrations(version,name,checksum,applied_at)` table tracks state;
   checksum mismatch on an applied migration → **drift**.
 - **Migration file format**: `<version>_<name>.sql` with `-- sqld:up` /
